@@ -1,0 +1,6 @@
+/objs
+/dist
+.*.swp
+*~
+*.o
+test

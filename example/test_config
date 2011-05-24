@@ -1,0 +1,7 @@
+name        = "test"
+kernel      = "test"
+memory      = 64
+vif         = ['']
+context     = "system_u:system_r:domU_t"
+on_crash    = "destroy"
+on_shutdown = "destroy"

@@ -1,0 +1,15 @@
+#!/bin/sh
+
+case $1 in
+	start)
+		dev=$(sudo tunctl -b -u $(whoami))
+		sudo ip link set dev $dev up
+		echo $dev
+		;;
+
+	stop)
+		dev=$2
+		sudo ip link set dev $dev down
+		sudo tunctl -d $dev -b
+		;;
+esac
