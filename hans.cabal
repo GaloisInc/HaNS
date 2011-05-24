@@ -40,7 +40,7 @@ library
                 build-depends:  BoundedChan
                 cpp-options:    -DBOUNDED_CHANNELS
 
-        ghc-options:            -Wall -O2
+        ghc-options:            -Wall
         hs-source-dirs:         src
         build-depends:          base       == 4.*,
                                 cereal     == 0.3.*,
