@@ -1,7 +1,7 @@
 name:           hans
 version:        2.1.0.0
 cabal-version:  >= 1.8
-license:        OtherLicense
+license:        BSD3
 license-file:   LICENSE
 author:         Galois Inc., Peng Li, Stephan Zdancewic
 maintainer:     halvm-devel@community.galois.com
