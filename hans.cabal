@@ -25,8 +25,12 @@ flag example
         default:        False
         description:    Build the example program
 
+flag halvm
+        default:        False
+        description:    Build for the HaLVM
+
 library
-        if(os(xen))
+        if(flag(halvm))
                 build-depends:          XenDevice, communication
                 exposed-modules:        Hans.Device.Xen,
                                         Hans.Device.Ivc
@@ -125,7 +129,7 @@ executable test
                         old-locale    == 1.0.0.*,
                         hans
 
-        if os(xen)
+        if flag(halvm)
                 build-depends:      XenDevice     == 1.0.0,
                                     RendezvousLib == 1.0.0,
                                     HALVMCore     == 1.0.0,
