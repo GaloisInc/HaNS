@@ -3,11 +3,15 @@ version:        2.1.0.0
 cabal-version:  >= 1.8
 license:        OtherLicense
 license-file:   LICENSE
-author:         http://galois.com
-maintainer:     http://galois.com
+author:         Galois Inc., Peng Li, Stephan Zdancewic
+maintainer:     halvm-devel@community.galois.com
 category:       Networking
 synopsis:       IPv4 Network Stack
 build-type:     Simple
+description:
+  HaNS is a lightweight, pure Haskell network stack that can be used for Haskell
+  networking in the context of the HaLVM, or with a Linux tap device. Currently,
+  HaNS supports 802.3, IPv4, ARP, DHCP (partially), ICMP, UDP, and TCP.
 
 source-repository head
         type:           git
