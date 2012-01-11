@@ -11,20 +11,21 @@ module Hans.Layer.Arp (
   , addLocalAddress
   ) where
 
-import Hans.Address.IP4
-import Hans.Address.Mac
+import Hans.Address.IP4 (IP4,parseIP4,renderIP4)
+import Hans.Address.Mac (Mac,parseMac,renderMac,broadcastMac)
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.Arp.Table
 import Hans.Layer.Ethernet
 import Hans.Layer.Timer
 import Hans.Message.Arp
+    (ArpPacket(..),parseArpPacket,renderArpPacket,ArpOper(..))
 import Hans.Message.EthernetFrame
 import Hans.Utils
 
 import Control.Concurrent (forkIO,takeMVar,putMVar,newEmptyMVar)
 import Control.Monad (forM_,mplus,guard,unless,when)
-import Data.Serialize (decode,encode)
+import Data.Serialize (runGet,runPut)
 import MonadLib (BaseM(inBase),set,get)
 import qualified Data.Map as Map
 
@@ -134,7 +135,7 @@ sendArpPacket msg = do
         { etherSource = arpSHA msg
         , etherDest   = arpTHA msg
         , etherType   = 0x0806
-        , etherData   = encode msg
+        , etherData   = runPut (renderArpPacket renderMac renderIP4 msg)
         }
   output (sendEthernet eth frame)
 
@@ -165,7 +166,7 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
               , arpPType  = 0x0800
               , arpSHA    = sha
               , arpSPA    = spa
-              , arpTHA    = Mac 0xff 0xff 0xff 0xff 0xff 0xff
+              , arpTHA    = broadcastMac
               , arpTPA    = ip
               , arpOper   = ArpRequest
               }
@@ -182,7 +183,7 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
 -- | Process an incoming arp packet
 handleIncoming :: Packet -> Arp ()
 handleIncoming bs = do
-  msg <- liftRight (decode bs)
+  msg <- liftRight (runGet (parseArpPacket parseMac parseIP4) bs)
   -- ?Do I have the hardware type in ar$hrd
   -- Yes: (This check is enforced by the type system)
   --   [optionally check the hardware length ar$hln]

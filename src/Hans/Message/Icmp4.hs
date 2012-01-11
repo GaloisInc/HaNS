@@ -11,7 +11,7 @@ import Control.Monad (liftM2, unless, when, replicateM)
 import Data.Serialize (Serialize(..))
 import Data.Serialize.Get (getWord8, getByteString, remaining, skip, Get, label,
                            lookAhead, getBytes, isEmpty)
-import Data.Serialize.Put (putWord8,putByteString, Put, runPut)
+import Data.Serialize.Put (Putter, putWord8,putByteString, Put, runPut)
 import Data.Int (Int32)
 import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
@@ -49,237 +49,239 @@ noCode str = do
   unless (code == 0)
     (fail (str ++ " expects code 0"))
 
-instance Serialize Icmp4Packet where
-  get = label "ICMP" $ do
-    rest <- lookAhead (getBytes =<< remaining)
-    unless (computeChecksum 0 rest == 0)
-      (fail "Bad checksum")
-    ty      <- get
+parseIcmp4Packet :: Get Icmp4Packet
+parseIcmp4Packet  = label "ICMP" $ do
+  rest <- lookAhead (getBytes =<< remaining)
+  unless (computeChecksum 0 rest == 0)
+    (fail "Bad checksum")
+  ty      <- get
 
-    let firstGet :: Serialize a => String -> (a -> Get b) -> Get b
-        firstGet labelString f = label labelString $ do
-          code <- get
-          skip 2 -- checksum
-          f code
+  let firstGet :: Serialize a => String -> (a -> Get b) -> Get b
+      firstGet labelString f = label labelString $ do
+        code <- get
+        skip 2 -- checksum
+        f code
 
-    case (ty :: Word8) of
-      0  -> firstGet "Echo Reply" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               dat      <- getByteString =<< remaining
-               return $! EchoReply ident seqNum dat
+  case (ty :: Word8) of
+    0  -> firstGet "Echo Reply" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             dat      <- getByteString =<< remaining
+             return $! EchoReply ident seqNum dat
 
-      3  -> firstGet "DestinationUnreachable" $ \ code -> do
-               skip 4   -- unused
-               dat      <- getByteString =<< remaining
-               return $! DestinationUnreachable code dat
+    3  -> firstGet "DestinationUnreachable" $ \ code -> do
+             skip 4   -- unused
+             dat      <- getByteString =<< remaining
+             return $! DestinationUnreachable code dat
 
-      4  -> firstGet "Source Quence" $ \ NoCode -> do
-               skip 4   -- unused
-               dat      <- getByteString =<< remaining
-               return $! SourceQuench dat
+    4  -> firstGet "Source Quence" $ \ NoCode -> do
+             skip 4   -- unused
+             dat      <- getByteString =<< remaining
+             return $! SourceQuench dat
 
-      5  -> firstGet "Redirect" $ \ code -> do
-               gateway  <- get
-               dat      <- getByteString =<< remaining
-               return $! Redirect code gateway dat
+    5  -> firstGet "Redirect" $ \ code -> do
+             gateway  <- get
+             dat      <- getByteString =<< remaining
+             return $! Redirect code gateway dat
 
-      8  -> firstGet "Echo" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               dat      <- getByteString =<< remaining
-               return $! Echo ident seqNum dat
+    8  -> firstGet "Echo" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             dat      <- getByteString =<< remaining
+             return $! Echo ident seqNum dat
 
-      9  -> firstGet "Router Advertisement" $ \ NoCode -> do
-               n        <- getWord8
-               sz       <- getWord8
-               unless (sz == 2)
-                 (fail ("Expected size 2, got: " ++ show sz))
-               lifetime <- get
-               addrs    <- replicateM (fromIntegral n) get
-               return $! RouterAdvertisement lifetime addrs
+    9  -> firstGet "Router Advertisement" $ \ NoCode -> do
+             n        <- getWord8
+             sz       <- getWord8
+             unless (sz == 2)
+               (fail ("Expected size 2, got: " ++ show sz))
+             lifetime <- get
+             addrs    <- replicateM (fromIntegral n) get
+             return $! RouterAdvertisement lifetime addrs
 
-      10 -> firstGet "Router Solicitation" $ \ NoCode -> do
-               skip 4   -- reserved
-               return RouterSolicitation
+    10 -> firstGet "Router Solicitation" $ \ NoCode -> do
+             skip 4   -- reserved
+             return RouterSolicitation
 
-      11 -> firstGet "Time Exceeded" $ \ code -> do
-               skip 4   -- unused
-               dat      <- getByteString =<< remaining
-               return $! TimeExceeded code dat
+    11 -> firstGet "Time Exceeded" $ \ code -> do
+             skip 4   -- unused
+             dat      <- getByteString =<< remaining
+             return $! TimeExceeded code dat
 
-      12 -> firstGet "Parameter Problem" $ \ NoCode -> do
-               ptr      <- getWord8
-               skip 3   -- unused
-               dat      <- getByteString =<< remaining
-               return $! ParameterProblem ptr dat
+    12 -> firstGet "Parameter Problem" $ \ NoCode -> do
+             ptr      <- getWord8
+             skip 3   -- unused
+             dat      <- getByteString =<< remaining
+             return $! ParameterProblem ptr dat
 
-      13 -> firstGet "Timestamp" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               origTime <- get
-               recvTime <- get
-               tranTime <- get
-               return $! Timestamp ident seqNum origTime recvTime tranTime
+    13 -> firstGet "Timestamp" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             origTime <- get
+             recvTime <- get
+             tranTime <- get
+             return $! Timestamp ident seqNum origTime recvTime tranTime
 
-      14 -> firstGet "Timestamp Reply" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               origTime <- get
-               recvTime <- get
-               tranTime <- get
-               return $! TimestampReply ident seqNum origTime recvTime tranTime
+    14 -> firstGet "Timestamp Reply" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             origTime <- get
+             recvTime <- get
+             tranTime <- get
+             return $! TimestampReply ident seqNum origTime recvTime tranTime
 
-      15 -> firstGet "Information" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               return $! Information ident seqNum
+    15 -> firstGet "Information" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             return $! Information ident seqNum
 
-      16 -> firstGet "Information Reply" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               return $! InformationReply ident seqNum
+    16 -> firstGet "Information Reply" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             return $! InformationReply ident seqNum
 
-      17 -> firstGet "Address Mask" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               skip 4   -- address mask
-               return $! AddressMask ident seqNum
+    17 -> firstGet "Address Mask" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             skip 4   -- address mask
+             return $! AddressMask ident seqNum
 
-      18 -> firstGet "Address Mask Reply" $ \ NoCode -> do
-               ident    <- get
-               seqNum   <- get
-               mask     <- get
-               return $! AddressMaskReply ident seqNum mask
+    18 -> firstGet "Address Mask Reply" $ \ NoCode -> do
+             ident    <- get
+             seqNum   <- get
+             mask     <- get
+             return $! AddressMaskReply ident seqNum mask
 
-      30 -> firstGet "Trace Route" $ \ code -> do
-               ident    <- get
-               skip 2   -- unused
-               outHop   <- get
-               retHop   <- get
-               speed    <- get
-               mtu      <- get
-               return $! TraceRoute code ident outHop retHop speed mtu
+    30 -> firstGet "Trace Route" $ \ code -> do
+             ident    <- get
+             skip 2   -- unused
+             outHop   <- get
+             retHop   <- get
+             speed    <- get
+             mtu      <- get
+             return $! TraceRoute code ident outHop retHop speed mtu
 
-      _ -> fail ("Unknown type: " ++ show ty)
+    _ -> fail ("Unknown type: " ++ show ty)
 
 
-  put = putByteString . unsafePerformIO . setChecksum . runPut . put'
-                         -- Argument for safety: The bytestring being
-                         -- destructively modified here is only accessible
-                         -- through the composition and will never escape
-    where
-    setChecksum pkt = pokeChecksum (computeChecksum 0 pkt) pkt 2
+renderIcmp4Packet :: Putter Icmp4Packet
+renderIcmp4Packet  =
+      putByteString . unsafePerformIO . setChecksum . runPut . put'
+                       -- Argument for safety: The bytestring being
+                       -- destructively modified here is only accessible
+                       -- through the composition and will never escape
+  where
+  setChecksum pkt = pokeChecksum (computeChecksum 0 pkt) pkt 2
 
-    firstPut :: Serialize a => Word8 -> a -> Put
-    firstPut ty code
-      = do put ty
-           put code
-           put (0 :: Word16)
+  firstPut :: Serialize a => Word8 -> a -> Put
+  firstPut ty code
+    = do put ty
+         put code
+         put (0 :: Word16)
 
-    put' (EchoReply ident seqNum dat)
-      = do firstPut 0 NoCode
-           put ident
-           put seqNum
-           putByteString dat
+  put' (EchoReply ident seqNum dat)
+    = do firstPut 0 NoCode
+         put ident
+         put seqNum
+         putByteString dat
 
-    put' (DestinationUnreachable code dat)
-      = do firstPut 3 code
-           put (0 :: Word32) -- unused
-           putByteString dat
+  put' (DestinationUnreachable code dat)
+    = do firstPut 3 code
+         put (0 :: Word32) -- unused
+         putByteString dat
 
-    put' (SourceQuench dat)
-      = do firstPut 4 NoCode
-           put (0 :: Word32) -- unused
-           putByteString dat
+  put' (SourceQuench dat)
+    = do firstPut 4 NoCode
+         put (0 :: Word32) -- unused
+         putByteString dat
 
-    put' (Redirect code gateway dat)
-      = do firstPut 5 code
-           put gateway
-           putByteString dat
+  put' (Redirect code gateway dat)
+    = do firstPut 5 code
+         put gateway
+         putByteString dat
 
-    put' (Echo ident seqNum dat)
-      = do firstPut 8 NoCode
-           put ident
-           put seqNum
-           putByteString dat
+  put' (Echo ident seqNum dat)
+    = do firstPut 8 NoCode
+         put ident
+         put seqNum
+         putByteString dat
 
-    put' (RouterAdvertisement lifetime addrs)
-      = do let len = length addrs
-               addrSize :: Word8
-               addrSize = 2
+  put' (RouterAdvertisement lifetime addrs)
+    = do let len = length addrs
+             addrSize :: Word8
+             addrSize = 2
 
-           when (len > 255)
-             (fail "Too many routers in Router Advertisement")
+         when (len > 255)
+           (fail "Too many routers in Router Advertisement")
 
-           firstPut 9 NoCode
-           put (fromIntegral len :: Word8)
-           put addrSize
-           put lifetime
-           mapM_ put addrs
+         firstPut 9 NoCode
+         put (fromIntegral len :: Word8)
+         put addrSize
+         put lifetime
+         mapM_ put addrs
 
-    put' RouterSolicitation
-      = do firstPut 10 NoCode
-           put (0 :: Word32) -- RESERVED
+  put' RouterSolicitation
+    = do firstPut 10 NoCode
+         put (0 :: Word32) -- RESERVED
 
-    put' (TimeExceeded code dat)
-      = do firstPut 11 code
-           put (0 :: Word32) -- unused
-           putByteString dat
+  put' (TimeExceeded code dat)
+    = do firstPut 11 code
+         put (0 :: Word32) -- unused
+         putByteString dat
 
-    put' (ParameterProblem ptr dat)
-      = do firstPut 12 NoCode
-           put ptr
-           put (0 :: Word8)  -- unused
-           put (0 :: Word16) -- unused
-           putByteString dat
+  put' (ParameterProblem ptr dat)
+    = do firstPut 12 NoCode
+         put ptr
+         put (0 :: Word8)  -- unused
+         put (0 :: Word16) -- unused
+         putByteString dat
 
-    put' (Timestamp ident seqNum origTime recvTime tranTime)
-      = do firstPut 13 NoCode
-           put ident
-           put seqNum
-           put origTime
-           put recvTime
-           put tranTime
+  put' (Timestamp ident seqNum origTime recvTime tranTime)
+    = do firstPut 13 NoCode
+         put ident
+         put seqNum
+         put origTime
+         put recvTime
+         put tranTime
 
-    put' (TimestampReply ident seqNum origTime recvTime tranTime)
-      = do firstPut 14 NoCode
-           put ident
-           put seqNum
-           put origTime
-           put recvTime
-           put tranTime
+  put' (TimestampReply ident seqNum origTime recvTime tranTime)
+    = do firstPut 14 NoCode
+         put ident
+         put seqNum
+         put origTime
+         put recvTime
+         put tranTime
 
-    put' (Information ident seqNum)
-      = do firstPut 15 NoCode
-           put ident
-           put seqNum
+  put' (Information ident seqNum)
+    = do firstPut 15 NoCode
+         put ident
+         put seqNum
 
-    put' (InformationReply ident seqNum)
-      = do firstPut 16 NoCode
-           put ident
-           put seqNum
+  put' (InformationReply ident seqNum)
+    = do firstPut 16 NoCode
+         put ident
+         put seqNum
 
-    put' (AddressMask ident seqNum)
-      = do firstPut 17 NoCode
-           put ident
-           put seqNum
-           put (0 :: Word32) -- address mask
+  put' (AddressMask ident seqNum)
+    = do firstPut 17 NoCode
+         put ident
+         put seqNum
+         put (0 :: Word32) -- address mask
 
-    put' (AddressMaskReply ident seqNum mask)
-      = do firstPut 17 NoCode
-           put ident
-           put seqNum
-           put mask
+  put' (AddressMaskReply ident seqNum mask)
+    = do firstPut 17 NoCode
+         put ident
+         put seqNum
+         put mask
 
-    put' (TraceRoute code ident outHop retHop speed mtu)
-      = do firstPut 30 code
-           put ident
-           put (0 :: Word16) -- unused
-           put outHop
-           put retHop
-           put speed
-           put mtu
+  put' (TraceRoute code ident outHop retHop speed mtu)
+    = do firstPut 30 code
+         put ident
+         put (0 :: Word16) -- unused
+         put outHop
+         put retHop
+         put speed
+         put mtu
 
 data NoCode = NoCode
 

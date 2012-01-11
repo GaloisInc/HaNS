@@ -8,8 +8,8 @@ import Hans.Utils (Endo)
 
 import Control.Monad (guard,liftM2)
 import Data.Serialize (Serialize(..))
-import Data.Serialize.Get (getWord32be)
-import Data.Serialize.Put (putWord32be)
+import Data.Serialize.Get (Get,getWord32be)
+import Data.Serialize.Put (Putter,putWord32be)
 import Data.Bits (Bits((.&.),(.|.),shiftL,shiftR))
 import Data.Data (Data)
 import Data.List (intersperse)
@@ -33,11 +33,15 @@ instance Address IP4 where
     f 0 _ xs = xs
     f m i xs = (i .&. m == 0) : f (m `shiftR` 1) i xs
 
+parseIP4 :: Get IP4
+parseIP4  = convertFromWord32 `fmap` getWord32be
+
+renderIP4 :: Putter IP4
+renderIP4  = putWord32be . convertToWord32
+
 instance Serialize IP4 where
-  get = do
-    n <- getWord32be
-    return $! convertFromWord32 n
-  put ip = putWord32be (convertToWord32 ip)
+  get = parseIP4
+  put = renderIP4
 
 instance Show IP4 where
   showsPrec _ (IP4 a b c d) = foldl (.) id

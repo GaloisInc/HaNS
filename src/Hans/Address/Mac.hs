@@ -1,6 +1,8 @@
 
 module Hans.Address.Mac (
     Mac(..)
+  , parseMac
+  , renderMac
   , showsMac
   , macMask
   ) where
@@ -8,10 +10,11 @@ module Hans.Address.Mac (
 import Hans.Address
 import Hans.Utils (showPaddedHex)
 
+import Control.Applicative ((<*>),(<$>))
 import Data.Serialize (Serialize(..))
-import Data.Serialize.Get (getWord16be,getWord32be)
-import Data.Serialize.Put (putByteString)
-import Data.Bits (Bits(shiftR,testBit,complement))
+import Data.Serialize.Get (Get,getWord8)
+import Data.Serialize.Put (Putter,putByteString)
+import Data.Bits (Bits(testBit,complement))
 import Data.List (intersperse)
 import Data.Word (Word8)
 import Numeric (readHex)
@@ -66,12 +69,18 @@ instance Address Mac where
   toBits (Mac a b c d e f) = concatMap k [a,b,c,d,e,f]
     where k i = map (testBit i) [0 .. 7]
 
-instance Serialize Mac where
-  get = do
-    n <- getWord32be
-    m <- getWord16be
-    let f x d = fromIntegral (x `shiftR` d)
-    return $! Mac (f n 24) (f n 16) (f n 8) (fromIntegral n)
-                  (f m 8)  (fromIntegral m)
+parseMac :: Get Mac
+parseMac  =  Mac
+         <$> getWord8
+         <*> getWord8
+         <*> getWord8
+         <*> getWord8
+         <*> getWord8
+         <*> getWord8
 
-  put (Mac a b c d e f) = putByteString (S.pack [a,b,c,d,e,f])
+renderMac :: Putter Mac
+renderMac (Mac a b c d e f) = putByteString (S.pack [a,b,c,d,e,f])
+
+instance Serialize Mac where
+  get = parseMac
+  put = renderMac

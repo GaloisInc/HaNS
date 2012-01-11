@@ -1,10 +1,10 @@
 module Hans.Message.Arp where
 
-import Hans.Address
+import Hans.Address (Address(addrSize))
 
-import Data.Serialize (Serialize(..))
-import Data.Serialize.Get (getWord8,getWord16be)
-import Data.Serialize.Put (putWord16be,putWord8)
+import Control.Applicative (Applicative(..),(<$>))
+import Data.Serialize.Get (Get,getWord8,getWord16be)
+import Data.Serialize.Put (Putter,putWord16be,putWord8)
 import Data.Word (Word16)
 
 
@@ -18,57 +18,57 @@ data ArpPacket hw p = ArpPacket
   , arpSPA    :: p
   , arpTHA    :: hw
   , arpTPA    :: p
-  }
+  } deriving (Show)
 
--- | Decode an Arp message.
-instance (Address hw, Address p) => Serialize (ArpPacket hw p) where
-  get = do
-    hty  <- getWord16be
-    pty  <- getWord16be
-    _    <- getWord8
-    _    <- getWord8
-    oper <- get
-    sha  <- get
-    spa  <- get
-    tha  <- get
-    tpa  <- get
-    return $! ArpPacket
-      { arpHwType = hty
-      , arpPType  = pty
-      , arpOper   = oper
-      , arpSHA    = sha
-      , arpSPA    = spa
-      , arpTHA    = tha
-      , arpTPA    = tpa
-      }
+-- | Parse an Arp packet, given a way to parse hardware and protocol addresses.
+parseArpPacket :: Get hw -> Get p -> Get (ArpPacket hw p)
+parseArpPacket getHw getP
+   =  ArpPacket
+  <$> getWord16be  -- hardware type
+  <*> getWord16be  -- protocol type
+  <*  getWord8     -- hardware address length (ignored)
+  <*  getWord8     -- protocol address length (ignored)
+  <*> parseArpOper -- operation
+  <*> getHw        -- sender hardware address
+  <*> getP         -- sender protocol address
+  <*> getHw        -- target hardware address
+  <*> getP         -- target protocol address
 
-  put msg = do
-    putWord16be (arpHwType msg)
-    putWord16be (arpPType msg)
-    putWord8    (addrSize (arpSHA msg))
-    putWord8    (addrSize (arpSPA msg))
-    put         (arpOper msg)
-    put         (arpSHA msg)
-    put         (arpSPA msg)
-    put         (arpTHA msg)
-    put         (arpTPA msg)
+-- | Render an Arp packet, given a way to render hardware and protocol
+-- addresses.
+renderArpPacket :: (Address hw, Address p)
+                => Putter hw -> Putter p -> Putter (ArpPacket hw p)
+renderArpPacket putHw putP arp = do
+  putWord16be   (arpHwType arp)
+  putWord16be   (arpPType arp)
+  putWord8      (addrSize (arpSHA arp))
+  putWord8      (addrSize (arpSPA arp))
+  renderArpOper (arpOper arp)
+  putHw         (arpSHA arp)
+  putP          (arpSPA arp)
+  putHw         (arpTHA arp)
+  putP          (arpTPA arp)
 
 
 -- Arp Opcodes -----------------------------------------------------------------
 
+-- | Arp operations.
 data ArpOper
   = ArpRequest -- ^ 0x1
   | ArpReply   -- ^ 0x2
-  deriving (Eq)
+  deriving (Show,Eq)
 
+-- | Parse an Arp operation.
+parseArpOper :: Get ArpOper
+parseArpOper  = do
+  b <- getWord16be
+  case b of
+    0x1 -> return ArpRequest
+    0x2 -> return ArpReply
+    _   -> fail "invalid Arp opcode"
 
-instance Serialize ArpOper where
-  get = do
-    b <- getWord16be
-    case b of
-      0x1 -> return ArpRequest
-      0x2 -> return ArpReply
-      _   -> fail "invalid Arp opcode"
-
-  put ArpRequest = putWord16be 0x1
-  put ArpReply   = putWord16be 0x2
+-- | Render an Arp operation.
+renderArpOper :: Putter ArpOper
+renderArpOper op = case op of
+  ArpRequest -> putWord16be 0x1
+  ArpReply   -> putWord16be 0x2

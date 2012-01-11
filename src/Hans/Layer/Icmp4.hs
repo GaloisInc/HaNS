@@ -8,16 +8,18 @@ module Hans.Layer.Icmp4 (
   , addIcmp4Handler
   ) where
 
-import Hans.Address.IP4
+import Hans.Address.IP4 (IP4)
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Message.Icmp4
+    (Icmp4Packet(Echo,EchoReply),parseIcmp4Packet,renderIcmp4Packet
+    ,Identifier,SequenceNumber)
 import Hans.Message.Ip4
 import Hans.Utils
 
 import Control.Concurrent (forkIO)
-import Data.Serialize (decode,encode)
+import Data.Serialize (runGet,runPut)
 import MonadLib (get,set)
 
 type Handler = Icmp4Packet -> IO ()
@@ -47,7 +49,7 @@ ip4Handle  = icmpIp4 `fmap` get
 sendPacket :: IP4 -> Icmp4Packet -> Icmp4 ()
 sendPacket dst pkt = do
   ip4 <- ip4Handle
-  output $ sendIP4Packet ip4 icmpProtocol dst (encode pkt)
+  output (sendIP4Packet ip4 icmpProtocol dst (runPut (renderIcmp4Packet pkt)))
 
 -- | Add a handler for Icmp4 messages that match the provided predicate.
 addIcmp4Handler :: Icmp4Handle -> Handler -> IO ()
@@ -58,7 +60,7 @@ addIcmp4Handler h k = send h (handleAdd k)
 -- | Handle incoming ICMP packets
 handleIncoming :: IP4 -> IP4 -> Packet -> Icmp4 ()
 handleIncoming src _dst bs = do
-  pkt <- liftRight (decode bs)
+  pkt <- liftRight (runGet parseIcmp4Packet bs)
   matchHandlers pkt
   case pkt of
     -- XXX: Only echo-request is handled at the moment
