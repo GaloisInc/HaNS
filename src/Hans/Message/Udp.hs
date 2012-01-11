@@ -5,14 +5,26 @@ module Hans.Message.Udp where
 import Hans.Utils
 import Hans.Utils.Checksum
 
-import Data.Serialize (Serialize(..))
+import Control.Applicative ((<$>))
 import Data.Serialize.Get (Get,getWord16be,getByteString,isolate,label)
-import Data.Serialize.Put (runPut,putWord16be,putByteString)
+import Data.Serialize.Put (Putter,runPut,putWord16be,putByteString)
 import Data.Word (Word16)
 import qualified Data.ByteString as S
 
+
+-- Udp Ports -------------------------------------------------------------------
+
 newtype UdpPort = UdpPort { getUdpPort :: Word16 }
-  deriving (Eq,Ord,Num,Show,Serialize,Enum,Bounded)
+  deriving (Eq,Ord,Num,Show,Enum,Bounded)
+
+parseUdpPort :: Get UdpPort
+parseUdpPort  = UdpPort <$> getWord16be
+
+renderUdpPort :: Putter UdpPort
+renderUdpPort  = putWord16be . getUdpPort
+
+
+-- Udp Packets -----------------------------------------------------------------
 
 data UdpPacket = UdpPacket
   { udpHeader  :: !UdpHeader
@@ -27,8 +39,8 @@ data UdpHeader = UdpHeader
 
 parseUdpPacket :: Get UdpPacket
 parseUdpPacket  = do
-  src <- get
-  dst <- get
+  src <- parseUdpPort
+  dst <- parseUdpPort
   b16 <- getWord16be
   let len = fromIntegral b16
   label "UDPPacket" $ isolate (len - 6) $ do
@@ -43,17 +55,17 @@ parseUdpPacket  = do
 
 -- | Given a way to make the pseudo header, render the UDP packet.
 renderUdpPacket :: UdpPacket -> MkPseudoHeader -> IO Packet
-renderUdpPacket (UdpPacket hdr bs) mk = do
-  let hdrSize = 8
-  let len     = S.length bs + hdrSize
-  let ph      = mk len
-  let pcs     = computePartialChecksum 0 ph
-  let bytes   = runPut $ do
-        put (udpSourcePort hdr)
-        put (udpDestPort   hdr)
-        putWord16be (fromIntegral len)
-        putWord16be 0 -- initial checksum
-        putByteString bs
+renderUdpPacket (UdpPacket hdr bs) mk = pokeChecksum cs bytes 6
+  where
+  hdrSize = 8
+  len     = S.length bs + hdrSize
+  ph      = mk len
+  pcs     = computePartialChecksum 0 ph
+  bytes   = runPut $ do
+    renderUdpPort (udpSourcePort hdr)
+    renderUdpPort (udpDestPort   hdr)
+    putWord16be   (fromIntegral len)
+    putWord16be 0 -- initial checksum
+    putByteString bs
   -- the checksum is 6 bytes into the rendered packet
-  let cs = computeChecksum pcs bytes
-  pokeChecksum cs bytes 6
+  cs = computeChecksum pcs bytes
