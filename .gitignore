@@ -1,5 +1,6 @@
 /objs
 /dist
+/cabal-dev
 .*.swp
 *~
 *.o
