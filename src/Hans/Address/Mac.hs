@@ -3,6 +3,7 @@ module Hans.Address.Mac (
     Mac(..)
   , parseMac
   , renderMac
+  , broadcastMac
   , showsMac
   , macMask
   ) where
@@ -47,6 +48,10 @@ macMask (Mac a b c d e f) =
       (complement d)
       (complement e)
       (complement f)
+
+-- | The broadcast mac address.
+broadcastMac :: Mac
+broadcastMac  = Mac 0xff 0xff 0xff 0xff 0xff 0xff
 
 instance Show Mac where
   showsPrec _ = showsMac

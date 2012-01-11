@@ -25,6 +25,9 @@ data IP4 = IP4
   {-# UNPACK #-} !Word8
   deriving (Ord,Eq,Typeable,Data)
 
+broadcastIP4 :: IP4
+broadcastIP4  = IP4 255 255 255 255
+
 instance Address IP4 where
   addrSize _ = 4
 

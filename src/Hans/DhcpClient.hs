@@ -3,8 +3,8 @@ module Hans.DhcpClient (
   ) where
 
 import Hans.Address
-import Hans.Address.IP4
-import Hans.Address.Mac
+import Hans.Address.IP4 (IP4(..),broadcastIP4,IP4Mask(..))
+import Hans.Address.Mac (Mac(..),broadcastMac)
 import Hans.Layer.Ethernet (sendEthernet,addEthernetHandler)
 import Hans.Layer.IP4 (connectEthernet)
 import Hans.Layer.Timer (delay)
@@ -36,12 +36,6 @@ bootpc  = UdpPort 68
 
 currentNetwork :: IP4
 currentNetwork  = IP4 0 0 0 0
-
-broadcastIP4 :: IP4
-broadcastIP4  = IP4 255 255 255 255
-
-broadcastMac :: Mac
-broadcastMac  = Mac 0xff 0xff 0xff 0xff 0xff 0xff
 
 udpProtocol :: IP4Protocol
 udpProtocol  = IP4Protocol 0x11
