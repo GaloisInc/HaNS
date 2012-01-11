@@ -3,7 +3,7 @@
 module Hans.Message.Icmp4 where
 
 import Hans.Address.IP4 (IP4)
-import Hans.Message.Types (Lifetime)
+import Hans.Message.Types (Lifetime,parseLifetime,renderLifetime)
 import Hans.Utils (Packet)
 import Hans.Utils.Checksum (pokeChecksum, computeChecksum)
 
@@ -95,7 +95,7 @@ parseIcmp4Packet  = label "ICMP" $ do
              sz       <- getWord8
              unless (sz == 2)
                (fail ("Expected size 2, got: " ++ show sz))
-             lifetime <- get
+             lifetime <- parseLifetime
              addrs    <- replicateM (fromIntegral n) get
              return $! RouterAdvertisement lifetime addrs
 
@@ -217,7 +217,7 @@ renderIcmp4Packet  =
          firstPut 9 NoCode
          put (fromIntegral len :: Word8)
          put addrSize
-         put lifetime
+         renderLifetime lifetime
          mapM_ put addrs
 
   put' RouterSolicitation
