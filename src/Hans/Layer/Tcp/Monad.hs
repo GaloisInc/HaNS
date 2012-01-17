@@ -16,7 +16,9 @@ import qualified Data.Map as Map
 
 type TcpHandle = Channel (Tcp ())
 
-type Tcp = Layer (TcpState (IO ()))
+type Thread = IO ()
+
+type Tcp = Layer (TcpState Thread)
 
 data TcpState t = TcpState
   { tcpSelf   :: TcpHandle

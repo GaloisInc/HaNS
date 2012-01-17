@@ -34,21 +34,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 module Network.TCP.Aux.Misc where
 
-import Network.TCP.Type.Base
-import Network.TCP.Type.Timer
-import Network.TCP.Type.Datagram
-import Network.TCP.Type.Socket
 import Network.TCP.Aux.Param
-import Foreign
-import Data.Map as Map
-import Data.List as List
-import Data.Maybe
-import Data.List as List
-import System.IO.Unsafe
-import Control.Exception
+import Network.TCP.Type.Base
+import Network.TCP.Type.Socket
+import Network.TCP.Type.Timer
 
-debug :: (Monad m) => String -> m a
-debug s = seq (unsafePerformIO $ putStrLn s) return undefined
+import Control.Exception
+import Data.List as List
+import Data.Map as Map
+import Foreign
 
 
 bound_ports :: Map SocketID (TCPSocket threadt) -> [Port]
@@ -65,24 +59,31 @@ bound_ports sockmap = List.map get_local_port (keys sockmap)
 --            Just fakeid
 --          else
 --            Nothing
--- 
-create_timer (curr_time :: Time) (offset :: Time) = curr_time + offset
-slow_timer = create_timer
+--
+create_timer :: Time -> Time -> Time
+create_timer curr_time offset = curr_time + offset
 
-create_timewindow (curr_time :: Time) (offset :: Time) a = Just (Timed a (create_timer curr_time offset))
+slow_timer :: Time -> Time -> Time
+slow_timer  = create_timer
+
+create_timewindow :: Time -> Time -> a -> Maybe (Timed a)
+create_timewindow curr_time offset a =
+  Just (Timed a (create_timer curr_time offset))
 
 -- queues
 
 -- enqueue_message msg q = addToQueue q msg
 -- enqueue_messages msgs q = foldl addToQueue q msgs
--- 
+
 accept_incoming_q0 :: SocketListen -> Bool
-accept_incoming_q0 lis =
-    (length $ lis_q lis) < (backlog_fudge (lis_qlimit lis))
-accept_incoming_q lis = 
-    (length $ lis_q lis) < 3 * (backlog_fudge (lis_qlimit lis `div` 2))
-drop_from_q0 lis = 
-    (length $ lis_q0 lis) >= tcp_q0maxlimit
+accept_incoming_q0 lis = length (lis_q lis) < backlog_fudge (lis_qlimit lis)
+
+accept_incoming_q :: SocketListen -> Bool
+accept_incoming_q lis =
+    length (lis_q lis) < 3 * (backlog_fudge (lis_qlimit lis `div` 2))
+
+drop_from_q0 :: SocketListen -> Bool
+drop_from_q0 lis = length (lis_q0 lis) >= tcp_q0maxlimit
 
 do_tcp_options :: Time -> Bool -> (TimeWindow Timestamp) -> Timestamp -> Maybe (Timestamp,Timestamp)
 do_tcp_options curr_time cb_tf_doing_tstmp cb_ts_recent cb_ts_val =
@@ -94,19 +95,23 @@ do_tcp_options curr_time cb_tf_doing_tstmp cb_ts_recent cb_ts_val =
      else
        Nothing
 
-calculate_tcp_options_len cb_tf_doing_tstmp =
-    if cb_tf_doing_tstmp then 12 else 0
+calculate_tcp_options_len :: Num a => Bool -> a
+calculate_tcp_options_len cb_tf_doing_tstmp
+  | cb_tf_doing_tstmp = 12
+  | otherwise         = 0
 
-rounddown bs v = if v < bs then v else (v `div` bs) * bs
+rounddown :: Integral a => a -> a -> a
+rounddown bs v
+  | v < bs    = v
+  | otherwise = (v `div` bs) * bs
+
+roundup :: Integral a => a -> a -> a
 roundup bs v = ((v+(bs-1)) `div` bs) * bs
 
-calculate_buf_sizes  (cb_t_maxseg             :: Int)  
-                     (seg_mss                 :: Maybe Int)
-                     (bw_delay_product_for_rt :: Maybe Int)
-                     (is_local_conn           :: Bool)
-                     (rcvbufsize              :: Int)
-                     (sndbufsize              :: Int)
-                     (cb_tf_doing_tstmp       :: Bool)
+calculate_buf_sizes :: Int -> Maybe Int -> Maybe Int -> Bool -> Int -> Int
+                    -> Bool -> (Int,Int,Int,Int)
+calculate_buf_sizes cb_t_maxseg seg_mss bw_delay_product_for_rt is_local_conn
+  rcvbufsize sndbufsize cb_tf_doing_tstmp
     = let t_maxseg' =
            let maxseg = (min cb_t_maxseg (max 64 $ (case seg_mss of Nothing -> mssdflt; Just x-> x))) in
               -- BSD
@@ -122,22 +127,24 @@ calculate_buf_sizes  (cb_t_maxseg             :: Int)
       let sndbufsize'' = (if sndbufsize' < t_maxseg'''
                              then sndbufsize'
                              else min (sb_max) (roundup (t_maxseg'') sndbufsize')) in
-      let snd_cwnd = t_maxseg''' * ((if is_local_conn then ss_fltsz_local else ss_fltsz)) in
-      (rcvbufsize'', sndbufsize'', t_maxseg''', snd_cwnd)
+      let snd_cwnd' = t_maxseg''' * ((if is_local_conn then ss_fltsz_local else ss_fltsz)) in
+      (rcvbufsize'', sndbufsize'', t_maxseg''', snd_cwnd')
 
 
-calculate_bsd_rcv_wnd :: TCPSocket t -> Int 
-calculate_bsd_rcv_wnd (tcp_sock :: TCPSocket t)=
-  let cb = cb_rcv tcp_sock in
-    assert ((rcv_adv cb) >= (rcv_nxt cb)) $ -- assertion for debugging
-    max (seq_diff (rcv_adv cb) (rcv_nxt cb))
-        (freebsd_so_rcvbuf - (bufc_length $ rcvq cb))
+calculate_bsd_rcv_wnd :: TCPSocket t -> Int
+calculate_bsd_rcv_wnd tcp_sock =
+  let cb' = cb_rcv tcp_sock
+   in assert (rcv_adv cb' >= rcv_nxt cb') $ -- assertion for debugging
+        max (seq_diff (rcv_adv cb') (rcv_nxt cb'))
+          (freebsd_so_rcvbuf - bufc_length (rcvq cb'))
 
+send_queue_space :: Num a => a -> a -> a
 send_queue_space sndq_max sndq_size = (sndq_max - sndq_size)
 
 
 
-update_idle (curr_time :: Time) tcp_sock =
+update_idle :: Time -> TCPSocket threadt -> (Maybe Time, Maybe Time)
+update_idle curr_time tcp_sock =
     let tt_keep' = if not (st tcp_sock == SYN_RECEIVED && tf_needfin (cb tcp_sock)) then
                       Just (slow_timer curr_time tcptv_keep_idle)
                    else
@@ -152,49 +159,63 @@ update_idle (curr_time :: Time) tcp_sock =
 -- tcp timing and rtt
 
 
-tcp_backoffs = tcp_bsd_backoffs
-tcp_syn_backoffs = tcp_syn_backoffs
+tcp_backoffs :: [Int]
+tcp_backoffs  = tcp_bsd_backoffs
+
+tcp_syn_backoffs :: a
+tcp_syn_backoffs  = tcp_syn_backoffs
 
 mode_of :: Maybe (Timed (RexmtMode,Int)) -> Maybe RexmtMode
-mode_of (Just (Timed (x,_) _)) = Just x
-mode_of Nothing = Nothing
+mode_of  = fmap unwrap
+  where
+  unwrap (Timed (x,_) _) = x
 
+-- TODO: not sure if 0 is a suitable default
 shift_of :: Maybe (Timed (RexmtMode,Int)) -> Int
-shift_of (Just (Timed (_,shift) _ )) = shift
+shift_of  = maybe 0 unwrap
+  where
+  unwrap (Timed (_,s) _) = s
 
 -- todo: check types!
 
 -- compute the retransmit timeout to use
 computed_rto :: [Int] -> Int -> Rttinf -> Time
-computed_rto (backoffs :: [Int]) (shift :: Int) (ri::Rttinf) =
-    (to_Int64 $ backoffs !! shift ) * (max (t_rttmin ri) ((t_srtt ri) + 4*(t_rttvar ri)))
+computed_rto backoffs s ri =
+    to_Int64 (backoffs !! s ) * max (t_rttmin ri) (t_srtt ri + 4 * t_rttvar ri)
 
 -- compute the last-used rxtcur
-computed_rxtcur (ri :: Rttinf) =
-    max (t_rttmin ri)
-        (min (tcptv_rexmtmax)
-             ((computed_rto ( if t_wassyn ri then tcp_syn_backoffs else tcp_backoffs )
-                           (t_lastshift ri) ri )))
+computed_rxtcur :: Rttinf -> Time
+computed_rxtcur ri
+  = max (t_rttmin ri)
+  $ min (tcptv_rexmtmax)
+  $ computed_rto
+    (if t_wassyn ri then tcp_syn_backoffs else tcp_backoffs)
+    (t_lastshift ri) ri
 
-start_tt_rexmt_gen (mode :: RexmtMode) (backoffs :: [Int]) (shift :: Int) 
-                       (wantmin :: Bool) (ri :: Rttinf) (curr_time :: Time) =
+start_tt_rexmt_gen :: RexmtMode -> [Int] -> Int -> Bool -> Rttinf -> Time
+                   -> Maybe (Timed (RexmtMode,Int))
+start_tt_rexmt_gen mode backoffs s wantmin ri curr_time =
     let rxtcur = max (if wantmin
                          then max (t_rttmin ri) (t_lastrtt ri + (2*1000*1000 `div` 100)) -- 2s/100
                          else t_rttmin ri )
                       ( min (tcptv_rexmtmax )
-                            ( computed_rto backoffs shift ri) )
+                            ( computed_rto backoffs s ri) )
     in
-    Just ( Timed (mode,shift) (create_timer curr_time rxtcur ) )
+    Just ( Timed (mode,s) (create_timer curr_time rxtcur ) )
 
-start_tt_rexmt = start_tt_rexmt_gen Rexmt tcp_backoffs
-start_tt_rexmtsyn = start_tt_rexmt_gen RexmtSyn tcp_syn_backoffs
+start_tt_rexmt :: Int -> Bool -> Rttinf -> Time -> Maybe (Timed (RexmtMode,Int))
+start_tt_rexmt  = start_tt_rexmt_gen Rexmt tcp_backoffs
 
-start_tt_persist (shift :: Int) (ri::Rttinf) (curr_time :: Time) =
+start_tt_rexmtsyn :: Int -> Bool -> Rttinf -> Time
+                  -> Maybe (Timed (RexmtMode,Int))
+start_tt_rexmtsyn  = start_tt_rexmt_gen RexmtSyn tcp_syn_backoffs
+
+start_tt_persist :: Int -> Rttinf -> Time -> Maybe (Timed (RexmtMode,Int))
+start_tt_persist s ri curr_time =
     let cur = max (tcptv_persmin)
                   (min (tcptv_persmax)
-                       (computed_rto tcp_backoffs shift ri) )
-    in
-    Just ( Timed (Persist, shift) (create_timer curr_time cur))
+                       (computed_rto tcp_backoffs s ri) )
+     in Just ( Timed (Persist, s) (create_timer curr_time cur))
 
 update_rtt :: Time -> Rttinf -> Rttinf
 update_rtt rtt ri =
@@ -219,18 +240,26 @@ update_rtt rtt ri =
         , t_wassyn = False
         }
 
+expand_cwnd :: Integral a => a -> a -> a -> a -> a
 expand_cwnd ssthresh maxseg maxwin cwnd
     = min maxwin (cwnd + (if cwnd > ssthresh then (maxseg * maxseg) `div` cwnd else maxseg))
 
 -- Path MTU Discovery
 
-mtu_tab = [65535, 32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296, 88]
+--mtu_tab  = [65535, 32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296, 88]
 
 next_smaller :: [Int] -> Int -> Int
-next_smaller (x:xs) value = if value >= x then x else next_smaller xs value
+next_smaller xs0 value = loop xs0
+  where
+  loop xs = case xs of
+    x:xs' | value >= x -> x
+          | otherwise  -> loop xs'
+    -- TODO: Not sure if this is an acceptable default value
+    []                 -> value
 
 
-initial_cb_time = TCBTiming
+initial_cb_time :: TCBTiming
+initial_cb_time  = TCBTiming
     { tt_keep        = Nothing
     , tt_conn_est    = Nothing
     , tt_fin_wait_2  = Nothing
@@ -240,7 +269,8 @@ initial_cb_time = TCBTiming
     , t_badrxtwin    = Nothing
     }
 
-initial_cb_snd = TCBSending
+initial_cb_snd :: TCBSending
+initial_cb_snd  = TCBSending
     { sndq            = bufferchain_empty
     , snd_una         = SeqLocal 0
     , snd_wnd         = 0
@@ -267,7 +297,10 @@ initial_cb_snd = TCBSending
 {-# INLINE tcp_reass #-}
 {-# INLINE tcp_reass_prune #-}
 
-hasfin seg = case trs_FIN seg of True -> 1; False -> 0
+hasfin :: TCPReassSegment -> Int
+hasfin seg
+  | trs_FIN seg = 1
+  | otherwise   = 0
 
 -- returns (1) the string 
 --         (2) the SEQ for the next byte
@@ -275,43 +308,44 @@ hasfin seg = case trs_FIN seg of True -> 1; False -> 0
 --         (4) remaining...
 -- this is a very SLOW algorithm and should be replaced ....
 
-tcp_reass :: SeqForeign -> [TCPReassSegment] -> (BufferChain, SeqForeign, Bool, [TCPReassSegment])
-tcp_reass seq rsegq =
+tcp_reass :: SeqForeign -> [TCPReassSegment]
+          -> (BufferChain, SeqForeign, Bool, [TCPReassSegment])
+tcp_reass sq rsegq =
   let searchpkt rseg = 
-         let seq1 = (trs_seq rseg)
-             seq2 = seq1 `seq_plus` (bufc_length $ trs_data rseg) `seq_plus` (hasfin rseg)
-         in (seq >= seq1 && seq < seq2)
+         let sq1 = (trs_seq rseg)
+             sq2 = sq1 `seq_plus` fromIntegral (bufc_length (trs_data rseg))
+                       `seq_plus` fromIntegral (hasfin rseg)
+         in sq >= sq1 && sq < sq2
   in
   case List.find searchpkt rsegq of
-    Nothing -> 
-      (bufferchain_empty, seq, False, rsegq)
-    Just rseg -> 
-      let data_to_trim = seq `seq_diff` (trs_seq rseg) in
-      let result_buf = bufferchain_drop data_to_trim (trs_data rseg) in
-      let next_seq = (trs_seq rseg) `seq_plus` (bufc_length $ trs_data rseg) `seq_plus` (hasfin rseg) in
-      let new_rsegq = tcp_reass_prune next_seq rsegq in
-      if trs_FIN rseg then
-         (result_buf
-         , next_seq
-         , True
-         , new_rsegq
-         )
-      else
-         let (bufc2, next_seq2, hasfin2, rsegq2) = tcp_reass next_seq new_rsegq in
-         ( bufferchain_concat result_buf bufc2
-         , next_seq2
-         , hasfin2
-         , rsegq2
-         )
+    Nothing   -> (bufferchain_empty, sq, False, rsegq)
+    Just rseg ->
+      let data_to_trim = sq `seq_diff` (trs_seq rseg)
+          result_buf   = bufferchain_drop data_to_trim (trs_data rseg)
+          next_seq     = trs_seq rseg
+              `seq_plus` fromIntegral (bufc_length (trs_data rseg))
+              `seq_plus` fromIntegral (hasfin rseg)
+          new_rsegq  = tcp_reass_prune next_seq rsegq
+       in if trs_FIN rseg
+             then (result_buf, next_seq, True, new_rsegq)
+             else let (bufc2, next_seq2, hasfin2, rsegq2) =
+                          tcp_reass next_seq new_rsegq
+                  in ( bufferchain_concat result_buf bufc2
+                     , next_seq2
+                     , hasfin2
+                     , rsegq2
+                     )
 
 tcp_reass_prune :: SeqForeign -> [TCPReassSegment] -> [TCPReassSegment]
-tcp_reass_prune seq rsegq = 
-    List.filter (\seg -> 
-       let nxtseq = (trs_seq seg) `seq_plus` (bufc_length $ trs_data seg) `seq_plus` (hasfin seg)
-       in nxtseq > seq 
-      ) rsegq
+tcp_reass_prune sq = List.filter p
+  where
+  p seg = nxtseq > sq
+    where
+    nxtseq = trs_seq seg `seq_plus` fromIntegral (bufc_length (trs_data seg))
+                         `seq_plus` fromIntegral (hasfin seg)
 
-initial_cb_rcv = TCBReceiving
+initial_cb_rcv :: TCBReceiving
+initial_cb_rcv  = TCBReceiving
     { last_ack_sent   = SeqForeign 0
     , tf_rxwin0sent   = False
     , tf_shouldacknow = False
@@ -323,7 +357,8 @@ initial_cb_rcv = TCBReceiving
     , t_segq          = []
     }
 
-initial_cb_misc = TCBMisc
+initial_cb_misc :: TCBMisc
+initial_cb_misc  = TCBMisc
     { -- retransmission
       snd_ssthresh      = tcp_maxwin `shiftL` tcp_maxwinscale
     , snd_cwnd_prev     = 0
@@ -356,7 +391,8 @@ initial_cb_misc = TCBMisc
     , tf_needfin        = False
     }
 
-initial_tcp_socket = TCPSocket
+initial_tcp_socket :: TCPSocket threadt
+initial_tcp_socket  = TCPSocket
     { st      = CLOSED
     , cb_time = initial_cb_time
     , cb_snd  = initial_cb_snd

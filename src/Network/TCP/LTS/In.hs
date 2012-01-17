@@ -37,32 +37,26 @@ module Network.TCP.LTS.In
 where
 
 import Hans.Layer.Tcp.Monad
-import Hans.Message.Tcp
-
-import Foreign
-import Foreign.C
-import Data.List as List
-import Control.Exception
-import Control.Monad
-
-import Network.TCP.Type.Base
-import Network.TCP.Type.Syscall
-import Network.TCP.Type.Timer
-import Network.TCP.Type.Socket
-import Network.TCP.Type.Datagram
-import Network.TCP.Aux.Param
-
 import Network.TCP.Aux.Misc
 import Network.TCP.Aux.Output
+import Network.TCP.Aux.Param
 import Network.TCP.Aux.SockMonad
-import Network.TCP.Aux.Output
-
-import Network.TCP.LTS.InPassive
 import Network.TCP.LTS.InActive
 import Network.TCP.LTS.InData
-import Network.TCP.LTS.User
+import Network.TCP.LTS.InPassive
 import Network.TCP.LTS.Out
+import Network.TCP.LTS.User
+import Network.TCP.Type.Base
+import Network.TCP.Type.Datagram
+import Network.TCP.Type.Socket
 
+import Control.Exception
+import Control.Monad
+import Data.List as List
+import Foreign
+
+
+tcp_deliver_in_packet :: TCPSegment -> HMonad t ()
 tcp_deliver_in_packet seg = do
   let sid = SocketID (get_port (tcp_dst seg), tcp_src seg)
   ok <- has_sock sid
@@ -78,7 +72,7 @@ tcp_deliver_in_packet seg = do
 -- makes the implementation simpler...
 
 --pre-condition: sid exists
-tcp_deliver_packet_to_sock :: SocketID -> TCPSegment -> HMonad t ()  
+tcp_deliver_packet_to_sock :: SocketID -> TCPSegment -> HMonad t ()
 tcp_deliver_packet_to_sock sid seg =
   do h <- get_host
      sock <- lookup_sock sid
@@ -110,10 +104,10 @@ tcp_deliver_packet_to_sock sid seg =
                    else if invalidack || (seqnum < (irs tcb)) then
                       return ()
                    else do
-                      sock <- runSMonad sid $ deliver_in_3 seg
-                      if st sock == CLOSED then
+                      sock' <- runSMonad sid $ deliver_in_3 seg
+                      if st sock' == CLOSED then
                           tcp_close sid
-                       else when (st sock /= SYN_RECEIVED) $
+                       else when (st sock' /= SYN_RECEIVED) $
                           di3_socks_update sid
        _        -> if tcp_RST seg then 
                       when (st sock /= TIME_WAIT) $ tcp_close sid
@@ -121,13 +115,18 @@ tcp_deliver_packet_to_sock sid seg =
                       when (st sock==TIME_WAIT) $ emit_segs $ dropwithreset seg
                    else  
                       if st sock `elem` [FIN_WAIT_1, CLOSING, LAST_ACK, FIN_WAIT_2, TIME_WAIT]  
-                         && seqnum `seq_plus` (bufc_length $ tcp_data seg) > (rcv_nxt rcb)
+                         && seqnum
+                             `seq_plus` fromIntegral (bufc_length (tcp_data seg))
+                           > rcv_nxt rcb
                         then return () -- data coming into closing socket?
-                        else do sock <- runSMonad sid $ deliver_in_3 seg
-                                --debug $ (show $ st sock)
-                                when (st sock == CLOSED) $ tcp_close sid
+                        else do sock' <- runSMonad sid $ deliver_in_3 seg
+                                --debug $ (show $ st sock')
+                                when (st sock' == CLOSED) $ tcp_close sid
 
 {-# INLINE header_prediction #-}
+header_prediction :: TCPSegment -> Host t' -> SocketID -> TCPSocket t''
+                  -> TCBMisc -> TCBReceiving -> TCBSending
+                  -> SeqForeign -> SeqLocal -> HMonad t Bool
 header_prediction seg h sid sock tcb rcb scb seqnum acknum =
  if st sock == ESTABLISHED
      && not (tcp_SYN seg) 
@@ -147,12 +146,12 @@ header_prediction seg h sid sock tcb rcb scb seqnum acknum =
             --------------------------------------------------------------------------------
             --debug $ "prediction 2.1!"
             let emission_time = case (tcp_ts seg, t_rttseg scb) of
-                                (Just (ts_val, ts_ecr), _ ) -> Just (ts_ecr `seq_minus` 1)
+                                (Just (_, ts_ecr), _ ) -> Just (ts_ecr `seq_minus` 1)
                                 (Nothing, Just (ts0, seq0)) -> if acknum > seq0 then Just ts0 else Nothing
                                 (Nothing, Nothing) -> Nothing
             let t_rttinf' = case emission_time of
                             Just emtime -> assert ((ticks h) >= emtime) $
-                                           update_rtt ( ((ticks h) `seq_diff` emtime)*10000 ) (t_rttinf scb)
+                                           update_rtt ( fromIntegral ((ticks h) `seq_diff` emtime)*10000 ) (t_rttinf scb)
                             Nothing -> t_rttinf scb
             let tt_rexmt' = if acknum == snd_max scb then
                                Nothing

@@ -32,30 +32,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --}
 
 module Network.TCP.LTS.InPassive where
-import Data.List as List
+
+import Hans.Layer.Tcp.Monad
+import Network.TCP.Aux.Misc
+import Network.TCP.Aux.Output
+import Network.TCP.Aux.Param
+import Network.TCP.Aux.SockMonad
+import Network.TCP.LTS.User
+import Network.TCP.Type.Base
+import Network.TCP.Type.Datagram
+import Network.TCP.Type.Socket
+
 import Control.Exception
 import Control.Monad
+import Data.List as List
 
---import Foreign.C
-import Network.TCP.Type.Base
-import Network.TCP.Type.Syscall
-import Network.TCP.Type.Timer
-import Network.TCP.Type.Socket
-import Network.TCP.Type.Datagram
-import Network.TCP.Aux.Misc
-import Network.TCP.Aux.Param
-import Network.TCP.Aux.Output
-import Hans.Layer.Tcp.Monad
-import Network.TCP.Aux.SockMonad
-
-import Network.TCP.LTS.Out
-import Network.TCP.LTS.User
-
+tcp_deliver_syn_packet :: TCPSegment -> HMonad t ()
 tcp_deliver_syn_packet seg = do
    -- precondition: sid does not exist
    -- try if seg matches a listening socket...
    let sidlisten = SocketID ((get_port $ tcp_dst seg), TCPAddr (IPAddr 0,0))
-   h <- get_host
+   --h <- get_host
    haslisten <- has_sock sidlisten
    if not haslisten then return () else do
       -- matches a socket...
@@ -65,7 +62,8 @@ tcp_deliver_syn_packet seg = do
          if accept_incoming_q0 (sock_listen sock)
             then deliver_in_1 sidlisten sock seg
             else return ()
-      
+
+deliver_in_1 :: SocketID -> TCPSocket t -> TCPSegment -> HMonad t ()
 deliver_in_1 sid sock seg = 
   do let newsid = SocketID ((get_port $ tcp_dst seg), tcp_src seg)
      h <- get_host
@@ -87,10 +85,11 @@ deliver_in_1 sid sock seg =
      let advmss  = mssdflt -- todo: lookup interface mss
          advmss' = Nothing  -- not advertising MSS (todo: change it)
 
-         tf_rcvd_tstmp = case tcp_ts seg of Just _ -> True; Nothing -> False
+         --tf_rcvd_tstmp = case tcp_ts seg of Just _ -> True; Nothing -> False
          tf_doing_tstmp' = False -- not doing timestamping (todo: change it)
 
-         (rcvbufsize', sndbufsize', t_maxseg', snd_cwnd') =
+         --(rcvbufsize', sndbufsize', t_maxseg', snd_cwnd') =
+         (_, _, t_maxseg', snd_cwnd') =
           calculate_buf_sizes advmss (tcp_mss seg) Nothing False
             (freebsd_so_rcvbuf) (freebsd_so_sndbuf) tf_doing_tstmp'
 
@@ -102,13 +101,14 @@ deliver_in_1 sid sock seg =
          newiss = SeqLocal 1000 -- beginning iss. (todo: add more randomness)
          t_rttseg' = Just (ticks h, newiss)
          seqnum = SeqForeign (tcp_seq seg)
-         acknum = SeqLocal (tcp_ack seg)
+         --acknum = SeqLocal (tcp_ack seg)
          ack' = seqnum `seq_plus` 1
          cb_time' = (cb_time sock)
                { tt_keep = Just (create_timer (clock h) tcptv_keep_idle)
-               , ts_recent = case (tcp_ts seg) of 
-                             Nothing -> ts_recent (cb_time sock) 
-                             Just (ts_val, ts_ecr) -> create_timewindow (clock h) (dtsinval) ts_val
+               , ts_recent = case (tcp_ts seg) of
+                   Nothing          -> ts_recent (cb_time sock)
+                   Just (ts_val, _) ->
+                               create_timewindow (clock h) (dtsinval) ts_val
                }
          cb_snd' = (cb_snd sock)
                { tt_rexmt = start_tt_rexmt 0 False (t_rttinf (cb_snd sock)) (clock h)
@@ -122,7 +122,7 @@ deliver_in_1 sid sock seg =
                { rcv_wnd = rcv_window
                , tf_rxwin0sent = (rcv_window == 0)
                , last_ack_sent = ack'
-               , rcv_adv = ack' `seq_plus` rcv_window
+               , rcv_adv = ack' `seq_plus` fromIntegral rcv_window
                , rcv_nxt = ack'
                }
          cb' = (cb sock)
@@ -156,8 +156,9 @@ deliver_in_1 sid sock seg =
 
 -- After receiving ACK on SYN_RECEIVED, a connection is established.
 -- Now we need to update the queues of the listening socket...
+di3_socks_update :: SocketID -> HMonad t ()
 di3_socks_update sid = do
-    h <- get_host
+    --h <- get_host
     -- precondition: sid exists
     newsock <- lookup_sock sid
     let tcb = cb newsock
@@ -177,7 +178,8 @@ di3_socks_update sid = do
                        }
        let rcv_window = calculate_bsd_rcv_wnd newsock
        let newcb = (cb_rcv newsock) { rcv_wnd = rcv_window
-                                    , rcv_adv = (rcv_nxt rcb) `seq_plus` (rcv_wnd rcb)
+                                    , rcv_adv = rcv_nxt rcb
+                                        `seq_plus` fromIntegral (rcv_wnd rcb)
                                     }
        update_sock sidlisten $ \_ -> listensock { sock_listen = lis2 }
        update_sock sid       $ \_ -> newsock    { cb_rcv = newcb }

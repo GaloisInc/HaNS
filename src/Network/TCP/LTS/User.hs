@@ -37,7 +37,6 @@ module Network.TCP.LTS.User
   )
 where
 
-import Foreign.C
 import Data.List as List
 import Control.Monad
 import Data.Maybe
@@ -73,15 +72,19 @@ tcp_process_user_request (req, cont) =
    SockSend sid d    -> process_send sid d cont
    SockRecv sid -> process_recv sid cont
 
+tcp_wakeup_request :: SockReq -> (SockRsp -> t) -> SMonad t (Maybe t)
 tcp_wakeup_request req cont = 
  case req of 
-   SockConnect local addr  -> wakeup_connect cont
-   SockAccept sid    -> wakeup_accept sid cont
-   SockSend sid d    -> wakeup_send sid d cont
-   SockRecv sid -> wakeup_recv sid cont
-  
+   SockConnect _ _ -> wakeup_connect cont
+   SockAccept sid  -> wakeup_accept sid cont
+   SockSend sid d  -> wakeup_send sid d cont
+   SockRecv sid    -> wakeup_recv sid cont
+   SockListen _    -> fail "tcp_wakeup_request: SockListen"
+   SockClose _     -> fail "tcp_wakeup_request: SockClose"
+
 -- pre-cond: sock is set
 -- post-cond: sock is set, tcp_output needed
+tcp_wakeup :: SMonad t ()
 tcp_wakeup =
  do sock <- get_sock
     case waiting_list sock of
@@ -103,13 +106,16 @@ process_listen port cont =
     -- check if port has been used...
     if port `elem` (local_ports h) then
        do let listen = SocketListen [] [] listen_qlimit
-          let newsock = initial_tcp_socket 
-                        { cb = (cb initial_tcp_socket) { local_addr = TCPAddr (IPAddr 0,port), self_id=sock_id }
-                        , st = LISTEN
+          let newsock = initial_tcp_socket
+                        { cb = (cb initial_tcp_socket)
+                          { local_addr = TCPAddr (IPAddr 0,port)
+                          , self_id    = sock_id
+                          }
+                        , st          = LISTEN
                         , sock_listen = listen
                         }
           insert_sock sock_id newsock
-          modify_host $ \h -> h { local_ports = List.delete port (local_ports h) }          
+          modify_host $ \hs -> hs { local_ports = List.delete port (local_ports hs) }
           return $ Just $ cont $ SockNew sock_id
      else
        return $ Just $ cont $ SockError "Port not available"
@@ -127,9 +133,14 @@ process_close sid cont =
           return $ Just $ cont $ SockOK
         else if st sock /= LISTEN then runSMonad sid $ do
           -- close_1 : change the flags so FIN can be sent later
-          modify_sock $ \sock-> sock { cb = (cb sock) { cantsndmore=True, cantrcvmore=True}
-                                     , cb_rcv = (cb_rcv sock) { rcvq=bufferchain_empty }
-                                     }
+          modify_sock $ \s-> s { cb     = (cb s)
+                                 { cantsndmore=True
+                                 , cantrcvmore=True
+                                 }
+                               , cb_rcv = (cb_rcv sock)
+                                 { rcvq=bufferchain_empty
+                                 }
+                               }
           tcp_output_all
           return $ Just $ cont $ SockOK
         else do
@@ -150,8 +161,9 @@ process_accept sid cont =
           -- put thread in waiting list
           modify_sock $ \sock -> sock {waiting_list = (waiting_list sock)++[(SockAccept sid, cont)] }
        return res
-wakeup_accept sid cont
-  = try_accept cont
+
+wakeup_accept :: a -> (SockRsp -> t) -> SMonad t (Maybe t)
+wakeup_accept _sid = try_accept
 
 -- pre-cond: sock is set
 -- post-cond: sock is set, listening queue updated
@@ -166,7 +178,7 @@ try_accept cont =
           case lis_q listen of 
            []        -> return Nothing  -- no connection to accept, can't proceed
            (sid2:qs) -> do         -- try to accept sid2, either success or fail 
-             modify_sock $ \sock -> sock { sock_listen = listen { lis_q = qs } }
+             modify_sock $ \s -> s { sock_listen = listen { lis_q = qs } }
              return $ Just $ cont $ SockNew sid2
 
 process_recv ::  SocketID  -> (SockRsp->t) -> HMonad t (Maybe t)
@@ -180,9 +192,9 @@ process_recv sid cont =
           -- put thread in waiting list
           modify_sock $ \sock -> sock {waiting_list = (waiting_list sock)++[(SockRecv sid, cont)] }
        return res
-   
-wakeup_recv sid cont =
-    try_recv cont
+
+wakeup_recv :: a -> (SockRsp -> t) -> SMonad t (Maybe t)
+wakeup_recv _sid = try_recv
 
 try_recv ::  (SockRsp->t) -> SMonad t (Maybe t)
 try_recv cont = 
@@ -211,7 +223,8 @@ process_send sid d cont =
           -- put thread in waiting list
           modify_sock $ \sock -> sock {waiting_list = (waiting_list sock)++[(SockSend sid remain, cont)] }
        return res
-   
+
+wakeup_send :: SocketID -> Buffer -> (SockRsp -> t) -> SMonad t (Maybe t)
 wakeup_send sid d cont =
  do (res,remain) <- try_send d cont
     when (isNothing res) $
@@ -268,7 +281,7 @@ process_connect local addr cont = do
            }
         , cb_rcv = initial_cb_rcv
            { rcv_wnd = rcv_wnd'
-           , rcv_adv = (rcv_nxt initial_cb_rcv) `seq_plus` rcv_wnd'
+           , rcv_adv = (rcv_nxt initial_cb_rcv) `seq_plus` fromIntegral rcv_wnd'
            , tf_rxwin0sent = (rcv_wnd' == 0)
            }   
         , cb = initial_cb_misc 

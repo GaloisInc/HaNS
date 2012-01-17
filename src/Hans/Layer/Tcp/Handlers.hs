@@ -4,12 +4,12 @@ module Hans.Layer.Tcp.Handlers (
   ) where
 
 import Hans.Address.IP4 (IP4,convertFromWord32)
-import Hans.Channel (send)
+--import Hans.Channel (send)
 import Hans.Layer (output,liftRight)
 import Hans.Layer.IP4 (sendIP4Packet,withIP4Source)
 import Hans.Layer.Tcp.Monad
     (Tcp,TcpState(..),ip4Handle,ip4Handle,ip4Handle,ip4Handle)
-import Hans.Layer.Timer (udelay)
+--import Hans.Layer.Timer (udelay)
 import Hans.Message.Tcp
     (tcpProtocol,renderWithTcpChecksumIP4,getTcpPacket,recreateTcpChecksumIP4
     ,TcpHeader(..))

@@ -66,6 +66,7 @@ import Hans.Message.Tcp
 
 import Network.TCP.Type.Base
 
+import Data.Word (Word32,Word16)
 import qualified Data.ByteString as S
 
 data TCPSegment = TCPSegment
@@ -99,21 +100,41 @@ mkTCPSegment' s@(TCPAddr (_, srcP)) d@(TCPAddr (_, dstP)) hdr body =
     }
   where
 
-tcp_seq = getSeqNum . tcpSeqNum . tcp_header
-tcp_ack = getAckNum . tcpAckNum . tcp_header
-tcp_URG = tcpUrg    . tcp_header
-tcp_ACK = tcpAck    . tcp_header
-tcp_PSH = tcpPsh    . tcp_header
-tcp_RST = tcpRst    . tcp_header
-tcp_SYN = tcpSyn    . tcp_header
-tcp_FIN = tcpFin    . tcp_header
-tcp_win = tcpWindow . tcp_header
-tcp_urp = tcpUrgentPointer . tcp_header
+tcp_seq :: TCPSegment -> Word32
+tcp_seq  = getSeqNum . tcpSeqNum . tcp_header
+
+tcp_ack :: TCPSegment -> Word32
+tcp_ack  = getAckNum . tcpAckNum . tcp_header
+
+tcp_URG :: TCPSegment -> Bool
+tcp_URG  = tcpUrg    . tcp_header
+
+tcp_ACK :: TCPSegment -> Bool
+tcp_ACK  = tcpAck    . tcp_header
+
+tcp_PSH :: TCPSegment -> Bool
+tcp_PSH  = tcpPsh    . tcp_header
+
+tcp_RST :: TCPSegment -> Bool
+tcp_RST  = tcpRst    . tcp_header
+
+tcp_SYN :: TCPSegment -> Bool
+tcp_SYN  = tcpSyn    . tcp_header
+
+tcp_FIN :: TCPSegment -> Bool
+tcp_FIN  = tcpFin    . tcp_header
+
+tcp_win :: TCPSegment -> Word16
+tcp_win  = tcpWindow . tcp_header
+
+tcp_urp :: TCPSegment -> Word16
+tcp_urp  = tcpUrgentPointer . tcp_header
 
 tcp_ws :: TCPSegment -> Maybe Int
 tcp_ws = fmap prj . findTcpOption OptTagWindowScaling . tcp_header
   where
   prj (OptWindowScaling ws) = fromIntegral ws
+  prj _                     = error "Network.TCP.Type.Datagram.tcp_ws"
 
 set_tcp_ws :: Maybe Int -> TcpHeader -> TcpHeader
 set_tcp_ws Nothing   = id
@@ -123,6 +144,7 @@ tcp_mss :: TCPSegment -> Maybe Int
 tcp_mss = fmap prj . findTcpOption OptTagMaxSegmentSize . tcp_header
   where
   prj (OptMaxSegmentSize mss) = fromIntegral mss
+  prj _                       = error "Network.TCP.Type.Datagram.tcp_mss"
 
 set_tcp_mss :: Maybe Int -> TcpHeader -> TcpHeader
 set_tcp_mss Nothing    = id
@@ -132,6 +154,7 @@ tcp_ts :: TCPSegment -> Maybe (Timestamp,Timestamp)
 tcp_ts = fmap prj . findTcpOption OptTagTimestamp . tcp_header
   where
   prj (OptTimestamp v r) = (Timestamp v, Timestamp r)
+  prj _                  = error "Network.TCP.Type.Datagram.tcp_ts"
 
 set_tcp_ts :: Maybe (Timestamp,Timestamp) -> TcpHeader -> TcpHeader
 set_tcp_ts Nothing                           = id

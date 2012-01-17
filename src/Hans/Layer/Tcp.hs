@@ -15,7 +15,7 @@ import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Layer.Tcp.Monad (Tcp,TcpHandle,TcpState(..),emptyTcpState)
 import Hans.Layer.Tcp.Socket as Exports
-import Hans.Layer.Timer (TimerHandle,udelay)
+import Hans.Layer.Timer (TimerHandle)
 import Hans.Message.Tcp (tcpProtocol)
 import Hans.Layer.Tcp.Handlers (handleIncomingTcp,handleOutgoing)
 import Hans.Utils (void)

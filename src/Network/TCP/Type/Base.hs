@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 {--
 Copyright (c) 2006, Peng Li
@@ -37,24 +37,40 @@ module Network.TCP.Type.Base where
 
 import Data.Time.Clock.POSIX (POSIXTime,getPOSIXTime)
 import Foreign
-import Foreign.C
-import System.IO.Unsafe
 import Control.Exception
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
 
 
-to_Int x    = (fromIntegral x)::Int
-to_Int8  x  = (fromIntegral x)::Int8
-to_Int16 x  = (fromIntegral x)::Int16
-to_Int32 x  = (fromIntegral x)::Int32
-to_Int64 x  = (fromIntegral x)::Int64
+to_Int :: Integral a => a -> Int
+to_Int x = fromIntegral x
 
-to_Word x   = (fromIntegral x)::Word
-to_Word8 x  = (fromIntegral x)::Word8
-to_Word16 x = (fromIntegral x)::Word16
-to_Word32 x = (fromIntegral x)::Word32
-to_Word64 x = (fromIntegral x)::Word64
+to_Int8 :: Integral a => a -> Int8
+to_Int8 x = fromIntegral x
+
+to_Int16 :: Integral a => a -> Int16
+to_Int16 x  = fromIntegral x
+
+to_Int32 :: Integral a => a -> Int32
+to_Int32 x  = fromIntegral x
+
+to_Int64 :: Integral a => a -> Int64
+to_Int64 x  = fromIntegral x
+
+to_Word :: Integral a => a -> Word
+to_Word x   = (fromIntegral x)
+
+to_Word8 :: Integral a => a -> Word8
+to_Word8 x  = (fromIntegral x)
+
+to_Word16 :: Integral a => a -> Word16
+to_Word16 x = (fromIntegral x)
+
+to_Word32 :: Integral a => a -> Word32
+to_Word32 x = (fromIntegral x)
+
+to_Word64 :: Integral a => a -> Word64
+to_Word64 x = (fromIntegral x)
 
 
 {-# INLINE to_Int    #-}
@@ -85,16 +101,16 @@ instance Show TCPAddr where
 
 
 get_ip :: TCPAddr -> IPAddr
-get_ip (TCPAddr (i,p)) = i
+get_ip (TCPAddr (i,_)) = i
 
 get_port :: TCPAddr -> Port
-get_port (TCPAddr (i,p)) = p
+get_port (TCPAddr (_,p)) = p
 
 get_remote_addr :: SocketID -> TCPAddr
-get_remote_addr (SocketID (p,a)) = a
+get_remote_addr (SocketID (_,a)) = a
 
 get_local_port :: SocketID -> Port
-get_local_port (SocketID (p,a)) = p
+get_local_port (SocketID (p,_)) = p
 
 {-# INLINE get_ip #-}
 {-# INLINE get_port #-}
@@ -104,31 +120,42 @@ get_local_port (SocketID (p,a)) = p
 -- TCP Sequence numbers
 
 class (Eq a) => Seq32 a where
-  seq_val :: a -> Word32
-  seq_lt  :: a -> a -> Bool
-  seq_leq :: a -> a -> Bool
-  seq_gt  :: a -> a -> Bool
-  seq_geq :: a -> a -> Bool
-  seq_plus  :: (Integral n) => a -> n -> a
-  seq_minus :: (Integral n) => a -> n -> a
-  seq_diff  :: (Integral n) => a -> a -> n
+  seq_val   :: a -> Word32
+  seq_lt    :: a -> a -> Bool
+  seq_leq   :: a -> a -> Bool
+  seq_gt    :: a -> a -> Bool
+  seq_geq   :: a -> a -> Bool
+  seq_plus  :: a -> Word32 -> a
+  seq_minus :: a -> Word32 -> a
+  seq_diff  :: a -> a -> Int
+
+infixl 6 `seq_plus`
 
 instance Seq32 Word32 where
   seq_val w = w
-  seq_lt  x y = (to_Int32 (x-y)) <  0
-  seq_leq x y = (to_Int32 (x-y)) <= 0
-  seq_gt  x y = (to_Int32 (x-y)) >  0
-  seq_geq x y = (to_Int32 (x-y)) >= 0
-  seq_plus  s i = assert (i>=0)  $ s + (to_Word32 i)
-  seq_minus s i = assert (i>=0)  $ s - (to_Word32 i)
-  seq_diff  s t = let res=fromIntegral $ to_Int32 (s-t) in assert (res>=0) res
   {-# INLINE seq_val #-}
+
+  seq_lt  x y = x < y
   {-# INLINE seq_lt  #-}
+
+  seq_leq x y = x <= y
   {-# INLINE seq_leq #-}
+
+  seq_gt  x y = x > y
   {-# INLINE seq_gt  #-}
+
+  seq_geq x y = x >= y
   {-# INLINE seq_geq #-}
+
+  seq_plus  s i = assert (i>=0)  (s + i)
   {-# INLINE seq_plus #-}
+
+  seq_minus s i = assert (i>=0)  (s - i)
   {-# INLINE seq_minus  #-}
+
+  seq_diff s t = assert (res>=0) res
+    where
+    res = fromIntegral s - fromIntegral t
   {-# INLINE seq_diff #-}
 
 newtype SeqLocal   = SeqLocal   Word32 deriving (Eq,Show,Seq32)
@@ -163,21 +190,24 @@ instance Ord Timestamp where
   {-# INLINE (<=) #-}  
   {-# INLINE (>=) #-}  
 
+seq_flip_ltof :: SeqLocal -> SeqForeign
 seq_flip_ltof (SeqLocal w) = SeqForeign w
+{-# INLINE seq_flip_ltof  #-}
+
+seq_flip_ftol :: SeqForeign -> SeqLocal
 seq_flip_ftol (SeqForeign w) = SeqLocal w
+{-# INLINE seq_flip_ftol  #-}
 
 fseq_val :: SeqForeign -> Word32
 fseq_val (SeqForeign w32) = w32
 
-{-# INLINE seq_flip_ltof  #-}
-{-# INLINE seq_flip_ftol  #-}
 
 
 -- | Clock time, in microseconds.
 type Time = Int64
 
-seconds_to_time :: RealFrac a => a -> Time
-seconds_to_time f = round (f * 1000*1000)
+seconds_to_time :: Double -> Time
+seconds_to_time f = round f * 1000 * 1000
 
 {-# INLINE seconds_to_time  #-}
 
@@ -185,7 +215,7 @@ get_current_time :: IO Time
 get_current_time = posixtime_to_time `fmap` getPOSIXTime
 
 posixtime_to_time :: POSIXTime -> Time
-posixtime_to_time  = seconds_to_time . toRational
+posixtime_to_time p = round p * 1000 * 1000
 
 ---------------------------------------------------------------------------
 
@@ -209,7 +239,10 @@ string_to_buffer  = return . S.pack . map (toEnum . fromEnum)
 buffer_split :: Int -> Buffer -> (Buffer,Buffer)
 buffer_split  = S.splitAt
 
+buffer_take :: Int -> Buffer -> Buffer
 buffer_take = S.take
+
+buffer_drop :: Int -> Buffer -> Buffer
 buffer_drop = S.drop
 
 buffer_merge :: Buffer -> Buffer -> [Buffer]
@@ -224,14 +257,19 @@ type BufferChain = L.ByteString
 bufc_length :: BufferChain -> Int
 bufc_length  = fromIntegral . L.length
 
+bufferchain_empty :: BufferChain
 bufferchain_empty = L.empty
+
+bufferchain_singleton :: Buffer -> BufferChain
 bufferchain_singleton b = L.fromChunks [b]
 
+bufferchain_add :: Buffer -> BufferChain -> BufferChain
 bufferchain_add bs bc = bufferchain_singleton bs `L.append` bc
 
 bufferchain_get :: BufferChain -> Int -> BufferChain
 bufferchain_get bc ix = L.take 1 (L.drop (fromIntegral ix) bc)
 
+bufferchain_append :: BufferChain -> Buffer -> BufferChain
 bufferchain_append bc bs = bc `L.append` bufferchain_singleton bs
 
 bufferchain_concat :: BufferChain -> BufferChain -> BufferChain

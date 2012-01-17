@@ -37,12 +37,14 @@ where
 
 import Network.TCP.Type.Base
 
+import Control.Monad (guard)
+
 data Timed a = Timed { timed_val :: a
                      , timed_exp :: Time 
                      } deriving (Show, Eq)
 
 timed_expires :: Time -> Timed a -> Bool
-timed_expires t (Timed x tm) = t >= tm
+timed_expires t (Timed _ tm) = t >= tm
 
 timer_expires :: Time -> Time -> Bool
 timer_expires t tm = t >= tm
@@ -61,8 +63,9 @@ timewindow_open :: Time -> TimeWindow a -> Bool
 timewindow_open  = maybe_timed_expires
 
 timewindow_val :: Time -> TimeWindow a -> Maybe a
-timewindow_val t Nothing = Nothing
-timewindow_val t (Just tmd) = 
-    if timed_expires t tmd then Nothing else Just (timed_val tmd)
+timewindow_val t mb = do
+  tmd <- mb
+  guard (not (timed_expires t tmd))
+  return (timed_val tmd)
 
 

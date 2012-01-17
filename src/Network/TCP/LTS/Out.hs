@@ -46,9 +46,7 @@ import Data.List as List
 import Network.TCP.Aux.Output
 import Network.TCP.Aux.Misc
 import Network.TCP.Type.Base
-import Network.TCP.Type.Syscall
 import Network.TCP.Type.Socket
-import Hans.Layer.Tcp.Monad
 import Network.TCP.Aux.SockMonad
 import Control.Monad
 import Control.Exception
@@ -57,8 +55,8 @@ import Network.TCP.Type.Timer
 import Network.TCP.Type.Datagram as Datagram
 import Network.TCP.Aux.Param
 
-tcp_output_all :: SMonad t ()    
-tcp_output_all = do
+tcp_output_all :: SMonad t ()
+tcp_output_all  = do
     h <- get_host_
     sock <- get_sock
     let scb = cb_snd sock
@@ -69,7 +67,9 @@ tcp_output_all = do
           || ( st sock `elem` [SYN_SENT, SYN_RECEIVED] && 
                cantsndmore tcb && (tf_shouldacknow $ cb_rcv sock))) $
      output_loop h sock
- 
+{-# INLINE tcp_output_all #-}
+
+output_loop :: Host t -> TCPSocket t -> SMonad t ()
 output_loop h sock =
    let (sock1, outsegs) = tcp_output_really (clock h) False (ticks h) sock in
    if List.null outsegs then 
@@ -78,14 +78,13 @@ output_loop h sock =
       --debug $ "tcp_output_all: " ++ (show outsegs)
       emit_segs_ $! outsegs
       output_loop h sock1
-
-{-# INLINE tcp_output_all #-}
 {-# INLINE output_loop #-}
 
 
-{-# INLINE tcp_output_really #-}
 
-tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) tcp_sock =
+tcp_output_really :: Time -> Bool -> Timestamp -> TCPSocket t
+                  -> (TCPSocket t,[IPMessage])
+tcp_output_really curr_time window_probe ts_val' tcp_sock =
     let tcb = cb tcp_sock
         scb = cb_snd tcp_sock
         rcb = cb_rcv tcp_sock
@@ -102,10 +101,11 @@ tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) 
         snd_wnd_unused ::Int = win - ((snd_nxt scb) `seq_diff` (snd_una scb))
         syn_not_acked = (st tcp_sock `elem` [SYN_SENT, SYN_RECEIVED])
         fin_required = (cantsndmore tcb && st tcp_sock `notElem` [FIN_WAIT_2, TIME_WAIT])
-        last_sndq_data_seq = (snd_una scb) `seq_plus` (bufc_length $ sndq scb)
-        last_sndq_data_and_fin_seq = last_sndq_data_seq `seq_plus` 
-                                     (if fin_required then 1 else 0) `seq_plus` 
-                                     (if syn_not_acked then 1 else 0)
+        last_sndq_data_seq =
+            snd_una scb `seq_plus` fromIntegral (bufc_length (sndq scb))
+        last_sndq_data_and_fin_seq = last_sndq_data_seq
+            `seq_plus` (if fin_required then 1 else 0  :: Word32)
+            `seq_plus` (if syn_not_acked then 1 else 0 :: Word32)
         have_data_to_send = (snd_nxt scb) < last_sndq_data_seq
         have_data_or_fin_to_send = (snd_nxt scb) < last_sndq_data_and_fin_seq
         window_update_delta = (min (tcp_maxwin `shiftL` (rcv_scale tcb))
@@ -127,7 +127,8 @@ tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) 
                     else if window_shrunk then 
                        tcp_sock { cb_snd = scb { 
                          tt_rexmt = case tt_rexmt scb of
-                           Just(Timed (Persist, shift) d ) -> Just (Timed (Persist, 0) d)
+                           Just(Timed (Persist, _) d ) ->
+                             Just (Timed (Persist, 0) d)
                            _ -> start_tt_persist 0 (t_rttinf scb) curr_time
                        , snd_nxt = snd_una scb
                        }}
@@ -135,21 +136,24 @@ tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) 
     in
     if  (not do_output) then (tcp_sock0, []) else
     ------------ really do it ---------------------------------------------
-    let tcp_sock = tcp_sock0
-        scb = cb_snd tcp_sock
+    let tcp_sock = tcp_sock0       -- fix this
+        scb      = cb_snd tcp_sock -- fix this
 
         data' = bufferchain_drop (snd_nxt scb `seq_diff` (snd_una scb)) (sndq scb)
         data_to_send = bufferchain_take (min (snd_wnd_unused) ( t_maxseg tcb)) data'
-        bFIN = fin_required && (snd_nxt scb) `seq_plus` (bufc_length data_to_send) >= last_sndq_data_seq
+        bFIN = fin_required
+            && snd_nxt scb `seq_plus` fromIntegral (bufc_length data_to_send)
+               >= last_sndq_data_seq
         bACK = if bFIN && st tcp_sock == SYN_SENT then False else True
-        snd_nxt' = if bFIN &&  
-                   ((snd_nxt scb `seq_plus` (bufc_length data_to_send) == 
+        snd_nxt' = if bFIN &&
+                   ((snd_nxt scb `seq_plus` fromIntegral (bufc_length data_to_send) == 
                     last_sndq_data_seq `seq_plus` 1 &&  snd_una scb /= iss tcb )
-                    || (snd_nxt scb) `seq_diff` (iss tcb) == 2) 
+                    || snd_nxt scb `seq_diff` iss tcb == 2)
                    then snd_nxt scb `seq_minus` 1
                    else snd_nxt scb
-        bPSH = bufc_length data_to_send > 0  && 
-               snd_nxt scb `seq_plus` (bufc_length data_to_send) == last_sndq_data_seq
+        bPSH = bufc_length data_to_send > 0
+            && snd_nxt scb `seq_plus` fromIntegral (bufc_length data_to_send)
+               == last_sndq_data_seq
         rcv_wnd'' = calculate_bsd_rcv_wnd tcp_sock
         rcv_wnd' = max (rcv_adv rcb `seq_diff` (rcv_nxt rcb))
                        (min (tcp_maxwin `shiftL` (rcv_scale tcb))
@@ -175,7 +179,8 @@ tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) 
                   xxx         -> xxx
               else
                  st tcp_sock
-        snd_nxt'' = snd_nxt' `seq_plus` (bufc_length data_to_send) `seq_plus` (if bFIN then 1 else 0)
+        snd_nxt'' = snd_nxt' `seq_plus` fromIntegral (bufc_length data_to_send)
+                             `seq_plus` (if bFIN then 1 else 0)
         snd_max'  = max (snd_max scb) snd_nxt''
         tt_rexmt' = if (mode_of (tt_rexmt scb) == Nothing ||
                         (mode_of (tt_rexmt scb) == Just Persist && not window_probe)) &&
@@ -199,17 +204,20 @@ tcp_output_really (curr_time :: Time) (window_probe::Bool) (ts_val'::Timestamp) 
                                      , snd_max = snd_max'
                                      , snd_nxt = snd_nxt''
                                      }
-                      , cb_rcv = rcb { last_ack_sent = rcv_nxt rcb
-                                     , rcv_adv = rcv_nxt rcb `seq_plus` rcv_wnd'
-                                     , tt_delack = False
-                                     , rcv_wnd = rcv_wnd'
-                                     , tf_rxwin0sent = (rcv_wnd' == 0)
-                                     , tf_shouldacknow = False
-                                     }
+                      , cb_rcv = rcb
+                        { last_ack_sent   = rcv_nxt rcb
+                        , rcv_adv         =
+                          rcv_nxt rcb `seq_plus` fromIntegral rcv_wnd'
+                        , tt_delack       = False
+                        , rcv_wnd         = rcv_wnd'
+                        , tf_rxwin0sent   = rcv_wnd' == 0
+                        , tf_shouldacknow = False
+                        }
                       }
         outsegs' = [TCPMessage seg]
     in
     (tcp_sock', outsegs')
+{-# INLINE tcp_output_really #-}
 
 {-# INLINE tcp_output #-}
 tcp_output :: Bool -> SMonad t ()

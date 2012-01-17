@@ -37,15 +37,12 @@ module Network.TCP.Aux.Output where
 import Hans.Message.Tcp
 
 import Network.TCP.Type.Base
-import Network.TCP.Type.Timer
 import Network.TCP.Type.Datagram as Datagram
 import Network.TCP.Type.Socket
 import Network.TCP.Type.Syscall
-import Network.TCP.Aux.Param
 import Network.TCP.Aux.Misc
 import Hans.Layer.Tcp.Monad
 import Foreign
-import Control.Exception
 import Control.Monad
 
 make_syn_segment :: Time -> TCPSocket t -> Timestamp -> TCPSegment
@@ -65,7 +62,9 @@ make_syn_segment curr_time sock (ts_val::Timestamp) =
     in mkTCPSegment'
            (local_addr (cb sock)) (remote_addr (cb sock)) hdr bufferchain_empty
 
-make_syn_ack_segment curr_time sock (addrfrom::TCPAddr) (addrto::TCPAddr) (ts_val::Timestamp) = 
+make_syn_ack_segment :: Time -> TCPSocket t -> TCPAddr -> TCPAddr -> Timestamp
+                     -> TCPSegment
+make_syn_ack_segment curr_time sock addrfrom addrto ts_val =
     let urp_any = 0
         tcb = cb sock
         win = rcv_wnd (cb_rcv sock) -- `shiftR` (rcv_scale $ cb sock)
@@ -85,7 +84,8 @@ make_syn_ack_segment curr_time sock (addrfrom::TCPAddr) (addrto::TCPAddr) (ts_va
             }
     in mkTCPSegment' addrfrom addrto hdr bufferchain_empty
 
-make_ack_segment curr_time sock (fin::Bool) (ts_val::Timestamp) = 
+make_ack_segment :: Time -> TCPSocket t -> Bool -> Timestamp -> TCPSegment
+make_ack_segment curr_time sock fin ts_val =
     let urp_garbage = 0
         tcb = cb sock
         win = (rcv_wnd $ cb_rcv sock) `shiftR` (rcv_scale tcb)
@@ -103,13 +103,16 @@ make_ack_segment curr_time sock (fin::Bool) (ts_val::Timestamp) =
             }
     in mkTCPSegment' (local_addr tcb) (remote_addr tcb) hdr bufferchain_empty
 
-bsd_make_phantom_segment curr_time sock (addrfrom::TCPAddr) (addrto::TCPAddr) (ts_val::Timestamp) (cantsendmore::Bool) = 
+bsd_make_phantom_segment :: Time -> TCPSocket t -> TCPAddr -> TCPAddr
+                         -> Timestamp -> Bool -> TCPSegment
+bsd_make_phantom_segment curr_time sock addrfrom addrto ts_val cantsendmore =
     let urp_garbage = 0
         tcb = cb sock
         scb = cb_snd sock
         rcb = cb_rcv sock
-        win = (rcv_wnd rcb) `shiftR` (rcv_scale tcb)
-        fin = (cantsendmore && seq_lt (snd_una scb) (seq_minus (snd_max scb) 1))
+        win = rcv_wnd rcb `shiftR` rcv_scale tcb
+        fin = cantsendmore &&
+              seq_lt (snd_una scb) (seq_minus (snd_max scb) (1 :: Word32))
         ts = do_tcp_options curr_time (tf_req_tstmp tcb) (ts_recent $ cb_time sock) ts_val
         sn | fin       = snd_una scb
            | otherwise = snd_max scb
@@ -126,7 +129,8 @@ bsd_make_phantom_segment curr_time sock (addrfrom::TCPAddr) (addrto::TCPAddr) (t
     in
     mkTCPSegment' addrfrom addrto hdr bufferchain_empty
 
-make_rst_segment_from_cb sock (addrfrom::TCPAddr) (addrto::TCPAddr) = 
+make_rst_segment_from_cb :: TCPSocket t -> TCPAddr -> TCPAddr -> TCPSegment
+make_rst_segment_from_cb sock addrfrom addrto =
   let hdr = emptyTcpHeader
         { tcpSourcePort    = TcpPort 0
         , tcpDestPort      = TcpPort 0
@@ -137,12 +141,13 @@ make_rst_segment_from_cb sock (addrfrom::TCPAddr) (addrto::TCPAddr) =
         }
    in mkTCPSegment' addrfrom addrto hdr bufferchain_empty
 
-make_rst_segment_from_seg (seg::TCPSegment) =
+make_rst_segment_from_seg :: TCPSegment -> TCPSegment
+make_rst_segment_from_seg seg =
     let tcp_ACK' = not (tcp_ACK seg)
         seq' = if tcp_ACK seg then tcp_ack seg else 0
         ack' = if tcp_ACK'
                   then let s1 = tcp_seq seg
-                       in  s1 `seq_plus` bufc_length (tcp_data seg)
+                        in s1 `seq_plus` fromIntegral (bufc_length (tcp_data seg))
                               `seq_plus` (if tcp_SYN seg then 1 else 0)
                   else 0
 
@@ -157,13 +162,16 @@ make_rst_segment_from_seg (seg::TCPSegment) =
     mkTCPSegment' (tcp_src seg) (tcp_dst seg) hdr bufferchain_empty
 
 
-dropwithreset (seg::TCPSegment) =
+dropwithreset :: TCPSegment -> [IPMessage]
+dropwithreset seg =
     if tcp_RST seg then []
     else let seg' = make_rst_segment_from_seg seg
           in [TCPMessage seg']
 
-dropwithreset_ignore_or_fail = dropwithreset
+dropwithreset_ignore_or_fail :: TCPSegment -> [IPMessage]
+dropwithreset_ignore_or_fail  = dropwithreset
 
+tcp_close_temp :: TCPSocket t -> TCPSocket t
 tcp_close_temp sock =
     sock { cb = (cb sock) { cantrcvmore = True
                           , cantsndmore = True
@@ -208,6 +216,7 @@ alloc_local_port = do
    port:rest -> do put_host $ h { local_ports = rest }
                    return $ Just port
 
+free_local_port :: Port -> HMonad t ()
 free_local_port port =
   modify_host $ \h -> h { local_ports = port:(local_ports h) }
 

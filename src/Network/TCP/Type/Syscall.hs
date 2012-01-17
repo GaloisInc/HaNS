@@ -34,7 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 module Network.TCP.Type.Syscall 
 ( SocketID
 , TCPAddr
-, Buffer (..)
+, Buffer
 , SockReq (..)
 , SockRsp (..)
 )
