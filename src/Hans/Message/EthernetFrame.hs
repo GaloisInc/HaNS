@@ -2,18 +2,21 @@
 
 module Hans.Message.EthernetFrame (
     EtherType(..)
+  , parseEtherType, renderEtherType
+
   , EthernetFrame(..)
+  , parseEthernetFrame, renderEthernetFrame
   ) where
 
 import Hans.Address.Mac (Mac,parseMac,renderMac)
 
 import Control.Applicative ((<$>),(<*>))
 import Data.Serialize (Serialize(..))
-import Data.Serialize.Get (Get,getBytes,remaining,getWord16be)
-import Data.Serialize.Put (Putter,putByteString,putWord16be)
-import Data.ByteString (ByteString)
+import Data.Serialize.Get (Get,remaining,getWord16be,getBytes)
+import Data.Serialize.Put (Putter,putWord16be,putByteString)
 import Data.Word (Word16)
 import Numeric (showHex)
+import qualified Data.ByteString as S
 
 
 -- Ether Type ------------------------------------------------------------------
@@ -37,7 +40,7 @@ data EthernetFrame = EthernetFrame
   { etherDest   :: !Mac
   , etherSource :: !Mac
   , etherType   :: !EtherType
-  , etherData   :: ByteString
+  , etherData   :: S.ByteString
   } deriving (Eq,Show)
 
 instance Serialize EthernetFrame where
@@ -54,7 +57,7 @@ parseEthernetFrame
 
 renderEthernetFrame :: Putter EthernetFrame
 renderEthernetFrame frame = do
-  renderMac        (etherDest   frame)
-  renderMac        (etherSource frame)
-  renderEtherType  (etherType   frame)
-  putByteString    (etherData   frame)
+  renderMac         (etherDest   frame)
+  renderMac         (etherSource frame)
+  renderEtherType   (etherType   frame)
+  putByteString     (etherData   frame)

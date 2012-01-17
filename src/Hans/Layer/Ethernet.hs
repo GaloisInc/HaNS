@@ -29,12 +29,13 @@ import Hans.Utils (Packet,void,just)
 
 import Control.Concurrent (forkIO,ThreadId,killThread)
 import Control.Monad (mplus)
-import Data.Serialize (decode,encode)
+import Data.Serialize.Get (runGet)
+import Data.Serialize.Put (runPut)
 import MonadLib (get,set)
 import qualified Data.Map as Map
 
 
--- Messages --------------------------------------------------------------------
+-- Ethernet Layer --------------------------------------------------------------
 
 type Handler = Packet -> IO ()
 
@@ -47,6 +48,9 @@ type EthernetHandle = Channel (Eth ())
 runEthernetLayer :: EthernetHandle -> IO ()
 runEthernetLayer h =
   void (forkIO (loopLayer (emptyEthernetState h) (receive h) id))
+
+
+-- External Interface ----------------------------------------------------------
 
 sendEthernet :: EthernetHandle -> EthernetFrame -> IO ()
 sendEthernet h !frame = send h (handleOutgoing frame)
@@ -111,12 +115,13 @@ emptyEthernetState h = EthernetState
 self :: Eth EthernetHandle
 self = ethHandle `fmap` get
 
+
 -- Message Handling ------------------------------------------------------------
 
 -- | Handle an incoming packet, from a device.
 handleIncoming :: Packet -> Eth ()
 handleIncoming pkt = do
-  frame <- liftRight (decode pkt)
+  frame <- liftRight (runGet parseEthernetFrame pkt)
   h     <- getHandler (etherType frame)
   output (h (etherData frame))
 
@@ -140,7 +145,7 @@ setDevice mac dev = do
 handleOutgoing :: EthernetFrame -> Eth ()
 handleOutgoing frame = do
   dev <- getDevice (etherSource frame)
-  output (devTx dev (encode frame))
+  output (devTx dev (runPut (renderEthernetFrame frame)))
 
 
 -- | Add an ethernet device to the state.
