@@ -60,7 +60,8 @@ loopLayer i0 msg k = loop (LayerState 0 i0)
     a   <- msg
     now <- getPOSIXTime
     let res = runLayer (i {lsNow = now }) (k a)
-    X.evaluate res `X.catch` \ se -> print (se :: X.SomeException) >> return res
+    _ <- X.evaluate res `X.catch` \ se ->
+           print (se :: X.SomeException) >> return res
     case res of
       Error        m -> runAction m >> loop i
       Result i' () m -> runAction m >> loop i'
