@@ -29,6 +29,9 @@ import Data.Serialize (runGet,runPut)
 import MonadLib (BaseM(inBase),set,get)
 import qualified Data.Map as Map
 
+
+-- Arp -------------------------------------------------------------------------
+
 -- | A handle to a running arp layer.
 type ArpHandle = Channel (Arp ())
 
@@ -41,6 +44,8 @@ runArpLayer h eth th = do
   void (forkIO (loopLayer i (receive h) id))
 
 
+-- External Interface ----------------------------------------------------------
+
 -- | Lookup the hardware address associated with an IP address.
 arpWhoHas :: BaseM m IO => ArpHandle -> IP4 -> m (Maybe Mac)
 arpWhoHas h !ip = inBase $ do
@@ -48,13 +53,12 @@ arpWhoHas h !ip = inBase $ do
   send h (whoHas ip (putMVar var))
   takeMVar var
 
-
 -- | Send an IP packet via the arp layer, to resolve the underlying hardware
 -- addresses.
 arpIP4Packet :: ArpHandle -> IP4 -> IP4 -> Packet -> IO ()
 arpIP4Packet h !src !dst !pkt = send h (handleOutgoing src dst pkt)
 
-
+-- | Associate an address with a mac in the Arp layer.
 addLocalAddress :: ArpHandle -> IP4 -> Mac -> IO ()
 addLocalAddress h !ip !mac = send h (handleAddAddress ip mac)
 
@@ -177,8 +181,6 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
         mapM_ (sendArpPacket . msg) addrs
         th <- timerHandle
         output (delay th 10000 (send (arpSelf state) advanceArpTable))
-
--- Message Handling ------------------------------------------------------------
 
 -- | Process an incoming arp packet
 handleIncoming :: Packet -> Arp ()
