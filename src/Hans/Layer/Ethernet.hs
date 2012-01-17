@@ -25,21 +25,23 @@ import Hans.Address.Mac
 import Hans.Channel
 import Hans.Layer
 import Hans.Message.EthernetFrame
-import Hans.Utils (Packet,void,just)
+import Hans.Utils (void,just)
 
 import Control.Concurrent (forkIO,ThreadId,killThread)
 import Control.Monad (mplus)
 import Data.Serialize.Get (runGet)
-import Data.Serialize.Put (runPut)
+import Data.Serialize.Put (runPutLazy)
 import MonadLib (get,set)
-import qualified Data.Map as Map
+import qualified Data.ByteString.Lazy as L
+import qualified Data.Map             as Map
+import qualified Data.ByteString      as S
 
 
 -- Ethernet Layer --------------------------------------------------------------
 
-type Handler = Packet -> IO ()
+type Handler = S.ByteString -> IO ()
 
-type Tx = Packet -> IO ()
+type Tx = L.ByteString   -> IO ()
 type Rx = EthernetHandle -> IO ()
 
 type EthernetHandle = Channel (Eth ())
@@ -52,10 +54,10 @@ runEthernetLayer h =
 
 -- External Interface ----------------------------------------------------------
 
-sendEthernet :: EthernetHandle -> EthernetFrame -> IO ()
-sendEthernet h !frame = send h (handleOutgoing frame)
+sendEthernet :: EthernetHandle -> EthernetFrame -> L.ByteString -> IO ()
+sendEthernet h !frame body = send h (handleOutgoing frame body)
 
-queueEthernet :: EthernetHandle -> Packet -> IO ()
+queueEthernet :: EthernetHandle -> S.ByteString -> IO ()
 queueEthernet h !pkt = send h (handleIncoming pkt)
 
 startEthernetDevice :: EthernetHandle -> Mac -> IO ()
@@ -119,11 +121,11 @@ self = ethHandle `fmap` get
 -- Message Handling ------------------------------------------------------------
 
 -- | Handle an incoming packet, from a device.
-handleIncoming :: Packet -> Eth ()
+handleIncoming :: S.ByteString -> Eth ()
 handleIncoming pkt = do
-  frame <- liftRight (runGet parseEthernetFrame pkt)
-  h     <- getHandler (etherType frame)
-  output (h (etherData frame))
+  (hdr,body) <- liftRight (runGet parseEthernetFrame pkt)
+  h          <- getHandler (etherType hdr)
+  output (h body)
 
 
 -- | Get the device associated with a mac address.
@@ -142,10 +144,10 @@ setDevice mac dev = do
 
 
 -- | Send an outgoing ethernet frame via the device that it's associated with.
-handleOutgoing :: EthernetFrame -> Eth ()
-handleOutgoing frame = do
+handleOutgoing :: EthernetFrame -> L.ByteString -> Eth ()
+handleOutgoing frame body = do
   dev <- getDevice (etherSource frame)
-  output (devTx dev (runPut (renderEthernetFrame frame)))
+  output (devTx dev (runPutLazy (renderEthernetFrame frame body)))
 
 
 -- | Add an ethernet device to the state.

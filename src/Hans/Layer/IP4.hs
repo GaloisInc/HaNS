@@ -34,10 +34,11 @@ import Control.Concurrent (forkIO)
 import Control.Monad (guard,mplus,(<=<))
 import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
-import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString      as S
 
 
-type Handler = IP4 -> IP4 -> Packet -> IO ()
+type Handler = IP4 -> IP4 -> S.ByteString -> IO ()
 
 type IP4Handle = Channel (IP ())
 
@@ -56,7 +57,7 @@ withIP4Source h !dst k = send h (handleSource dst k)
 addIP4RoutingRule :: IP4Handle -> Rule IP4Mask IP4 -> IO ()
 addIP4RoutingRule h !rule = send h (handleAddRule rule)
 
-sendIP4Packet :: IP4Handle -> IP4Protocol -> IP4 -> Packet -> IO ()
+sendIP4Packet :: IP4Handle -> IP4Protocol -> IP4 -> L.ByteString -> IO ()
 sendIP4Packet h !prot !dst !pkt = send h (handleOutgoing prot dst pkt)
 
 addIP4Handler :: IP4Handle -> IP4Protocol -> Handler -> IO ()
@@ -97,30 +98,30 @@ emptyIP4State arp = IP4State
 arpHandle :: IP ArpHandle
 arpHandle  = ip4ArpHandle `fmap` get
 
-sendBytes :: IP4Protocol -> IP4 -> Packet -> IP ()
+sendBytes :: IP4Protocol -> IP4 -> L.ByteString -> IP ()
 sendBytes prot dst bs = do
   rule@(src,_,mtu) <- findRoute dst
   let hdr = emptyIP4Header prot src dst
-  hdr' <- if fromIntegral (S.length bs) + 20 < mtu
+  hdr' <- if fromIntegral (L.length bs) + 20 < mtu
     then return hdr
     else do
       i <- nextIdent
       return (setIdent i hdr)
-  sendPacket' (IP4Packet hdr' bs) rule
+  sendPacket' hdr' bs rule
 
-sendPacket :: IP4Packet -> IP ()
-sendPacket pkt = do
-  rule@(src,_,_) <- findRoute (ip4DestAddr (ip4Header pkt))
-  guard (src /= ip4SourceAddr (ip4Header pkt))
-  sendPacket' pkt rule
+sendPacket :: IP4Header -> L.ByteString -> IP ()
+sendPacket hdr body = do
+  rule@(src,_,_) <- findRoute (ip4DestAddr hdr)
+  guard (src /= ip4SourceAddr hdr)
+  sendPacket' hdr body rule
 
 -- | Send a packet using a given routing rule
-sendPacket' :: IP4Packet -> (IP4,IP4,Mtu) -> IP ()
-sendPacket' pkt (src,dst,mtu) = do
+sendPacket' :: IP4Header -> L.ByteString -> (IP4,IP4,Mtu) -> IP ()
+sendPacket' hdr body (src,dst,mtu) = do
   arp  <- arpHandle
   output $ do
-    let frags = splitPacket mtu pkt
-    mapM_ (arpIP4Packet arp src dst <=< renderIP4Packet) frags
+    let frags = splitPacket mtu hdr body
+    mapM_ (arpIP4Packet arp src dst <=< uncurry renderIP4Packet) frags
 
 
 -- | Find a route to an address
@@ -131,9 +132,8 @@ findRoute addr = do
 
 
 -- | Route a packet that is forwardable
-forward :: IP4Packet -> IP ()
-forward pkt = sendPacket pkt
-
+forward :: IP4Header -> L.ByteString -> IP ()
+forward  = sendPacket
 
 -- | Require that an address is local.
 localAddress :: IP4 -> IP ()
@@ -154,22 +154,22 @@ broadcastDestination ip = do
   guard (isBroadcast mask ip)
 
 -- | Route a message to a local handler
-routeLocal :: IP4Packet -> IP ()
-routeLocal pkt@(IP4Packet hdr _) = do
+routeLocal :: IP4Header -> S.ByteString -> IP ()
+routeLocal hdr body = do
   let dest = ip4DestAddr hdr
   localAddress dest `mplus` broadcastDestination dest
   h  <- getHandler (ip4Protocol hdr)
-  mb <- handleFragments pkt
+  mb <- handleFragments hdr body
   case mb of
+    Just bs -> output (h (ip4SourceAddr hdr) (ip4DestAddr hdr) (strict bs))
     Nothing -> return ()
-    Just bs -> output (h (ip4SourceAddr hdr) (ip4DestAddr hdr) bs)
 
 
-handleFragments :: IP4Packet -> IP (Maybe Packet)
-handleFragments pkt = do
+handleFragments :: IP4Header -> S.ByteString -> IP (Maybe L.ByteString)
+handleFragments hdr body = do
   state <- get
   now   <- time
-  let (table',mb) = processIP4Packet now (ip4Fragments state) pkt
+  let (table',mb) = processIP4Packet now (ip4Fragments state) hdr body
   table' `seq` set state { ip4Fragments = table' }
   return mb
 
@@ -183,13 +183,11 @@ nextIdent = do
 -- Message Handling ------------------------------------------------------------
 
 -- | Incoming packet from the network
-handleIncoming :: Packet -> IP ()
+handleIncoming :: S.ByteString -> IP ()
 handleIncoming bs = do
   (hdr,hlen,plen) <- liftRight (runGet parseIP4Packet bs)
   let (header,rest) = S.splitAt hlen bs
-  let payload       = S.take plen rest
   let checksum      = computeChecksum 0 header
-  let pkt           = IP4Packet hdr payload
   guard $ and
     [ S.length bs       >= 20
     , hlen              >= 20
@@ -198,13 +196,13 @@ handleIncoming bs = do
     ]
 
   -- forward?
-  routeLocal pkt `mplus` forward pkt
+  let payload = S.take plen rest
+  routeLocal hdr payload `mplus` forward hdr (chunk payload)
 
 
 -- | Outgoing packet
-handleOutgoing :: IP4Protocol -> IP4 -> Packet -> IP ()
-handleOutgoing prot dst bs = do
-  sendBytes prot dst bs
+handleOutgoing :: IP4Protocol -> IP4 -> L.ByteString -> IP ()
+handleOutgoing  = sendBytes
 
 
 handleAddRule :: Rule IP4Mask IP4 -> IP ()

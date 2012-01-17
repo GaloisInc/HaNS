@@ -6,10 +6,11 @@ import Hans.Utils
 import Hans.Utils.Checksum
 
 import Control.Applicative ((<$>))
-import Data.Serialize.Get (Get,getWord16be,getByteString,isolate,label)
-import Data.Serialize.Put (Putter,runPut,putWord16be,putByteString)
+import Data.Serialize.Get (Get,getWord16be,isolate,label,getBytes)
+import Data.Serialize.Put (Putter,runPut,putWord16be)
 import Data.Word (Word16)
-import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString      as S
 
 
 -- Udp Ports -------------------------------------------------------------------
@@ -26,18 +27,13 @@ renderUdpPort  = putWord16be . getUdpPort
 
 -- Udp Packets -----------------------------------------------------------------
 
-data UdpPacket = UdpPacket
-  { udpHeader  :: !UdpHeader
-  , udpPayload :: S.ByteString
-  } deriving Show
-
 data UdpHeader = UdpHeader
   { udpSourcePort :: !UdpPort
   , udpDestPort   :: !UdpPort
   , udpChecksum   :: !Word16
   } deriving Show
 
-parseUdpPacket :: Get UdpPacket
+parseUdpPacket :: Get (UdpHeader,S.ByteString)
 parseUdpPacket  = do
   src <- parseUdpPort
   dst <- parseUdpPort
@@ -45,27 +41,35 @@ parseUdpPacket  = do
   let len = fromIntegral b16
   label "UDPPacket" $ isolate (len - 6) $ do
     cs  <- getWord16be
-    bs  <- getByteString (len - 8)
+    bs  <- getBytes (len - 8)
     let hdr = UdpHeader
           { udpSourcePort = src
           , udpDestPort   = dst
           , udpChecksum   = cs
           }
-    return $! UdpPacket hdr bs
+    return (hdr,bs)
 
 -- | Given a way to make the pseudo header, render the UDP packet.
-renderUdpPacket :: UdpPacket -> MkPseudoHeader -> IO Packet
-renderUdpPacket (UdpPacket hdr bs) mk = pokeChecksum cs bytes 6
+renderUdpPacket :: UdpHeader -> L.ByteString -> MkPseudoHeader
+                -> IO L.ByteString
+renderUdpPacket hdr body mk = do
+  -- the checksum is 6 bytes into the rendered packet
+  hdrBytes' <- pokeChecksum cs hdrBytes 6
+  return (L.fromChunks [hdrBytes'] `L.append` body)
   where
-  hdrSize = 8
-  len     = S.length bs + hdrSize
-  ph      = mk len
-  pcs     = computePartialChecksum 0 ph
-  bytes   = runPut $ do
+  -- pseudo header
+  hdrSize  = 8
+  len      = fromIntegral (L.length body + hdrSize)
+  ph       = mk len
+  pcs      = computePartialChecksum 0 ph
+
+  -- real header
+  hdrBytes = runPut $ do
     renderUdpPort (udpSourcePort hdr)
     renderUdpPort (udpDestPort   hdr)
     putWord16be   (fromIntegral len)
     putWord16be 0 -- initial checksum
-    putByteString bs
-  -- the checksum is 6 bytes into the rendered packet
-  cs = computeChecksum pcs bytes
+
+  -- body, and final checksum
+  hcs = computePartialChecksum pcs hdrBytes
+  cs  = finalizeChecksum (computePartialChecksumLazy hcs body)

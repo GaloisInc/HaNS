@@ -25,9 +25,11 @@ import Hans.Utils
 
 import Control.Concurrent (forkIO,takeMVar,putMVar,newEmptyMVar)
 import Control.Monad (forM_,mplus,guard,unless,when)
-import Data.Serialize (runGet,runPut)
+import Data.Serialize (runGet,runPutLazy)
 import MonadLib (BaseM(inBase),set,get)
-import qualified Data.Map as Map
+import qualified Data.ByteString.Lazy as L
+import qualified Data.Map             as Map
+import qualified Data.ByteString      as S
 
 
 -- Arp -------------------------------------------------------------------------
@@ -55,7 +57,7 @@ arpWhoHas h !ip = inBase $ do
 
 -- | Send an IP packet via the arp layer, to resolve the underlying hardware
 -- addresses.
-arpIP4Packet :: ArpHandle -> IP4 -> IP4 -> Packet -> IO ()
+arpIP4Packet :: ArpHandle -> IP4 -> IP4 -> L.ByteString -> IO ()
 arpIP4Packet h !src !dst !pkt = send h (handleOutgoing src dst pkt)
 
 -- | Associate an address with a mac in the Arp layer.
@@ -139,9 +141,9 @@ sendArpPacket msg = do
         { etherSource = arpSHA msg
         , etherDest   = arpTHA msg
         , etherType   = 0x0806
-        , etherData   = runPut (renderArpPacket renderMac renderIP4 msg)
         }
-  output (sendEthernet eth frame)
+      body = runPutLazy (renderArpPacket renderMac renderIP4 msg)
+  output (sendEthernet eth frame body)
 
 advanceArpTable :: Arp ()
 advanceArpTable  = do
@@ -183,7 +185,7 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
         output (delay th 10000 (send (arpSelf state) advanceArpTable))
 
 -- | Process an incoming arp packet
-handleIncoming :: Packet -> Arp ()
+handleIncoming :: S.ByteString -> Arp ()
 handleIncoming bs = do
   msg <- liftRight (runGet (parseArpPacket parseMac parseIP4) bs)
   -- ?Do I have the hardware type in ar$hrd
@@ -231,16 +233,15 @@ handleAddAddress ip mac = do
 
 
 -- | Output a packet to the ethernet layer.
-handleOutgoing :: IP4 -> IP4 -> Packet -> Arp ()
-handleOutgoing src dst bs = do
+handleOutgoing :: IP4 -> IP4 -> L.ByteString -> Arp ()
+handleOutgoing src dst body = do
   eth <- ethernetHandle
   lha <- localHwAddress src
   let frame dha = EthernetFrame
         { etherDest   = dha
         , etherSource = lha
         , etherType   = 0x0800
-        , etherData   = bs
         }
   whoHas dst $ \ res -> case res of
     Nothing  -> return ()
-    Just dha -> sendEthernet eth (frame dha)
+    Just dha -> sendEthernet eth (frame dha) body

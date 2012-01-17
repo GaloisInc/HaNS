@@ -4,7 +4,6 @@ module Hans.Message.Icmp4 where
 
 import Hans.Address.IP4 (IP4)
 import Hans.Message.Types (Lifetime,parseLifetime,renderLifetime)
-import Hans.Utils (Packet)
 import Hans.Utils.Checksum (pokeChecksum, computeChecksum)
 
 import Control.Monad (liftM2, unless, when, replicateM)
@@ -15,21 +14,22 @@ import Data.Serialize.Put (Putter, putWord8,putByteString, Put, runPut)
 import Data.Int (Int32)
 import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
+import qualified Data.ByteString as S
 
 
 -- General ICMP Packets --------------------------------------------------------
 
 data Icmp4Packet
   -- RFC 792 - Internet Control Message Protocol
-  = EchoReply Identifier SequenceNumber Packet
-  | DestinationUnreachable DestinationUnreachableCode Packet
-  | SourceQuench Packet
-  | Redirect RedirectCode IP4 Packet
-  | Echo Identifier SequenceNumber Packet
+  = EchoReply Identifier SequenceNumber S.ByteString
+  | DestinationUnreachable DestinationUnreachableCode S.ByteString
+  | SourceQuench S.ByteString
+  | Redirect RedirectCode IP4 S.ByteString
+  | Echo Identifier SequenceNumber S.ByteString
   | RouterAdvertisement Lifetime [RouterAddress]
   | RouterSolicitation
-  | TimeExceeded TimeExceededCode Packet
-  | ParameterProblem Word8 Packet
+  | TimeExceeded TimeExceededCode S.ByteString
+  | ParameterProblem Word8 S.ByteString
   | Timestamp Identifier SequenceNumber Word32 Word32 Word32
   | TimestampReply Identifier SequenceNumber Word32 Word32 Word32
   | Information Identifier SequenceNumber

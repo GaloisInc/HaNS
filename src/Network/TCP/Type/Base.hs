@@ -225,9 +225,7 @@ bufc_length :: BufferChain -> Int
 bufc_length  = fromIntegral . L.length
 
 bufferchain_empty = L.empty
-bufferchain_singleton b
-  | S.null b  = L.empty
-  | otherwise = L.fromChunks [b]
+bufferchain_singleton b = L.fromChunks [b]
 
 bufferchain_add bs bc = bufferchain_singleton bs `L.append` bc
 

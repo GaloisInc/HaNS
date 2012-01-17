@@ -4,17 +4,22 @@ module Hans.Message.Tcp where
 
 import Hans.Address.IP4 (IP4)
 import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
-import Hans.Utils.Checksum (computePartialChecksum,computeChecksum,pokeChecksum)
+import Hans.Utils (chunk)
+import Hans.Utils.Checksum
+    (finalizeChecksum,computePartialChecksum,computeChecksum,pokeChecksum
+    ,computePartialChecksumLazy)
 
 import Control.Monad (when,unless,ap)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
 import Data.List (foldl',find)
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
-    ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut)
+    ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut
+    ,putLazyByteString)
 import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
-import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString      as S
 
 
 -- Tcp Support Types -----------------------------------------------------------
@@ -393,34 +398,31 @@ putUnknown ty len body = do
 
 -- Tcp Packet ------------------------------------------------------------------
 
-data TcpPacket = TcpPacket
-  { tcpHeader :: !TcpHeader
-  , tcpBody   :: !S.ByteString
-  } deriving Show
-
 -- | Parse a TcpPacket.
-getTcpPacket :: Get TcpPacket
+getTcpPacket :: Get (TcpHeader,S.ByteString)
 getTcpPacket  = do
   pktLen       <- remaining
   (hdr,hdrLen) <- getTcpHeader
   body         <- getBytes (pktLen - hdrLen)
-  return (TcpPacket hdr body)
+  return (hdr,body)
 
 -- | Render out a TcpPacket, without calculating its checksum.
-putTcpPacket :: Putter TcpPacket
-putTcpPacket (TcpPacket hdr body) = do
+putTcpPacket :: TcpHeader -> L.ByteString -> Put
+putTcpPacket hdr body = do
   putTcpHeader hdr
-  putByteString body
+  putLazyByteString body
 
 -- | Calculate the checksum of a TcpHeader, and its body.
-renderWithTcpChecksumIP4 :: IP4 -> IP4 -> TcpPacket -> S.ByteString
-renderWithTcpChecksumIP4 src dst pkt@(TcpPacket _ body) = hdrbs `S.append` body
+renderWithTcpChecksumIP4 :: IP4 -> IP4 -> TcpHeader -> L.ByteString
+                         -> L.ByteString
+renderWithTcpChecksumIP4 src dst hdr body = chunk hdrbs `L.append` body
   where
-  (hdrbs,_) = computeTcpChecksumIP4 src dst pkt
+  (hdrbs,_) = computeTcpChecksumIP4 src dst hdr body
 
 -- | Calculate the checksum of a tcp packet, and return its rendered header.
-computeTcpChecksumIP4 :: IP4 -> IP4 -> TcpPacket -> (S.ByteString,Word16)
-computeTcpChecksumIP4 src dst (TcpPacket hdr body) =
+computeTcpChecksumIP4 :: IP4 -> IP4 -> TcpHeader -> L.ByteString
+                      -> (S.ByteString,Word16)
+computeTcpChecksumIP4 src dst hdr body =
   -- this is safe, as the header bytestring that gets modified is modified at
   -- its creation time.
   (cs `seq` unsafePerformIO (pokeChecksum cs hdrbs 16), cs)
@@ -428,9 +430,9 @@ computeTcpChecksumIP4 src dst (TcpPacket hdr body) =
   hdrbs = runPut (putTcpHeader hdr { tcpChecksum = 0 })
   phcs  = computePartialChecksum 0
         $ mkIP4PseudoHeader src dst tcpProtocol
-        $ S.length hdrbs + S.length body
+        $ S.length hdrbs + fromIntegral (L.length body)
   hdrcs = computePartialChecksum phcs hdrbs
-  cs    = computeChecksum hdrcs body
+  cs    = finalizeChecksum (computePartialChecksumLazy hdrcs body)
 
 -- | Re-create the checksum, minimizing duplication of the original, rendered
 -- TCP packet.

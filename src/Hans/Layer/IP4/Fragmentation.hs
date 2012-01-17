@@ -4,12 +4,13 @@ module Hans.Layer.IP4.Fragmentation where
 import Hans.Address
 import Hans.Address.IP4
 import Hans.Message.Ip4
-import Hans.Utils
+import Hans.Utils (chunk)
 
 import Data.Ord (comparing)
 import Data.Time.Clock.POSIX (POSIXTime)
-import qualified Data.ByteString as S
-import qualified Data.Map        as Map
+import qualified Data.ByteString.Lazy as L
+import qualified Data.Map             as Map
+import qualified Data.ByteString      as S
 
 
 type FragmentationTable addr = Map.Map (Ident,addr,addr) Fragments
@@ -27,7 +28,7 @@ data Fragments = Fragments
 data Fragment = Fragment
   { fragmentOffset  :: !Int
   , fragmentLength  :: !Int
-  , fragmentPayload :: !Packet
+  , fragmentPayload :: L.ByteString
   } deriving (Eq,Show)
 
 instance Ord Fragment where
@@ -54,7 +55,7 @@ combineFragments :: Fragment -> Fragment -> Fragment
 combineFragments f g = Fragment (fragmentOffset f) len pay
   where
   len = fragmentLength f + fragmentLength g
-  pay = fragmentPayload f `S.append` fragmentPayload g
+  pay = fragmentPayload f `L.append` fragmentPayload g
 
 
 -- | Given a group of fragments, a new fragment, and a possible total size,
@@ -81,27 +82,30 @@ addFragment f fs = case fs of
 -- is itself a fully-complete packet.
 processFragment :: Address addr
                 => POSIXTime -> FragmentationTable addr -> Bool -> Int
-                -> addr -> addr -> Ident -> Packet
-                -> (FragmentationTable addr, Maybe Packet)
-processFragment _   table False   0   _   _    _     bs = (table, Just bs)
-processFragment now table areMore off src dest ident bs = case group of
-  Fragments _ x [Fragment 0 y bs']
-    | x == y -> (Map.delete entry table, Just bs')
-  _          -> (Map.insert entry group table, Nothing)
+                -> addr -> addr -> Ident -> S.ByteString
+                -> (FragmentationTable addr, Maybe L.ByteString)
+processFragment _   table False   0   _   _    _     bs =
+  (table, Just (chunk bs))
+processFragment now table areMore off src dest ident bs =
+  case group of
+    Fragments _ x [Fragment 0 y bs']
+      | x == y -> (Map.delete entry table, Just bs')
+    _          -> (Map.insert entry group table, Nothing)
   where
   entry = (ident,src,dest)
   group = case Map.lookup (ident,src,dest) table of
     Nothing -> Fragments now newTotalLen [cur]
     Just g  -> expandGroup g cur newTotalLen
-  curlen = fromIntegral (S.length bs)
-  cur    = Fragment off curlen bs
+  curlen = S.length bs
+  cur    = Fragment off curlen (chunk bs)
   newTotalLen | areMore   = -1
               | otherwise = off + curlen
 
 
-processIP4Packet :: POSIXTime -> FragmentationTable IP4 -> IP4Packet
-                 -> (FragmentationTable IP4, Maybe Packet)
-processIP4Packet now table (IP4Packet hdr bs) =
+processIP4Packet :: POSIXTime -> FragmentationTable IP4
+                 -> IP4Header -> S.ByteString
+                 -> (FragmentationTable IP4, Maybe L.ByteString)
+processIP4Packet now table hdr bs =
   processFragment now table areMore off src dest ident bs
   where
   off     = fromIntegral (ip4FragmentOffset hdr)

@@ -7,12 +7,16 @@ import Hans.Utils
 import Hans.Utils.Checksum
 
 import Control.Monad (unless)
+import Data.Int (Int64)
 import Data.Serialize (Serialize(..))
-import Data.Serialize.Get (Get,getWord8,getWord16be,getByteString,isolate,label)
-import Data.Serialize.Put (runPut,runPutM,putWord8,putWord16be,putByteString)
+import Data.Serialize.Get
+    (Get,getWord8,getWord16be,isolate,label,getByteString)
+import Data.Serialize.Put
+    (runPut,putWord8,putWord16be,putByteString)
 import Data.Bits (Bits((.&.),(.|.),testBit,setBit,shiftR,shiftL,bit))
 import Data.Word (Word8,Word16)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 -- IP4 Pseudo Header -----------------------------------------------------------
@@ -39,11 +43,6 @@ newtype Ident = Ident { getIdent :: Word16 }
 
 newtype IP4Protocol = IP4Protocol { getIP4Protocol :: Word8 }
   deriving (Eq,Ord,Num,Show,Serialize)
-
-data IP4Packet = IP4Packet
-  { ip4Header  :: !IP4Header
-  , ip4Payload :: S.ByteString
-  } deriving Show
 
 data IP4Header = IP4Header
   { ip4Version        :: !Word8
@@ -91,9 +90,9 @@ setIdent i hdr = hdr { ip4Ident = i }
 
 
 -- | Calculate the size of an IP4 packet
-ip4PacketSize :: IP4Packet -> Int
-ip4PacketSize (IP4Packet hdr bs) =
-  ip4HeaderSize hdr + fromIntegral (S.length bs)
+ip4PacketSize :: IP4Header -> L.ByteString -> Int
+ip4PacketSize hdr bs =
+  ip4HeaderSize hdr + fromIntegral (L.length bs)
 
 -- | Calculate the size of an IP4 header
 ip4HeaderSize :: IP4Header -> Int
@@ -101,27 +100,27 @@ ip4HeaderSize hdr = 20 + sum (map ip4OptionSize (ip4Options hdr))
 
 
 -- | Fragment a single IP packet into one or more, given an MTU to fit into.
-splitPacket :: Int -> IP4Packet -> [IP4Packet]
-splitPacket mtu pkt
-  | ip4PacketSize pkt > mtu = fragmentPacket mtu' pkt
-  | otherwise               = [pkt]
-  where
-  mtu' = fromIntegral (mtu - ip4HeaderSize (ip4Header pkt))
+splitPacket :: Int -> IP4Header -> L.ByteString -> [(IP4Header,L.ByteString)]
+splitPacket mtu hdr bs
+  | ip4PacketSize hdr bs <= mtu = [(hdr,bs)]
+  | otherwise                   = fragmentPacket (fromIntegral mtu) hdr bs
 
 
 -- | Given a fragment size and a packet, fragment the packet into multiple
 -- smaller ones.
-fragmentPacket :: Int -> IP4Packet -> [IP4Packet]
-fragmentPacket mtu pkt@(IP4Packet hdr bs)
-  | payloadLen <= mtu = [pkt { ip4Header = noMoreFragments hdr }]
-  | otherwise         = frag : fragmentPacket mtu pkt'
+fragmentPacket :: Int64 -> IP4Header -> L.ByteString
+               -> [(IP4Header,L.ByteString)]
+fragmentPacket mtu = loop
   where
-  payloadLen = S.length bs
-  (as,rest)  = S.splitAt mtu bs
-  alen       = fromIntegral (S.length as)
-  pkt'       = pkt { ip4Header = hdr', ip4Payload = rest }
-  hdr'       = addOffset alen hdr
-  frag       = pkt { ip4Header = moreFragments hdr, ip4Payload = as }
+  loop hdr bs
+    | payloadLen <= mtu = [(noMoreFragments hdr, bs)]
+    | otherwise         = frag : loop hdr' rest
+    where
+    payloadLen = L.length bs
+    (as,rest)  = L.splitAt mtu bs
+    alen       = fromIntegral (L.length as)
+    hdr'       = addOffset alen hdr
+    frag       = (moreFragments hdr, as)
 
 
 --  0                   1                   2                   3   
@@ -177,14 +176,14 @@ parseIP4Packet = do
 
 
 -- | The final step to render an IP header and its payload out as a bytestring.
-renderIP4Packet :: IP4Packet -> IO Packet
-renderIP4Packet (IP4Packet hdr pkt) = do
-  let (len,bs) = runPutM $ do
+renderIP4Packet :: IP4Header -> L.ByteString -> IO L.ByteString
+renderIP4Packet hdr pkt = do
+  let hdrBytes = runPut $ do
         let (optbs,optlen) = renderOptions (ip4Options hdr)
         let ihl            = 20 + optlen
         putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
         putWord8    (ip4TypeOfService hdr)
-        putWord16be (fromIntegral (S.length pkt) + fromIntegral ihl)
+        putWord16be (fromIntegral (L.length pkt) + fromIntegral ihl)
 
         put (ip4Ident hdr)
         let frag | ip4MayFragment hdr = (`setBit` 1)
@@ -205,11 +204,11 @@ renderIP4Packet (IP4Packet hdr pkt) = do
 
         putByteString optbs
 
-        putByteString pkt
+  let hdrCs = computePartialChecksum 0 hdrBytes
+      pktCs = finalizeChecksum (computePartialChecksumLazy hdrCs pkt)
 
-        return ihl
-  let cs = computeChecksum 0 (S.take (fromIntegral len) bs)
-  pokeChecksum cs bs 10
+  hdrBytes' <- pokeChecksum pktCs hdrBytes 10
+  return (L.fromChunks [hdrBytes'] `L.append` pkt)
 
 
 -- IP4 Options -----------------------------------------------------------------

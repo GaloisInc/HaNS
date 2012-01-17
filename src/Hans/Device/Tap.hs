@@ -3,7 +3,7 @@
 module Hans.Device.Tap where
 
 import Hans.Layer.Ethernet
-import Hans.Utils
+import Hans.Utils (strict,DeviceName)
 
 import Control.Concurrent (threadWaitRead)
 import Control.Monad (forever)
@@ -15,6 +15,7 @@ import Foreign.Ptr (Ptr)
 import System.Posix.Types (Fd)
 import qualified Data.ByteString          as S
 import qualified Data.ByteString.Internal as S
+import qualified Data.ByteString.Lazy     as L
 
 
 
@@ -27,9 +28,11 @@ openTapDevice name = withCString name $ \str -> do
 
 
 -- | Send an ethernet frame via a tap device.
-tapSend :: Fd -> Packet -> IO ()
+--
+-- TODO: make more use of the lazy bytestring
+tapSend :: Fd -> L.ByteString -> IO ()
 tapSend fd packet = do
-  let (fptr, 0, len) = S.toForeignPtr packet
+  let (fptr, 0, len) = S.toForeignPtr (strict packet)
   _res <- withForeignPtr fptr $ \ptr -> c_write fd ptr (fromIntegral len)
   -- XXX: make sure to continue sending if res < len
   return ()
@@ -42,7 +45,7 @@ tapReceiveLoop fd eh = forever (k =<< tapReceive fd)
 
 
 -- | Recieve an ethernet frame from a tap device.
-tapReceive :: Fd -> IO Packet
+tapReceive :: Fd -> IO S.ByteString
 tapReceive fd = do
   threadWaitRead fd
   let packet ptr = fromIntegral `fmap` c_read fd ptr 1514

@@ -18,10 +18,11 @@ import Hans.Message.Udp
 import Hans.Setup
 
 import Control.Monad (guard)
-import Data.Serialize (runGet,runPut)
+import Data.Serialize (runGet,runPutLazy)
 import Data.Maybe (fromMaybe)
 import System.Random (randomIO)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 -- Protocol Constants ----------------------------------------------------------
@@ -183,29 +184,26 @@ ackNsOptions ack =
 sendMessage :: NetworkStack -> Dhcp4Message -> IP4 -> IP4 -> Mac -> IO ()
 sendMessage ns resp src dst hwdst = do
   ipBytes <- mkIpBytes src dst bootpc bootps
-      (runPut (putDhcp4Message resp))
+      (runPutLazy (putDhcp4Message resp))
   let mac   = dhcp4ClientHardwareAddr resp
   let frame = EthernetFrame
         { etherDest         = hwdst
         , etherSource       = mac
         , etherType         = ethernetIp4
-        , etherData         = ipBytes
         }
   putStrLn (show mac ++ " -> " ++ show hwdst)
 
-  sendEthernet (nsEthernet ns) frame
+  sendEthernet (nsEthernet ns) frame ipBytes
 
-mkIpBytes :: IP4 -> IP4 -> UdpPort -> UdpPort -> S.ByteString -> IO S.ByteString
+mkIpBytes :: IP4 -> IP4 -> UdpPort -> UdpPort -> L.ByteString -> IO L.ByteString
 mkIpBytes srcAddr dstAddr srcPort dstPort payload = do
   udpBytes <- do
     let udpHdr = UdpHeader srcPort dstPort 0
-        udp    = UdpPacket udpHdr payload
         mk     = mkIP4PseudoHeader srcAddr dstAddr udpProtocol
-    renderUdpPacket udp mk
+    renderUdpPacket udpHdr payload mk
 
   ipBytes  <- do
-    let ipHdr  = emptyIP4Header udpProtocol srcAddr dstAddr
-        ip     = IP4Packet ipHdr udpBytes
-    renderIP4Packet ip
+    let ipHdr = emptyIP4Header udpProtocol srcAddr dstAddr
+    renderIP4Packet ipHdr udpBytes
 
   return ipBytes

@@ -61,10 +61,12 @@ where
 
 import Hans.Address.IP4 (IP4,convertToWord32)
 import Hans.Message.Tcp
-    (TcpHeader(..),TcpPacket(..),TcpPort(..),TcpAckNum(..),TcpSeqNum(..)
-    ,findTcpOption,setTcpOption,TcpOptionTag(..),TcpOption(..))
+    (TcpHeader(..),TcpPort(..),TcpAckNum(..),TcpSeqNum(..),findTcpOption
+    ,setTcpOption,TcpOptionTag(..),TcpOption(..))
 
 import Network.TCP.Type.Base
+
+import qualified Data.ByteString as S
 
 data TCPSegment = TCPSegment
   { tcp_src    :: !TCPAddr
@@ -73,8 +75,8 @@ data TCPSegment = TCPSegment
   , tcp_data   :: !BufferChain
   }
 
-mkTCPSegment :: IP4 -> IP4 -> TcpPacket -> TCPSegment
-mkTCPSegment src dst (TcpPacket hdr body) = TCPSegment
+mkTCPSegment :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> TCPSegment
+mkTCPSegment src dst hdr body = TCPSegment
   { tcp_src    = TCPAddr (IPAddr (convertToWord32 src),srcP)
   , tcp_dst    = TCPAddr (IPAddr (convertToWord32 dst),dstP)
   , tcp_header = hdr

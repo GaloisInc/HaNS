@@ -11,7 +11,9 @@
 -- complement of the one's complement sum of the data).
 module Hans.Utils.Checksum(
          computeChecksum
+       , finalizeChecksum
        , computePartialChecksum
+       , computePartialChecksumLazy
        , clearChecksum
        , pokeChecksum
        )
@@ -19,8 +21,10 @@ module Hans.Utils.Checksum(
 
 import Control.Exception (assert)
 import Data.Bits (Bits(shiftL,shiftR,complement,clearBit,(.&.),rotate))
+import Data.List (foldl')
 import Data.Word (Word8,Word16,Word32)
 import Foreign.Storable (pokeByteOff)
+import qualified Data.ByteString.Lazy   as L
 import qualified Data.ByteString        as S
 import qualified Data.ByteString.Unsafe as S
 
@@ -37,10 +41,16 @@ pokeChecksum cs b off = S.unsafeUseAsCStringLen b $ \(ptr,len) -> do
   assert (off < len + 1) (pokeByteOff ptr off (rotate cs 8))
   return b
 
+finalizeChecksum :: Word32 -> Word16
+finalizeChecksum  = complement . fromIntegral . fold32 . fold32
+
 -- | Compute the final checksum, using the given initial value.
 computeChecksum :: Word32 -> S.ByteString -> Word16
-computeChecksum c0 =
-  complement . fromIntegral . fold32 . fold32 . computePartialChecksum c0
+computeChecksum c0 = finalizeChecksum . computePartialChecksum c0
+
+-- | Compute the checksum of a lazy bytestring.
+computePartialChecksumLazy :: Word32 -> L.ByteString -> Word32
+computePartialChecksumLazy c0 = foldl' computePartialChecksum c0 . L.toChunks
 
 -- | Compute a partial checksum, yielding a value suitable to be passed to
 -- computeChecksum.

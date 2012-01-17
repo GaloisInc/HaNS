@@ -11,12 +11,12 @@ module Hans.Message.EthernetFrame (
 import Hans.Address.Mac (Mac,parseMac,renderMac)
 
 import Control.Applicative ((<$>),(<*>))
-import Data.Serialize (Serialize(..))
 import Data.Serialize.Get (Get,remaining,getWord16be,getBytes)
-import Data.Serialize.Put (Putter,putWord16be,putByteString)
+import Data.Serialize.Put (Putter,Put,putWord16be,putLazyByteString)
 import Data.Word (Word16)
 import Numeric (showHex)
-import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString      as S
 
 
 -- Ether Type ------------------------------------------------------------------
@@ -40,24 +40,19 @@ data EthernetFrame = EthernetFrame
   { etherDest   :: !Mac
   , etherSource :: !Mac
   , etherType   :: !EtherType
-  , etherData   :: S.ByteString
   } deriving (Eq,Show)
 
-instance Serialize EthernetFrame where
-  get = parseEthernetFrame
-  put = renderEthernetFrame
+parseEthernetFrame :: Get (EthernetFrame,S.ByteString)
+parseEthernetFrame = (,) <$> header <*> (getBytes =<< remaining)
+  where
+  header =  EthernetFrame
+        <$> parseMac
+        <*> parseMac
+        <*> parseEtherType
 
-parseEthernetFrame :: Get EthernetFrame
-parseEthernetFrame
-   =  EthernetFrame
-  <$> parseMac
-  <*> parseMac
-  <*> parseEtherType
-  <*> (getBytes =<< remaining)
-
-renderEthernetFrame :: Putter EthernetFrame
-renderEthernetFrame frame = do
+renderEthernetFrame :: EthernetFrame -> L.ByteString -> Put
+renderEthernetFrame frame body = do
   renderMac         (etherDest   frame)
   renderMac         (etherSource frame)
   renderEtherType   (etherType   frame)
-  putByteString     (etherData   frame)
+  putLazyByteString body

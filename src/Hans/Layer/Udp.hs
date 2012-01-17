@@ -26,9 +26,11 @@ import Hans.Utils
 import Control.Concurrent (forkIO)
 import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString      as S
 
 
-type Handler = IP4 -> UdpPort -> Packet -> IO ()
+type Handler = IP4 -> UdpPort -> S.ByteString -> IO ()
 
 type UdpHandle = Channel (Udp ())
 
@@ -40,10 +42,10 @@ runUdpLayer h ip4 icmp4 = do
   addIP4Handler ip4 udpProtocol (queueUdp h)
   void (forkIO (loopLayer (emptyUdp4State ip4 icmp4) (receive h) id))
 
-sendUdp :: UdpHandle -> IP4 -> Maybe UdpPort -> UdpPort -> Packet -> IO ()
+sendUdp :: UdpHandle -> IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> IO ()
 sendUdp h !dst mb !dp !bs = send h (handleOutgoing dst mb dp bs)
 
-queueUdp :: UdpHandle -> IP4 -> IP4 -> Packet -> IO ()
+queueUdp :: UdpHandle -> IP4 -> IP4 -> S.ByteString -> IO ()
 queueUdp h !src !dst !bs = send h (handleIncoming src dst bs)
 
 addUdpHandler :: UdpHandle -> UdpPort -> Handler -> IO ()
@@ -110,18 +112,18 @@ handleRemoveHandler sp = do
   removeHandler sp
 
 
-handleIncoming :: IP4 -> IP4 -> Packet -> Udp ()
+handleIncoming :: IP4 -> IP4 -> S.ByteString -> Udp ()
 handleIncoming src _dst bs = do
-  UdpPacket hdr pkt <- liftRight (runGet parseUdpPacket bs)
-  h                 <- getHandler (udpDestPort hdr)
+  (hdr,pkt) <- liftRight (runGet parseUdpPacket bs)
+  h         <- getHandler (udpDestPort hdr)
   output (h src (udpSourcePort hdr) pkt)
 
 
-handleOutgoing :: IP4 -> Maybe UdpPort -> UdpPort -> Packet -> Udp ()
+handleOutgoing :: IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> Udp ()
 handleOutgoing dst mb dp bs = do
   sp  <- maybePort mb
   ip4 <- ip4Handle
-  let udp = UdpPacket (UdpHeader sp dp 0) bs
+  let hdr = UdpHeader sp dp 0
   output $ withIP4Source ip4 dst $ \ src -> do
-    pkt <- renderUdpPacket udp (mkIP4PseudoHeader src dst udpProtocol)
+    pkt <- renderUdpPacket hdr bs (mkIP4PseudoHeader src dst udpProtocol)
     sendIP4Packet ip4 udpProtocol dst pkt

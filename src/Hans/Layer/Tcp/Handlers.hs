@@ -11,11 +11,11 @@ import Hans.Layer.Tcp.Monad
     (Tcp,TcpState(..),ip4Handle,ip4Handle,ip4Handle,ip4Handle)
 import Hans.Layer.Timer (udelay)
 import Hans.Message.Tcp
-    (tcpProtocol,renderWithTcpChecksumIP4,TcpPacket(..),getTcpPacket
-    ,recreateTcpChecksumIP4,TcpHeader(..))
+    (tcpProtocol,renderWithTcpChecksumIP4,getTcpPacket,recreateTcpChecksumIP4
+    ,TcpHeader(..))
 
 import Network.TCP.LTS.In (tcp_deliver_in_packet)
-import Network.TCP.Type.Base (get_ip,bufferchain_collapse,IPAddr(..))
+import Network.TCP.Type.Base (get_ip,IPAddr(..))
 import Network.TCP.Type.Datagram
     (ICMPDatagram(..),UDPDatagram(..),TCPSegment(..),IPMessage(..)
     ,mkTCPSegment)
@@ -31,9 +31,9 @@ import qualified Data.ByteString as S
 handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
   let cs = recreateTcpChecksumIP4 src dst bytes
-  pkt@(TcpPacket hdr _body) <- liftRight (runGet getTcpPacket bytes)
+  (hdr,body) <- liftRight (runGet getTcpPacket bytes)
   guard (tcpChecksum hdr == cs)
-  tcp_deliver_in_packet (mkTCPSegment src dst pkt)
+  tcp_deliver_in_packet (mkTCPSegment src dst hdr body)
 
 -- | Force packets out of the pure layer.
 handleOutgoing :: Tcp ()
@@ -60,8 +60,7 @@ deliverTCPSegment seg = do
       dstAddr    = convertFromWord32 dst
   ip4 <- ip4Handle
   output $ withIP4Source ip4 dstAddr $ \ srcAddr -> do
-    body <- bufferchain_collapse (tcp_data seg)
-    let pkt = renderWithTcpChecksumIP4 srcAddr dstAddr (TcpPacket hdr body)
+    let pkt = renderWithTcpChecksumIP4 srcAddr dstAddr hdr (tcp_data seg)
     sendIP4Packet ip4 tcpProtocol dstAddr pkt
 
 deliverICMPDatagram :: ICMPDatagram -> Tcp ()

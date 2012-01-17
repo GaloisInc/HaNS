@@ -230,7 +230,9 @@ try_send d cont =
           let max_can_send = freebsd_so_sndbuf - (bufc_length $ sndq $ cb_snd sock)
               num_to_send = min max_can_send (buf_len d)
               (d1,d2) = buffer_split num_to_send d
-          modify_cb_snd $ \c -> c { sndq = (sndq c) `bufferchain_append` d1 }
+          modify_cb_snd $ \c -> c
+             { sndq = sndq c `bufferchain_append` d1
+             }
           --if (bufc_length (sndq $ cb_snd $ sock) == 0) then
           --    modify_cb_rcv $ \c -> c { tt_delack = True }
           -- else
