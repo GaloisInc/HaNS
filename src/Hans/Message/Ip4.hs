@@ -174,41 +174,45 @@ parseIP4Packet = do
           }
     return (hdr, fromIntegral ihl, fromIntegral len)
 
+renderIP4Header :: IP4Header -> Int -> Put
+renderIP4Header hdr pktlen = do
+  let (optbs,optlen) = renderOptions (ip4Options hdr)
+  let ihl            = 20 + optlen
+  putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
+  putWord8    (ip4TypeOfService hdr)
+  putWord16be (fromIntegral pktlen + fromIntegral ihl)
+
+  put (ip4Ident hdr)
+  let frag | ip4MayFragment hdr = (`setBit` 1)
+           | otherwise          = id
+  let morefrags | ip4MoreFragments hdr = (`setBit` 0)
+                | otherwise            = id
+  let flags = frag (morefrags 0)
+  let off   = ip4FragmentOffset hdr `div` 8
+  putWord16be (flags `shiftL` 13 .|. off .&. 0x1fff)
+
+  putWord8    (ip4TimeToLive hdr)
+  put         (ip4Protocol hdr)
+  putWord16be 0 -- checksum
+
+  put (ip4SourceAddr hdr)
+
+  put (ip4DestAddr hdr)
+
+  putByteString optbs
+
 
 -- | The final step to render an IP header and its payload out as a bytestring.
 renderIP4Packet :: IP4Header -> L.ByteString -> IO L.ByteString
 renderIP4Packet hdr pkt = do
-  let hdrBytes = runPut $ do
-        let (optbs,optlen) = renderOptions (ip4Options hdr)
-        let ihl            = 20 + optlen
-        putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
-        putWord8    (ip4TypeOfService hdr)
-        putWord16be (fromIntegral (L.length pkt) + fromIntegral ihl)
 
-        put (ip4Ident hdr)
-        let frag | ip4MayFragment hdr = (`setBit` 1)
-                 | otherwise          = id
-        let morefrags | ip4MoreFragments hdr = (`setBit` 0)
-                      | otherwise            = id
-        let flags = frag (morefrags 0)
-        let off   = ip4FragmentOffset hdr `div` 8
-        putWord16be (flags `shiftL` 13 .|. off .&. 0x1fff)
+  hdrBytes <-
+    let pktlen = fromIntegral (L.length pkt)
+        bytes  = runPut (renderIP4Header hdr pktlen)
+        cs     = computeChecksum 0 bytes
+     in pokeChecksum cs bytes 10
 
-        putWord8    (ip4TimeToLive hdr)
-        put         (ip4Protocol hdr)
-        putWord16be 0 -- (ip4Checksum hdr)
-
-        put (ip4SourceAddr hdr)
-
-        put (ip4DestAddr hdr)
-
-        putByteString optbs
-
-  let hdrCs = computePartialChecksum 0 hdrBytes
-      pktCs = finalizeChecksum (computePartialChecksumLazy hdrCs pkt)
-
-  hdrBytes' <- pokeChecksum pktCs hdrBytes 10
-  return (L.fromChunks [hdrBytes'] `L.append` pkt)
+  return (chunk hdrBytes `L.append` pkt)
 
 
 -- IP4 Options -----------------------------------------------------------------
