@@ -42,9 +42,9 @@ handleOutgoing  = do
   let h = tcpHost s
   set (s { tcpHost = h { output_queue = [], ready_list = [] } })
   let msgs = output_queue h
-  unless (null msgs) (mapM_ deliverIPMessage msgs)
+  mapM_ deliverIPMessage msgs
   let ready = ready_list h
-  unless (null ready) (mapM_ output ready)
+  mapM_ output ready
 
 deliverIPMessage :: IPMessage -> Tcp ()
 deliverIPMessage msg =
