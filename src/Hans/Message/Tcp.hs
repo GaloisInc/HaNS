@@ -427,10 +427,10 @@ computeTcpChecksumIP4 src dst hdr body =
   -- its creation time.
   (cs `seq` unsafePerformIO (pokeChecksum cs hdrbs 16), cs)
   where
-  hdrbs = runPut (putTcpHeader hdr { tcpChecksum = 0 })
   phcs  = computePartialChecksum 0
         $ mkIP4PseudoHeader src dst tcpProtocol
         $ S.length hdrbs + fromIntegral (L.length body)
+  hdrbs = runPut (putTcpHeader hdr { tcpChecksum = 0 })
   hdrcs = computePartialChecksum phcs hdrbs
   cs    = finalizeChecksum (computePartialChecksumLazy hdrcs body)
 
