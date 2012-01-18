@@ -12,7 +12,7 @@ import Data.Serialize (Serialize(..))
 import Data.Serialize.Get
     (Get,getWord8,getWord16be,isolate,label,getByteString)
 import Data.Serialize.Put
-    (runPut,putWord8,putWord16be,putByteString)
+    (Put,runPut,putWord8,putWord16be,putByteString)
 import Data.Bits (Bits((.&.),(.|.),testBit,setBit,shiftR,shiftL,bit))
 import Data.Word (Word8,Word16)
 import qualified Data.ByteString as S
