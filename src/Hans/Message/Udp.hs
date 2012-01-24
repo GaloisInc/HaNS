@@ -2,6 +2,7 @@
 
 module Hans.Message.Udp where
 
+import Hans.Message.Ip4
 import Hans.Utils
 import Hans.Utils.Checksum
 
@@ -12,6 +13,8 @@ import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
 
+udpProtocol :: IP4Protocol
+udpProtocol  = IP4Protocol 0x11
 
 -- Udp Ports -------------------------------------------------------------------
 

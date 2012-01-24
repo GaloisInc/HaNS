@@ -34,9 +34,6 @@ type Handler = IP4 -> UdpPort -> S.ByteString -> IO ()
 
 type UdpHandle = Channel (Udp ())
 
-udpProtocol :: IP4Protocol
-udpProtocol  = IP4Protocol 0x11
-
 runUdpLayer :: UdpHandle -> IP4Handle -> Icmp4Handle -> IO ()
 runUdpLayer h ip4 icmp4 = do
   addIP4Handler ip4 udpProtocol (queueUdp h)

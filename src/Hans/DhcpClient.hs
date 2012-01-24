@@ -38,9 +38,6 @@ bootpc  = UdpPort 68
 currentNetwork :: IP4
 currentNetwork  = IP4 0 0 0 0
 
-udpProtocol :: IP4Protocol
-udpProtocol  = IP4Protocol 0x11
-
 ethernetIp4 :: EtherType
 ethernetIp4  = EtherType 0x0800
 
