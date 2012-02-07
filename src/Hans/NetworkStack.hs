@@ -86,26 +86,34 @@ newNetworkStack  = do
   udp  <- newChannel
   tcp  <- newChannel
 
-  Timer.runTimerLayer  th
-  Eth.runEthernetLayer eth
-  Arp.runArpLayer      arp  eth th
-  IP4.runIP4Layer      ip4  arp eth
-  Icmp4.runIcmp4Layer  icmp ip4
-  Udp.runUdpLayer      udp  ip4 icmp
-  Tcp.runTcpLayer      tcp  ip4 th
+  let ns = NetworkStack
+        { nsArp     = arp
+        , nsEthernet= eth
+        , nsIp4     = ip4
+        , nsIcmp4   = icmp
+        , nsTimers  = th
+        , nsUdp     = udp
+        , nsTcp     = tcp
+        }
 
-  return NetworkStack
-    { nsArp     = arp
-    , nsEthernet= eth
-    , nsIp4     = ip4
-    , nsIcmp4   = icmp
-    , nsTimers  = th
-    , nsUdp     = udp
-    , nsTcp     = tcp
-    }
+  startTimerLayer    ns
+  startEthernetLayer ns
+  startArpLayer      ns
+  startIcmp4Layer    ns
+  startIP4Layer      ns
+  startUdpLayer      ns
+  startTcpLayer      ns
+
+  return ns
+
 
 
 -- Ethernet Layer Interface ----------------------------------------------------
+
+-- | Start the ethernet layer.
+startEthernetLayer :: HasEthernet stack => stack -> IO ()
+startEthernetLayer stack =
+  Eth.runEthernetLayer (ethernetHandle stack)
 
 -- | Add an ethernet device to the ethernet layer.
 addDevice :: HasEthernet stack => Mac -> Eth.Tx -> Eth.Rx -> stack -> IO ()
@@ -128,7 +136,29 @@ deviceDown mac stack =
   Eth.stopEthernetDevice (ethernetHandle stack) mac
 
 
+-- Arp Layer Interface ---------------------------------------------------------
+
+-- | Start the arp layer.
+startArpLayer :: (HasEthernet stack, HasTimer stack, HasArp stack)
+              => stack -> IO ()
+startArpLayer stack =
+  Arp.runArpLayer (arpHandle stack) (ethernetHandle stack) (timerHandle stack)
+
+
+-- Icmp4 Layer Interface -------------------------------------------------------
+
+-- | Start the icmp4 layer.
+startIcmp4Layer :: (HasIcmp4 stack, HasIP4 stack) => stack -> IO ()
+startIcmp4Layer stack =
+  Icmp4.runIcmp4Layer (icmp4Handle stack) (ip4Handle stack)
+
+
 -- IP4 Layer Interface ---------------------------------------------------------
+
+startIP4Layer :: (HasArp stack, HasEthernet stack, HasIP4 stack)
+              => stack -> IO ()
+startIP4Layer stack =
+  IP4.runIP4Layer (ip4Handle stack) (arpHandle stack) (ethernetHandle stack)
 
 type Mtu = Int
 
@@ -153,3 +183,23 @@ listenIP4Protocol prot k stack = IP4.addIP4Handler (ip4Handle stack) prot k
 -- | Register a handler for an IP4 protocol
 ignoreIP4Protocol :: HasIP4 stack => IP4Protocol -> stack -> IO ()
 ignoreIP4Protocol prot stack = IP4.removeIP4Handler (ip4Handle stack) prot
+
+
+-- Udp Layer Interface ---------------------------------------------------------
+
+startUdpLayer :: (HasIP4 stack, HasIcmp4 stack, HasUdp stack) => stack -> IO ()
+startUdpLayer stack =
+  Udp.runUdpLayer (udpHandle stack) (ip4Handle stack) (icmp4Handle stack)
+
+
+-- Tcp Layer Interface ---------------------------------------------------------
+
+startTcpLayer :: (HasIP4 stack, HasTimer stack, HasTcp stack) => stack -> IO ()
+startTcpLayer stack =
+  Tcp.runTcpLayer (tcpHandle stack) (ip4Handle stack) (timerHandle stack)
+
+
+-- Timer Layer Interface -------------------------------------------------------
+
+startTimerLayer :: HasTimer stack => stack -> IO ()
+startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
