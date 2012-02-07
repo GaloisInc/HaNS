@@ -13,8 +13,12 @@ import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
 
+
+-- Udp Protocol Number ---------------------------------------------------------
+
 udpProtocol :: IP4Protocol
 udpProtocol  = IP4Protocol 0x11
+
 
 -- Udp Ports -------------------------------------------------------------------
 
