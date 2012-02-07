@@ -21,7 +21,7 @@ import Network.TCP.Type.Datagram
     ,mkTCPSegment)
 import Network.TCP.Type.Socket (Host(..))
 
-import Control.Monad (unless,guard)
+import Control.Monad (guard)
 import Data.Serialize (runGet)
 import MonadLib (get,set)
 import qualified Data.ByteString as S

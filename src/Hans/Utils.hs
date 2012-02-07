@@ -17,7 +17,7 @@ void :: Monad m => m a -> m ()
 void m = m >> return ()
 
 -- | Show a single hex number, padded with a leading 0.
-showPaddedHex :: (Integral a) => a -> ShowS
+showPaddedHex :: (Integral a, Show a) => a -> ShowS
 showPaddedHex x
   | x < 0x10  = showChar '0' . base
   | otherwise = base
