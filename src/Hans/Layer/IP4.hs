@@ -13,7 +13,7 @@ module Hans.Layer.IP4 (
   , withIP4Source
   , sendIP4Packet
   , addIP4RoutingRule
-  , addIP4Handler
+  , addIP4Handler, Handler
   , removeIP4Handler
   ) where
 
