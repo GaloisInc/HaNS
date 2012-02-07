@@ -10,7 +10,7 @@ import Hans.Address.Mac
 import Hans.DhcpClient (dhcpDiscover)
 import Hans.Layer.Ethernet
 import Hans.Message.Tcp (TcpPort(..))
-import Hans.Setup
+import Hans.NetworkStack
 
 import System.Exit (exitFailure)
 import qualified Data.ByteString as S
@@ -56,7 +56,7 @@ initEthernetDevice ns = do
   Just nic <- openXenDevice ""
   let mac = read (getNICName nic)
   print mac
-  addEthernetDevice (nsEthernet ns) mac (xenSend nic) (xenReceiveLoop nic)
+  addDevice mac (xenSend nic) (xenReceiveLoop nic) ns
   --let mac = Mac 0x52 0x54 0x00 0x12 0x34 0x56
   --putStrLn "Waiting for input channel..."
   --input  <- buildInput
@@ -68,7 +68,7 @@ initEthernetDevice ns = do
 initEthernetDevice ns = do
   let mac = Mac 0x52 0x54 0x00 0x12 0x34 0x56
   Just dev <- openTapDevice "tap0"
-  addEthernetDevice (nsEthernet ns) mac (tapSend dev) (tapReceiveLoop dev)
+  addDevice mac (tapSend dev) (tapReceiveLoop dev) ns
   return mac
 #endif
 
@@ -79,9 +79,9 @@ main = halvm_kernel [dNICs] $ \ args -> do
 main = do
   args <- getArgs
 #endif
-  ns  <- setup
+  ns  <- newNetworkStack
   mac <- initEthernetDevice ns
-  startEthernetDevice (nsEthernet ns) mac
+  deviceUp mac ns
   setAddress args mac ns
   webserver ns (TcpPort 8000)
 
@@ -89,19 +89,10 @@ setAddress :: [String] -> Mac -> NetworkStack -> IO ()
 setAddress args mac ns =
   case args of
     ["dhcp"] -> dhcpDiscover ns mac print
-    [ip,gw]  -> apply (addrOptions ip gw mac) ns
+    [ip,gw]  -> do
+      addIP4Addr (read ip `withMask` 24) mac ns
+      routeVia (IP4 0 0 0 0 `withMask` 0) (read gw)
     _        -> do
       putStrLn "Usage: <prog> dhcp"
       putStrLn "       <prog> <ip> <gateway>"
       exitFailure
-
-addrOptions :: String -> String -> Mac -> [SomeOption]
-addrOptions ip gw mac =
-  [ SomeOption (LocalEthernet (ip4 `withMask` 24) mac)
-  , SomeOption (Route (IP4 0 0 0 0 `withMask` 0) gw4)
-  ]
-  where
-  ip4 :: IP4
-  ip4  = read ip
-  gw4 :: IP4
-  gw4  = read gw

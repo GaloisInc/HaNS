@@ -15,7 +15,7 @@ import Hans.Message.Dhcp4Options
 import Hans.Message.EthernetFrame
 import Hans.Message.Ip4
 import Hans.Message.Udp
-import Hans.Setup
+import Hans.NetworkStack
 
 import Control.Monad (guard)
 import Data.Serialize (runGet,runPutLazy)
@@ -50,24 +50,27 @@ defaultRoute  = IP4 0 0 0 0 `withMask` 0
 type AckHandler = IP4 -> IO ()
 
 -- | Discover a dhcp server, and request an address.
-dhcpDiscover :: NetworkStack -> Mac -> AckHandler -> IO ()
+dhcpDiscover :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
+                , HasTimer stack)
+             => stack -> Mac -> AckHandler -> IO ()
 dhcpDiscover ns mac h = do
   w32 <- randomIO
   let xid = Xid (fromIntegral (w32 :: Int))
 
-  addEthernetHandler (nsEthernet ns) ethernetIp4 (dhcpIP4Handler ns)
-  addUdpHandler (nsUdp ns) bootpc (handleOffer ns (Just h))
+  addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
+  addUdpHandler (udpHandle ns) bootpc (handleOffer ns (Just h))
 
   let disc = discoverToMessage (mkDiscover xid mac)
   sendMessage ns disc currentNetwork broadcastIP4 broadcastMac
 
 -- | Restore the connection between the Ethernet and IP4 layers.
-restoreIp4 :: NetworkStack -> IO ()
-restoreIp4 ns = connectEthernet (nsIp4 ns) (nsEthernet ns)
+restoreIp4 :: (HasEthernet stack, HasIP4 stack) => stack -> IO ()
+restoreIp4 ns = connectEthernet (ip4Handle ns) (ethernetHandle ns)
 
 -- | Handle IP4 messages from the Ethernet layer, passing all relevant DHCP
 -- messages to the UDP layer.
-dhcpIP4Handler :: NetworkStack -> S.ByteString -> IO ()
+dhcpIP4Handler :: (HasUdp stack)
+               => stack -> S.ByteString -> IO ()
 dhcpIP4Handler ns bytes =
   case runGet parseIP4Packet bytes of
     Left err            -> putStrLn err >> return ()
@@ -75,7 +78,7 @@ dhcpIP4Handler ns bytes =
       | ip4Protocol hdr == udpProtocol -> queue
       | otherwise                      -> return ()
       where
-      queue = queueUdp (nsUdp ns) (ip4SourceAddr hdr) (ip4DestAddr hdr)
+      queue = queueUdp (udpHandle ns) (ip4SourceAddr hdr) (ip4DestAddr hdr)
             $ S.take (len - ihl)
             $ S.drop ihl bytes
 
@@ -84,16 +87,18 @@ dhcpIP4Handler ns bytes =
 --  * Remove the current UDP handler
 --  * Install an DHCP Ack handler
 --  * Send a DHCP Request
-handleOffer :: NetworkStack -> Maybe AckHandler -> IP4 -> UdpPort
+handleOffer :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
+               , HasTimer stack)
+            => stack -> Maybe AckHandler -> IP4 -> UdpPort
             -> S.ByteString -> IO ()
 handleOffer ns mbh _src _srcPort bytes =
   case runGet (getDhcp4Message) bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (OfferMessage offer)) -> do
-        removeUdpHandler (nsUdp ns) bootpc
+        removeUdpHandler (udpHandle ns) bootpc
         let req = requestToMessage (offerToRequest offer)
-        addUdpHandler (nsUdp ns) bootpc (handleAck ns offer mbh)
+        addUdpHandler (udpHandle ns) bootpc (handleAck ns offer mbh)
         sendMessage ns req currentNetwork broadcastIP4 broadcastMac
 
       msg1 -> do
@@ -110,18 +115,20 @@ handleOffer ns mbh _src _srcPort bytes =
 --  * Configure the network stack with options from the Ack
 --  * Install a timer that renews the address after 50% of the lease time
 --    has passed
-handleAck :: NetworkStack -> Offer -> Maybe AckHandler -> IP4 -> UdpPort
+handleAck :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
+             , HasTimer stack)
+          => stack -> Offer -> Maybe AckHandler -> IP4 -> UdpPort
           -> S.ByteString -> IO ()
 handleAck ns offer mbh _src _srcPort bytes =
   case runGet (getDhcp4Message) bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (AckMessage ack)) -> do
-        removeUdpHandler (nsUdp ns) bootpc
+        removeUdpHandler (udpHandle ns) bootpc
         restoreIp4 ns
-        apply (ackNsOptions ack) ns
+        ackNsOptions ack ns
         let ms = fromIntegral (ackLeaseTime ack) * 500
-        delay (nsTimers ns) ms (dhcpRenew ns offer)
+        delay (timerHandle ns) ms (dhcpRenew ns offer)
         putStrLn ("Bound to: " ++ show (ackYourAddr ack))
 
         case mbh of
@@ -139,12 +146,14 @@ handleAck ns offer mbh _src _srcPort bytes =
 --  * Re-install the DHCP IP4 handler
 --  * Add a UDP handler for an Ack message
 --  * Re-send a renquest message, generated from the offer given.
-dhcpRenew :: NetworkStack -> Offer -> IO ()
+dhcpRenew :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
+             , HasTimer stack)
+          => stack -> Offer -> IO ()
 dhcpRenew ns offer = do
-  addEthernetHandler (nsEthernet ns) ethernetIp4 (dhcpIP4Handler ns)
+  addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
 
   let req = requestToMessage (offerToRequest offer)
-  addUdpHandler (nsUdp ns) bootpc (handleAck ns offer Nothing)
+  addUdpHandler (udpHandle ns) bootpc (handleAck ns offer Nothing)
   sendMessage ns req currentNetwork broadcastIP4 broadcastMac
 
 
@@ -163,22 +172,21 @@ lookupSubnet  = foldr p Nothing
   p _                              a = a
 
 -- | Produce options for the network stack from a DHCP Ack.
-ackNsOptions :: Ack -> [SomeOption]
-ackNsOptions ack =
-  [ toOption (LocalEthernet (addr `withMask` mask) mac)
-  , toOption (Route defaultRoute gateway)
-  ]
-  where
-  mac     = ackClientHardwareAddr ack
-  addr    = ackYourAddr ack
-  opts    = ackOptions ack
-  mask    = fromMaybe 24 (lookupSubnet opts)
-  gateway = fromMaybe (ackRelayAddr ack) (lookupGateway opts)
+ackNsOptions :: (HasIP4 stack, HasArp stack) => Ack -> stack -> IO ()
+ackNsOptions ack ns = do
+  let mac     = ackClientHardwareAddr ack
+      addr    = ackYourAddr ack
+      opts    = ackOptions ack
+      mask    = fromMaybe 24 (lookupSubnet opts)
+      gateway = fromMaybe (ackRelayAddr ack) (lookupGateway opts)
+  addIP4Addr (addr `withMask` mask) mac 1500 ns
+  routeVia defaultRoute gateway ns
 
 
 -- Packet Helpers --------------------------------------------------------------
 
-sendMessage :: NetworkStack -> Dhcp4Message -> IP4 -> IP4 -> Mac -> IO ()
+sendMessage :: (HasEthernet stack)
+            => stack -> Dhcp4Message -> IP4 -> IP4 -> Mac -> IO ()
 sendMessage ns resp src dst hwdst = do
   ipBytes <- mkIpBytes src dst bootpc bootps
       (runPutLazy (putDhcp4Message resp))
@@ -190,7 +198,7 @@ sendMessage ns resp src dst hwdst = do
         }
   putStrLn (show mac ++ " -> " ++ show hwdst)
 
-  sendEthernet (nsEthernet ns) frame ipBytes
+  sendEthernet (ethernetHandle ns) frame ipBytes
 
 mkIpBytes :: IP4 -> IP4 -> UdpPort -> UdpPort -> L.ByteString -> IO L.ByteString
 mkIpBytes srcAddr dstAddr srcPort dstPort payload = do
