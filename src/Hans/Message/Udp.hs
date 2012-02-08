@@ -23,7 +23,7 @@ udpProtocol  = IP4Protocol 0x11
 -- Udp Ports -------------------------------------------------------------------
 
 newtype UdpPort = UdpPort { getUdpPort :: Word16 }
-  deriving (Eq,Ord,Num,Show,Enum,Bounded)
+  deriving (Eq,Ord,Num,Read,Show,Enum,Bounded)
 
 parseUdpPort :: Get UdpPort
 parseUdpPort  = UdpPort <$> getWord16be
