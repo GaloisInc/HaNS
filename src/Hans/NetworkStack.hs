@@ -95,7 +95,7 @@ class HasEthernet stack where
 
 instance HasEthernet Eth.EthernetHandle where ethernetHandle = id
 
--- | Start the ethernet layer.
+-- | Start the ethernet layer in a network stack.
 startEthernetLayer :: HasEthernet stack => stack -> IO ()
 startEthernetLayer stack =
   Eth.runEthernetLayer (ethernetHandle stack)
@@ -124,7 +124,7 @@ class HasArp stack where
 
 instance HasArp Arp.ArpHandle where arpHandle = id
 
--- | Start the arp layer.
+-- | Start the arp layer in a network stack.
 startArpLayer :: (HasEthernet stack, HasTimer stack, HasArp stack)
               => stack -> IO ()
 startArpLayer stack =
@@ -138,7 +138,7 @@ class HasIcmp4 stack where
 
 instance HasIcmp4 Icmp4.Icmp4Handle where icmp4Handle = id
 
--- | Start the icmp4 layer.
+-- | Start the icmp4 layer in a network stack..
 startIcmp4Layer :: (HasIcmp4 stack, HasIP4 stack) => stack -> IO ()
 startIcmp4Layer stack =
   Icmp4.runIcmp4Layer (icmp4Handle stack) (ip4Handle stack)
@@ -151,6 +151,7 @@ class HasIP4 stack where
 
 instance HasIP4 IP4.IP4Handle where ip4Handle = id
 
+-- | Start the IP4 layer in a network stack.
 startIP4Layer :: (HasArp stack, HasEthernet stack, HasIP4 stack)
               => stack -> IO ()
 startIP4Layer stack =
@@ -230,5 +231,6 @@ class HasTimer stack where
 
 instance HasTimer Timer.TimerHandle where timerHandle = id
 
+-- | Start the Timer layer in a network stack.
 startTimerLayer :: HasTimer stack => stack -> IO ()
 startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
