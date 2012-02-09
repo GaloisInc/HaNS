@@ -5,11 +5,10 @@ import Data.Time.Calendar (Day(..))
 import Data.Time.Clock (UTCTime(..),addUTCTime)
 import Data.Time.Clock.POSIX (POSIXTime,getPOSIXTime,posixSecondsToUTCTime)
 import Data.Time.Format (formatTime)
-import Hans.Layer.Tcp.Socket
-    (Socket,readLine,sendSocket,acceptSocket,listenPort,closeSocket
-    ,SocketError(..))
 import Hans.Message.Tcp (TcpPort)
-import Hans.NetworkStack (NetworkStack,tcpHandle)
+import Hans.NetworkStack
+    (NetworkStack,tcpHandle,Socket,readLine,sendSocket,acceptSocket,listenPort
+    ,closeSocket,SocketError(..))
 import System.Exit (exitFailure)
 import System.Locale (defaultTimeLocale)
 import qualified Control.Exception as X
