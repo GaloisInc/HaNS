@@ -33,6 +33,7 @@ import qualified Hans.Layer.Timer as Timer
 import qualified Hans.Layer.Udp as Udp
 
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 -- Generic Network Stack -------------------------------------------------------
@@ -205,6 +206,11 @@ removeUdpHandler stack = Udp.removeUdpHandler (udpHandle stack)
 -- | Inject a packet into the UDP layer.
 queueUdp :: HasUdp stack => stack -> IP4 -> IP4 -> S.ByteString -> IO ()
 queueUdp stack = Udp.queueUdp (udpHandle stack)
+
+-- | Send a UDP packet.
+sendUdp :: HasUdp stack
+        => stack -> IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> IO ()
+sendUdp stack = Udp.sendUdp (udpHandle stack)
 
 
 -- Tcp Layer Interface ---------------------------------------------------------
