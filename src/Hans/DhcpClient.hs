@@ -8,7 +8,6 @@ import Hans.Address.Mac (Mac(..),broadcastMac)
 import Hans.Layer.Ethernet (sendEthernet,addEthernetHandler)
 import Hans.Layer.IP4 (connectEthernet)
 import Hans.Layer.Timer (delay)
-import Hans.Layer.Udp (addUdpHandler,removeUdpHandler,queueUdp)
 import Hans.Message.Dhcp4
 import Hans.Message.Dhcp4Codec
 import Hans.Message.Dhcp4Options

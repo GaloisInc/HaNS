@@ -9,6 +9,7 @@ module Hans.Layer.Udp (
 
   , queueUdp
   , sendUdp
+  , Handler
   , addUdpHandler
   , removeUdpHandler
   ) where

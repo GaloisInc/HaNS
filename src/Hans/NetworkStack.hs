@@ -23,6 +23,7 @@ import Hans.Address.Mac (Mac)
 import Hans.Channel (newChannel)
 import Hans.Message.Ip4 (IP4Protocol)
 import Hans.Message.Tcp (TcpPort)
+import Hans.Message.Udp (UdpPort)
 import qualified Hans.Layer.Arp as Arp
 import qualified Hans.Layer.Ethernet as Eth
 import qualified Hans.Layer.Icmp4 as Icmp4
@@ -30,6 +31,8 @@ import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Tcp as Tcp
 import qualified Hans.Layer.Timer as Timer
 import qualified Hans.Layer.Udp as Udp
+
+import qualified Data.ByteString as S
 
 
 -- Layer Accessors -------------------------------------------------------------
@@ -198,9 +201,22 @@ ignoreIP4Protocol stack = IP4.removeIP4Handler (ip4Handle stack)
 
 -- Udp Layer Interface ---------------------------------------------------------
 
+-- | Start the UDP layer of a network stack.
 startUdpLayer :: (HasIP4 stack, HasIcmp4 stack, HasUdp stack) => stack -> IO ()
 startUdpLayer stack =
   Udp.runUdpLayer (udpHandle stack) (ip4Handle stack) (icmp4Handle stack)
+
+-- | Add a handler for a UDP port.
+addUdpHandler :: HasUdp stack => stack -> UdpPort -> Udp.Handler -> IO ()
+addUdpHandler stack = Udp.addUdpHandler (udpHandle stack)
+
+-- | Remove a handler for a UDP port.
+removeUdpHandler :: HasUdp stack => stack -> UdpPort -> IO ()
+removeUdpHandler stack = Udp.removeUdpHandler (udpHandle stack)
+
+-- | Inject a packet into the UDP layer.
+queueUdp :: HasUdp stack => stack -> IP4 -> IP4 -> S.ByteString -> IO ()
+queueUdp stack = Udp.queueUdp (udpHandle stack)
 
 
 -- Tcp Layer Interface ---------------------------------------------------------
