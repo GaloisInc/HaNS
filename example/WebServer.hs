@@ -9,7 +9,7 @@ import Hans.Layer.Tcp.Socket
     (Socket,readLine,sendSocket,acceptSocket,listenPort,closeSocket
     ,SocketError(..))
 import Hans.Message.Tcp (TcpPort)
-import Hans.Setup (NetworkStack(nsTcp))
+import Hans.NetworkStack (NetworkStack,tcpHandle)
 import System.Exit (exitFailure)
 import System.Locale (defaultTimeLocale)
 import qualified Control.Exception as X
@@ -41,7 +41,7 @@ serverLoop start sock = loop
     loop
 
 initServer :: NetworkStack -> TcpPort -> IO Socket
-initServer ns port = listenPort (nsTcp ns) port `X.catch` h
+initServer ns port = listenPort (tcpHandle ns) port `X.catch` h
   where
   h ListenError{} = do
     putStrLn ("Unable to listen on port: " ++ show port)

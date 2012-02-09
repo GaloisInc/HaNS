@@ -8,7 +8,6 @@ import Hans.Address
 import Hans.Address.IP4
 import Hans.Address.Mac
 import Hans.DhcpClient (dhcpDiscover)
-import Hans.Layer.Ethernet
 import Hans.Message.Tcp (TcpPort(..))
 import Hans.NetworkStack
 
@@ -68,7 +67,7 @@ initEthernetDevice ns = do
 initEthernetDevice ns = do
   let mac = Mac 0x52 0x54 0x00 0x12 0x34 0x56
   Just dev <- openTapDevice "tap0"
-  addDevice mac (tapSend dev) (tapReceiveLoop dev) ns
+  addDevice ns mac (tapSend dev) (tapReceiveLoop dev)
   return mac
 #endif
 
@@ -81,7 +80,7 @@ main = do
 #endif
   ns  <- newNetworkStack
   mac <- initEthernetDevice ns
-  deviceUp mac ns
+  deviceUp ns mac
   setAddress args mac ns
   webserver ns (TcpPort 8000)
 
@@ -90,8 +89,8 @@ setAddress args mac ns =
   case args of
     ["dhcp"] -> dhcpDiscover ns mac print
     [ip,gw]  -> do
-      addIP4Addr (read ip `withMask` 24) mac ns
-      routeVia (IP4 0 0 0 0 `withMask` 0) (read gw)
+      addIP4Addr ns (read ip `withMask` 24) mac 1500
+      routeVia ns (IP4 0 0 0 0 `withMask` 0) (read gw)
     _        -> do
       putStrLn "Usage: <prog> dhcp"
       putStrLn "       <prog> <ip> <gateway>"

@@ -116,24 +116,20 @@ startEthernetLayer stack =
   Eth.runEthernetLayer (ethernetHandle stack)
 
 -- | Add an ethernet device to the ethernet layer.
-addDevice :: HasEthernet stack => Mac -> Eth.Tx -> Eth.Rx -> stack -> IO ()
-addDevice mac tx rx stack =
-  Eth.addEthernetDevice (ethernetHandle stack) mac tx rx
+addDevice :: HasEthernet stack => stack Mac -> Eth.Tx -> Eth.Rx -> IO ()
+addDevice stack = Eth.addEthernetDevice (ethernetHandle stack)
 
 -- | Remove a device from the ethernet layer.
-removeDevice :: HasEthernet stack => Mac -> stack -> IO ()
-removeDevice mac stack =
-  Eth.removeEthernetDevice (ethernetHandle stack) mac
+removeDevice :: HasEthernet stack => stack -> Mac -> IO ()
+removeDevice stack = Eth.removeEthernetDevice (ethernetHandle stack)
 
 -- | Bring an ethernet device in the ethernet layer up.
-deviceUp :: HasEthernet stack => Mac -> stack -> IO ()
-deviceUp mac stack =
-  Eth.startEthernetDevice (ethernetHandle stack) mac
+deviceUp :: HasEthernet stack => stack -> Mac -> IO ()
+deviceUp stack = Eth.startEthernetDevice (ethernetHandle stack)
 
 -- | Bring an ethernet device in the ethernet layer down.
-deviceDown :: HasEthernet stack => Mac -> stack -> IO ()
-deviceDown mac stack =
-  Eth.stopEthernetDevice (ethernetHandle stack) mac
+deviceDown :: HasEthernet stack => stack -> Mac -> IO ()
+deviceDown stack = Eth.stopEthernetDevice (ethernetHandle stack)
 
 
 -- Arp Layer Interface ---------------------------------------------------------
@@ -164,25 +160,25 @@ type Mtu = Int
 
 -- | Add an IP4 address to a network stack.
 addIP4Addr :: (HasArp stack, HasIP4 stack)
-           => IP4Mask -> Mac -> Mtu -> stack -> IO ()
-addIP4Addr mask mac mtu stack = do
+           => stack -> IP4Mask -> Mac -> Mtu -> IO ()
+addIP4Addr stack mask mac mtu = do
   let (addr,_) = getMaskComponents mask
   Arp.addLocalAddress (arpHandle stack) addr mac
   IP4.addIP4RoutingRule (ip4Handle stack) (IP4.Direct mask addr mtu)
 
 -- | Add a route for a network, via an address.
-routeVia :: HasIP4 stack => IP4Mask -> IP4 -> stack -> IO ()
-routeVia mask addr stack =
+routeVia :: HasIP4 stack => stack -> IP4Mask -> IP4 -> IO ()
+routeVia stack mask addr =
   IP4.addIP4RoutingRule (ip4Handle stack) (IP4.Indirect mask addr)
 
 -- | Register a handler for an IP4 protocol
 listenIP4Protocol :: HasIP4 stack
-                  => IP4Protocol -> IP4.Handler -> stack -> IO ()
-listenIP4Protocol prot k stack = IP4.addIP4Handler (ip4Handle stack) prot k
+                  => stack -> IP4Protocol -> IP4.Handler -> IO ()
+listenIP4Protocol stack = IP4.addIP4Handler (ip4Handle stack)
 
 -- | Register a handler for an IP4 protocol
-ignoreIP4Protocol :: HasIP4 stack => IP4Protocol -> stack -> IO ()
-ignoreIP4Protocol prot stack = IP4.removeIP4Handler (ip4Handle stack) prot
+ignoreIP4Protocol :: HasIP4 stack => stack -> IP4Protocol -> IO ()
+ignoreIP4Protocol stack = IP4.removeIP4Handler (ip4Handle stack)
 
 
 -- Udp Layer Interface ---------------------------------------------------------

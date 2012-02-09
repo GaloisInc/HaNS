@@ -179,8 +179,8 @@ ackNsOptions ack ns = do
       opts    = ackOptions ack
       mask    = fromMaybe 24 (lookupSubnet opts)
       gateway = fromMaybe (ackRelayAddr ack) (lookupGateway opts)
-  addIP4Addr (addr `withMask` mask) mac 1500 ns
-  routeVia defaultRoute gateway ns
+  addIP4Addr ns (addr `withMask` mask) mac 1500
+  routeVia ns defaultRoute gateway
 
 
 -- Packet Helpers --------------------------------------------------------------
