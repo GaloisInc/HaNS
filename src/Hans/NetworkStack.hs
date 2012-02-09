@@ -35,44 +35,6 @@ import qualified Hans.Layer.Udp as Udp
 import qualified Data.ByteString as S
 
 
--- Layer Accessors -------------------------------------------------------------
-
-class HasArp stack where
-  arpHandle :: stack -> Arp.ArpHandle
-
-instance HasArp Arp.ArpHandle where arpHandle = id
-
-class HasEthernet stack where
-  ethernetHandle :: stack -> Eth.EthernetHandle
-
-instance HasEthernet Eth.EthernetHandle where ethernetHandle = id
-
-class HasIcmp4 stack where
-  icmp4Handle :: stack -> Icmp4.Icmp4Handle
-
-instance HasIcmp4 Icmp4.Icmp4Handle where icmp4Handle = id
-
-class HasIP4 stack where
-  ip4Handle :: stack -> IP4.IP4Handle
-
-instance HasIP4 IP4.IP4Handle where ip4Handle = id
-
-class HasTcp stack where
-  tcpHandle :: stack -> Tcp.TcpHandle
-
-instance HasTcp Tcp.TcpHandle where tcpHandle = id
-
-class HasTimer stack where
-  timerHandle :: stack -> Timer.TimerHandle
-
-instance HasTimer Timer.TimerHandle where timerHandle = id
-
-class HasUdp stack where
-  udpHandle :: stack -> Udp.UdpHandle
-
-instance HasUdp Udp.UdpHandle where udpHandle = id
-
-
 -- Generic Network Stack -------------------------------------------------------
 
 -- | An example implementation of the whole network stack.
@@ -128,6 +90,11 @@ newNetworkStack  = do
 
 -- Ethernet Layer Interface ----------------------------------------------------
 
+class HasEthernet stack where
+  ethernetHandle :: stack -> Eth.EthernetHandle
+
+instance HasEthernet Eth.EthernetHandle where ethernetHandle = id
+
 -- | Start the ethernet layer.
 startEthernetLayer :: HasEthernet stack => stack -> IO ()
 startEthernetLayer stack =
@@ -152,6 +119,11 @@ deviceDown stack = Eth.stopEthernetDevice (ethernetHandle stack)
 
 -- Arp Layer Interface ---------------------------------------------------------
 
+class HasArp stack where
+  arpHandle :: stack -> Arp.ArpHandle
+
+instance HasArp Arp.ArpHandle where arpHandle = id
+
 -- | Start the arp layer.
 startArpLayer :: (HasEthernet stack, HasTimer stack, HasArp stack)
               => stack -> IO ()
@@ -161,6 +133,11 @@ startArpLayer stack =
 
 -- Icmp4 Layer Interface -------------------------------------------------------
 
+class HasIcmp4 stack where
+  icmp4Handle :: stack -> Icmp4.Icmp4Handle
+
+instance HasIcmp4 Icmp4.Icmp4Handle where icmp4Handle = id
+
 -- | Start the icmp4 layer.
 startIcmp4Layer :: (HasIcmp4 stack, HasIP4 stack) => stack -> IO ()
 startIcmp4Layer stack =
@@ -168,6 +145,11 @@ startIcmp4Layer stack =
 
 
 -- IP4 Layer Interface ---------------------------------------------------------
+
+class HasIP4 stack where
+  ip4Handle :: stack -> IP4.IP4Handle
+
+instance HasIP4 IP4.IP4Handle where ip4Handle = id
 
 startIP4Layer :: (HasArp stack, HasEthernet stack, HasIP4 stack)
               => stack -> IO ()
@@ -201,6 +183,11 @@ ignoreIP4Protocol stack = IP4.removeIP4Handler (ip4Handle stack)
 
 -- Udp Layer Interface ---------------------------------------------------------
 
+class HasUdp stack where
+  udpHandle :: stack -> Udp.UdpHandle
+
+instance HasUdp Udp.UdpHandle where udpHandle = id
+
 -- | Start the UDP layer of a network stack.
 startUdpLayer :: (HasIP4 stack, HasIcmp4 stack, HasUdp stack) => stack -> IO ()
 startUdpLayer stack =
@@ -221,6 +208,11 @@ queueUdp stack = Udp.queueUdp (udpHandle stack)
 
 -- Tcp Layer Interface ---------------------------------------------------------
 
+class HasTcp stack where
+  tcpHandle :: stack -> Tcp.TcpHandle
+
+instance HasTcp Tcp.TcpHandle where tcpHandle = id
+
 -- | Start the TCP layer of a network stack.
 startTcpLayer :: (HasIP4 stack, HasTimer stack, HasTcp stack) => stack -> IO ()
 startTcpLayer stack =
@@ -232,6 +224,11 @@ listenPort stack = Tcp.listenPort (tcpHandle stack)
 
 
 -- Timer Layer Interface -------------------------------------------------------
+
+class HasTimer stack where
+  timerHandle :: stack -> Timer.TimerHandle
+
+instance HasTimer Timer.TimerHandle where timerHandle = id
 
 startTimerLayer :: HasTimer stack => stack -> IO ()
 startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
