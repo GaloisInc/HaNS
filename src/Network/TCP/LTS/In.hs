@@ -58,13 +58,16 @@ import Foreign
 
 tcp_deliver_in_packet :: TCPSegment -> HMonad t ()
 tcp_deliver_in_packet seg = do
-  let sid = SocketID (get_port (tcp_dst seg), tcp_src seg)
   ok <- has_sock sid
   if ok
      then tcp_deliver_packet_to_sock sid seg
-     else if tcp_SYN seg && (not $ tcp_ACK seg) && (not $ tcp_RST seg) 
+     else if attemptOpen
              then tcp_deliver_syn_packet seg
-             else emit_segs $ dropwithreset seg
+             else emit_segs (dropwithreset seg)
+  where
+  sid         = SocketID (get_port (tcp_dst seg), tcp_src seg)
+  attemptOpen = tcp_SYN seg && not (tcp_ACK seg) && not (tcp_RST seg)
+
 
 -- Note: if there exists a socket in TIME_WAIT state, and an SYN
 -- packet matches it, the SYN packet will always be delivered to this

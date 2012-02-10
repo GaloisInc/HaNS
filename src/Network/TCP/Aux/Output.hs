@@ -143,30 +143,26 @@ make_rst_segment_from_cb sock addrfrom addrto =
 
 make_rst_segment_from_seg :: TCPSegment -> TCPSegment
 make_rst_segment_from_seg seg =
-    let tcp_ACK' = not (tcp_ACK seg)
-        seq' = if tcp_ACK seg then tcp_ack seg else 0
-        ack' = if tcp_ACK'
-                  then let s1 = tcp_seq seg
-                        in s1 `seq_plus` fromIntegral (bufc_length (tcp_data seg))
-                              `seq_plus` (if tcp_SYN seg then 1 else 0)
-                  else 0
-
-
-        hdr = emptyTcpHeader
-          { tcpSeqNum        = TcpSeqNum seq'
-          , tcpAckNum        = TcpAckNum ack'
-          , tcpAck           = tcp_ACK'
-          , tcpRst           = True
-          }
-    in
-    mkTCPSegment' (tcp_src seg) (tcp_dst seg) hdr bufferchain_empty
-
+  mkTCPSegment' (tcp_dst seg) (tcp_src seg) hdr bufferchain_empty
+  where
+  tcp_ACK'           = not (tcp_ACK seg)
+  seq' | tcp_ACK seg = tcp_ack seg
+       | otherwise   = 0
+  ack' | tcp_ACK'    = tcp_seq seg
+                       `seq_plus` fromIntegral (bufc_length (tcp_data seg))
+                       `seq_plus` if tcp_SYN seg then 1 else 0
+       | otherwise   = 0
+  hdr = emptyTcpHeader
+    { tcpSeqNum        = TcpSeqNum seq'
+    , tcpAckNum        = TcpAckNum ack'
+    , tcpAck           = tcp_ACK'
+    , tcpRst           = True
+    }
 
 dropwithreset :: TCPSegment -> [IPMessage]
-dropwithreset seg =
-    if tcp_RST seg then []
-    else let seg' = make_rst_segment_from_seg seg
-          in [TCPMessage seg']
+dropwithreset seg
+  | tcp_RST seg = []
+  | otherwise   = [TCPMessage (make_rst_segment_from_seg seg)]
 
 dropwithreset_ignore_or_fail :: TCPSegment -> [IPMessage]
 dropwithreset_ignore_or_fail  = dropwithreset

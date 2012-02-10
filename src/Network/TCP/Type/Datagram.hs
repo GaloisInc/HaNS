@@ -98,7 +98,6 @@ mkTCPSegment' s@(TCPAddr (_, srcP)) d@(TCPAddr (_, dstP)) hdr body =
       }
     , tcp_data   = body
     }
-  where
 
 tcp_seq :: TCPSegment -> Word32
 tcp_seq  = getSeqNum . tcpSeqNum . tcp_header

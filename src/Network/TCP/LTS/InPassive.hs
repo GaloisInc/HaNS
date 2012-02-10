@@ -54,7 +54,7 @@ tcp_deliver_syn_packet seg = do
    let sidlisten = SocketID ((get_port $ tcp_dst seg), TCPAddr (IPAddr 0,0))
    --h <- get_host
    haslisten <- has_sock sidlisten
-   if not haslisten then return () else do
+   if not haslisten then emit_segs (dropwithreset seg) else do
       -- matches a socket...
       sock <- lookup_sock sidlisten
       if st sock /= LISTEN then return () else do
