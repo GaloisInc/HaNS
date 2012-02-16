@@ -80,13 +80,12 @@ renderUdpPacket hdr body mk = do
   return (L.fromChunks [hdrBytes'] `L.append` body)
   where
   -- pseudo header
-  hdrSize  = 8
-  len      = fromIntegral (L.length body + hdrSize)
-  ph       = mk len
+  bodyLen  = fromIntegral (L.length body)
+  ph       = mk (bodyLen + udpHeaderSize)
   pcs      = computePartialChecksum 0 ph
 
   -- real header
-  hdrBytes = runPut (renderUdpHeader (hdr { udpChecksum = 0 }) len)
+  hdrBytes = runPut (renderUdpHeader (hdr { udpChecksum = 0 }) bodyLen)
 
   -- body, and final checksum
   hcs = computePartialChecksum pcs hdrBytes
