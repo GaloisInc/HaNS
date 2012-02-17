@@ -11,6 +11,9 @@ module Hans.Layer.Tcp.Socket (
   , closeSocket
   , readBytes
   , readLine
+
+  , getSocketHost
+  , getSocketPort
   ) where
 
 import Hans.Address.IP4
@@ -21,7 +24,7 @@ import Hans.Message.Tcp (TcpPort(..))
 
 import Network.TCP.LTS.User (tcp_process_user_request)
 import Network.TCP.Type.Base
-    (IPAddr(..),SocketID,TCPAddr(..))
+    (IPAddr(..),SocketID(..),TCPAddr(..))
 import Network.TCP.Type.Syscall (SockReq(..),SockRsp(..))
 
 import Control.Exception (throwIO,Exception)
@@ -36,7 +39,27 @@ data Socket = Socket
   { socketTcpHandle :: TcpHandle
   , socketId        :: !SocketID
   , socketBuffer    :: MVar L.ByteString
+  , socketPort      :: !TcpPort
+  , socketHost      :: !IP4
   }
+
+mkSocket :: TcpHandle -> SocketID -> MVar L.ByteString -> Socket
+mkSocket tcp sid@(SocketID (_,TCPAddr (IPAddr a,p))) buf = Socket
+  { socketTcpHandle = tcp
+  , socketId        = sid
+  , socketBuffer    = buf
+  , socketPort      = port
+  , socketHost      = addr
+  }
+  where
+  port = TcpPort p
+  addr = convertFromWord32 a
+
+getSocketHost :: Socket -> IP4
+getSocketHost  = socketHost
+
+getSocketPort :: Socket -> TcpPort
+getSocketPort  = socketPort
 
 data SocketResult a
   = SocketResult a
@@ -78,7 +101,7 @@ listenPort tcp (TcpPort port) = blockResult tcp $ \ res -> do
       k rsp = case rsp of
         SockNew sid   -> do
           buf <- newMVar L.empty
-          putMVar res (SocketResult (Socket tcp sid buf))
+          putMVar res (SocketResult (mkSocket tcp sid buf))
         SockError err -> putMVar res (mkError err)
         _             -> putMVar res (mkError "Unexpected response")
   maybeOutput (tcp_process_user_request (SockListen port,k))
@@ -90,7 +113,7 @@ acceptSocket sock = blockResult (socketTcpHandle sock) $ \ res -> do
       k rsp = case rsp of
         SockNew sid   -> do
           buf <- newMVar L.empty
-          putMVar res (SocketResult (Socket (socketTcpHandle sock) sid buf))
+          putMVar res (SocketResult (mkSocket (socketTcpHandle sock) sid buf))
         SockError err -> putMVar res (mkError err)
         _             -> putMVar res (mkError "Unexpected response")
   maybeOutput (tcp_process_user_request (SockAccept (socketId sock),k))
@@ -104,7 +127,7 @@ connect tcp src dst (TcpPort port) = blockResult tcp $ \ res -> do
       k rsp = case rsp of
         SockNew sid   -> do
           buf <- newMVar L.empty
-          putMVar res (SocketResult (Socket tcp sid buf))
+          putMVar res (SocketResult (mkSocket tcp sid buf))
         SockError err -> putMVar res (mkError err)
         _             -> putMVar res (mkError "Unexpected response")
   maybeOutput (tcp_process_user_request (SockConnect us them,k))

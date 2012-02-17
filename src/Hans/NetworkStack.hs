@@ -15,6 +15,9 @@ module Hans.NetworkStack (
   , Tcp.readBytes
   , Tcp.readLine
   , Tcp.closeSocket
+
+  , Tcp.getSocketHost
+  , Tcp.getSocketPort
   ) where
 
 import Hans.Address (getMaskComponents)
