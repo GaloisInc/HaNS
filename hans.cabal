@@ -106,6 +106,7 @@ library
                                 Network.TCP.Type.Base,
                                 Network.TCP.Type.Timer
 
+
 executable test
         if flag(example)
                 buildable:      True
@@ -125,7 +126,7 @@ executable test
                         bytestring >= 0.9.1.0 && < 0.10.0.0,
                         containers >= 0.4.0.0 && < 0.5.0.0,
                         monadLib   >= 3.6.0   && < 3.7.0,
-                        time       >= 1.2.0.0 && < 1.3.0.0,
+                        time       >= 1.2.0.0 && < 1.5.0.0,
                         old-locale >= 1.0.0.0 && < 1.1.0.0,
                         hans
 
