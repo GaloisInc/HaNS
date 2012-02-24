@@ -102,11 +102,15 @@ sendBytes :: IP4Protocol -> IP4 -> L.ByteString -> IP ()
 sendBytes prot dst bs = do
   rule@(src,_,mtu) <- findRoute dst
   let hdr = emptyIP4Header prot src dst
+{-
   hdr' <- if fromIntegral (L.length bs) + 20 < mtu
     then return hdr
     else do
       i <- nextIdent
       return (setIdent i hdr)
+-}
+  hdr' <- do i <- nextIdent
+             return (setIdent i hdr)
   sendPacket' hdr' bs rule
 
 sendPacket :: IP4Header -> L.ByteString -> IP ()
