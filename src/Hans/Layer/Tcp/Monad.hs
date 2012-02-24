@@ -6,11 +6,11 @@ import Hans.Layer.IP4
 import Hans.Layer.Timer
 
 import MonadLib
-import Network.TCP.Type.Datagram (IPMessage)
+import Network.TCP.Type.Datagram (IPMessage(..))
 import Network.TCP.Type.Socket (Host(..),empty_host,TCPSocket)
 import Network.TCP.Type.Syscall (SocketID)
 import qualified Data.Map as Map
-
+import System.Random
 
 -- TCP Monad -------------------------------------------------------------------
 
@@ -27,12 +27,12 @@ data TcpState t = TcpState
   , tcpHost   :: Host t
   }
 
-emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState t
-emptyTcpState tcp ip4 timer = TcpState
+emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> StdGen -> TcpState t
+emptyTcpState tcp ip4 timer g = TcpState
   { tcpSelf   = tcp
   , tcpIP4    = ip4
   , tcpTimers = timer
-  , tcpHost   = empty_host
+  , tcpHost   = empty_host{ randomGenerator = g }
   }
 
 -- | The handle to this layer.
@@ -92,3 +92,13 @@ update_sock sid f =
 insert_sock :: SocketID -> TCPSocket t -> HMonad t ()
 insert_sock sid sock = do
   modify_host (\h -> h { sock_map = Map.insert sid sock (sock_map h) })
+
+getRandom :: Random a => HMonad t a
+getRandom = do
+  h <- get_host
+  let (res, g') = random (randomGenerator h)
+  put_host h{ randomGenerator = g' }
+  return res
+
+  
+  

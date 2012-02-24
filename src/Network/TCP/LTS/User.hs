@@ -101,8 +101,10 @@ tcp_wakeup =
 -- post-cond: sock not set
 process_listen ::  Port -> (SockRsp->t) -> HMonad t (Maybe t)
 process_listen port cont =
- do let sock_id = SocketID (port, TCPAddr (IPAddr 0,0))
-    h <- get_host
+ do h <- get_host
+    newiss <- getRandom
+    let sock_id = SocketID (port, TCPAddr (IPAddr 0,0))
+        t_rttseq' = Just (ticks h, newiss)
     -- check if port has been used...
     if port `elem` (local_ports h) then
        do let listen = SocketListen [] [] listen_qlimit
@@ -110,9 +112,16 @@ process_listen port cont =
                         { cb = (cb initial_tcp_socket)
                           { local_addr = TCPAddr (IPAddr 0,port)
                           , self_id    = sock_id
+                          , iss        = newiss
                           }
                         , st          = LISTEN
                         , sock_listen = listen
+                        , cb_snd = (cb_snd initial_tcp_socket)
+                          { snd_una = newiss
+                          , snd_nxt = newiss `seq_plus` 1
+                          , snd_max = newiss `seq_plus` 1
+                          , t_rttseg = t_rttseq'
+                          }
                         }
           insert_sock sock_id newsock
           modify_host $ \hs -> hs { local_ports = List.delete port (local_ports hs) }
@@ -257,11 +266,11 @@ try_send d cont =
 process_connect :: IPAddr -> TCPAddr -> (SockRsp->t) -> HMonad t (Maybe t)
 process_connect local addr cont = do
   h <- get_host
+  newiss <- getRandom
   m_port <- alloc_local_port
   if m_port == Nothing then return $ Just $ cont $ SockError "cannot allocate local port" else do
   let (Just port) = m_port
       sock_id = SocketID (port, addr)
-      newiss = SeqLocal 1000 -- beginning iss. (todo: add more randomness)
       request_r_scale' = 0
       rcv_wnd' = freebsd_so_rcvbuf
       adv_mss = Just mssdflt

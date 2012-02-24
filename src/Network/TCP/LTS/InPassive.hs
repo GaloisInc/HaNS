@@ -67,6 +67,7 @@ deliver_in_1 :: SocketID -> TCPSocket t -> TCPSegment -> HMonad t ()
 deliver_in_1 sid sock seg = 
   do let newsid = SocketID ((get_port $ tcp_dst seg), tcp_src seg)
      h <- get_host
+     newiss <- getRandom
      -- at this point, newsid is an unique socket id in the system...
 
      -- drop the first sid from q0 if needed, append newsid to q0.
@@ -98,7 +99,6 @@ deliver_in_1 sid sock seg =
          snd_scale' = 0
          rcv_window = min tcp_maxwin freebsd_so_rcvbuf
 
-         newiss = SeqLocal 1000 -- beginning iss. (todo: add more randomness)
          t_rttseg' = Just (ticks h, newiss)
          seqnum = SeqForeign (tcp_seq seg)
          --acknum = SeqLocal (tcp_ack seg)

@@ -40,6 +40,7 @@ import Foreign
 import Control.Exception
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
+import System.Random
 
 
 to_Int :: Integral a => a -> Int
@@ -158,7 +159,7 @@ instance Seq32 Word32 where
     res = fromIntegral s - fromIntegral t
   {-# INLINE seq_diff #-}
 
-newtype SeqLocal   = SeqLocal   Word32 deriving (Eq,Show,Seq32)
+newtype SeqLocal   = SeqLocal   Word32 deriving (Eq,Show,Seq32,Random)
 newtype SeqForeign = SeqForeign Word32 deriving (Eq,Show,Seq32)
 newtype Timestamp  = Timestamp  Word32 deriving (Eq,Show,Seq32)
 

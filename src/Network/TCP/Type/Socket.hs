@@ -39,6 +39,7 @@ import Network.TCP.Type.Timer
 import Network.TCP.Type.Datagram
 import Network.TCP.Type.Syscall
 import Data.Map as Map
+import System.Random
 
 data TCPState = CLOSED
               | LISTEN
@@ -180,6 +181,7 @@ data Host threadt = Host
     , clock           :: !Time
     , next_timers     :: !(Time,Time) -- fast timer, slow timer
     , local_ports     :: ![Port]
+    , randomGenerator :: !StdGen
     }
 
 empty_host :: Host t
@@ -191,6 +193,7 @@ empty_host = Host
   , clock           = 0
   , next_timers     = (0,0)
   , local_ports     = [0..65535]
+  , randomGenerator = mkStdGen 0xdeadbeef
   }
 
 update_host_time :: Time -> Host t -> Host t

@@ -27,10 +27,13 @@ import Control.Concurrent (forkIO)
 import MonadLib (get,set)
 import qualified Data.ByteString as S
 
+import System.Random
+
 
 runTcpLayer :: TcpHandle -> IP4Handle -> TimerHandle -> IO ()
 runTcpLayer tcp ip4 t = do
-  let s0 = emptyTcpState tcp ip4 t
+  g <- getStdGen
+  let s0 = emptyTcpState tcp ip4 t g
   void (forkIO (loopLayer s0 (receive tcp) updateTimeAndRun))
   addIP4Handler ip4 tcpProtocol (queueTcp tcp)
 
