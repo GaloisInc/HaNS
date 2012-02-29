@@ -32,8 +32,8 @@ openXenDevice _ =
   initializeNIC dev Nothing
 
 
-xenSend :: NIC -> S.ByteString -> IO ()
-xenSend nic bs = void (Xen.transmitPacket nic (L.fromChunks [bs]))
+xenSend :: NIC -> L.ByteString -> IO ()
+xenSend nic bs = void (Xen.transmitPacket nic bs)
 
 
 xenReceiveLoop :: NIC -> EthernetHandle -> IO ()
