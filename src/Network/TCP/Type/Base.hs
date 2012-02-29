@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {--
 Copyright (c) 2006, Peng Li
@@ -158,6 +160,15 @@ instance Seq32 Word32 where
     where
     res = fromIntegral s - fromIntegral t
   {-# INLINE seq_diff #-}
+
+#if defined(xen_HOST_OS)
+instance Random Word32 where
+  randomR (l,h) g = let l' :: Integer = fromIntegral l
+                        h'            = fromIntegral h
+                        (r, g')       = randomR (l',h') g
+                    in (fromIntegral r, g')
+  random          = randomR (minBound, maxBound)
+#endif
 
 newtype SeqLocal   = SeqLocal   Word32 deriving (Eq,Show,Seq32,Random)
 newtype SeqForeign = SeqForeign Word32 deriving (Eq,Show,Seq32)
