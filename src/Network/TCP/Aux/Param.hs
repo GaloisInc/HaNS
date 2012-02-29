@@ -95,8 +95,14 @@ tcp_maxwinscale  = 14
 
 
 --default
-freebsd_so_rcvbuf :: Int
-freebsd_so_rcvbuf  = 42080
+--freebsd_so_rcvbuf :: Int
+--freebsd_so_rcvbuf  = 42080
+
+windows_so_rcvbuf :: Int
+windows_so_rcvbuf  = 0xfaf0
+
+default_so_rcvbuf :: Int
+default_so_rcvbuf  = windows_so_rcvbuf
 
 freebsd_so_sndbuf :: Int
 freebsd_so_sndbuf  = 9216

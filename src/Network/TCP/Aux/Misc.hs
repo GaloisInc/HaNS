@@ -136,7 +136,7 @@ calculate_bsd_rcv_wnd tcp_sock =
   let cb' = cb_rcv tcp_sock
    in assert (rcv_adv cb' >= rcv_nxt cb') $ -- assertion for debugging
         max (seq_diff (rcv_adv cb') (rcv_nxt cb'))
-          (freebsd_so_rcvbuf - bufc_length (rcvq cb'))
+          (default_so_rcvbuf - bufc_length (rcvq cb'))
 
 send_queue_space :: Num a => a -> a -> a
 send_queue_space sndq_max sndq_size = (sndq_max - sndq_size)

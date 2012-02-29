@@ -74,9 +74,9 @@ deliver_in_2 seg = do
 
     (_, _, t_maxseg'', snd_cwnd') = 
         calculate_buf_sizes ourmss (tcp_mss seg) Nothing False 
-            (freebsd_so_rcvbuf) (freebsd_so_sndbuf) tf_doing_tstmp';
+            (default_so_rcvbuf) (freebsd_so_sndbuf) tf_doing_tstmp';
 
-    rcv_window = min tcp_maxwin freebsd_so_rcvbuf;
+    rcv_window = min tcp_maxwin default_so_rcvbuf;
 
     emission_time = 
       ( case tcp_ts seg of

@@ -187,7 +187,7 @@ header_prediction seg h sid sock tcb rcb scb seqnum acknum =
             --------------------------------------------------------------------------------
        else if acknum == snd_una scb
                && List.null (t_segq rcb)
-               && bufc_length (tcp_data seg) < (freebsd_so_rcvbuf - (bufc_length $ rcvq rcb))
+               && bufc_length (tcp_data seg) < (default_so_rcvbuf - (bufc_length $ rcvq rcb))
        then do -- pure in-sequence data packet 
             --------------------------------------------------------------------------------
             return False

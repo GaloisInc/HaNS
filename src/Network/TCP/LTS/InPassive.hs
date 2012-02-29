@@ -92,12 +92,12 @@ deliver_in_1 sid sock seg =
          --(rcvbufsize', sndbufsize', t_maxseg', snd_cwnd') =
          (_, _, t_maxseg', snd_cwnd') =
           calculate_buf_sizes advmss (tcp_mss seg) Nothing False
-            (freebsd_so_rcvbuf) (freebsd_so_sndbuf) tf_doing_tstmp'
+            (default_so_rcvbuf) (freebsd_so_sndbuf) tf_doing_tstmp'
 
          tf_doing_ws' = False -- not doing window scaling (todo: change it)
          rcv_scale' = 0
          snd_scale' = 0
-         rcv_window = min tcp_maxwin freebsd_so_rcvbuf
+         rcv_window = min tcp_maxwin default_so_rcvbuf
 
          t_rttseg' = Just (ticks h, newiss)
          seqnum = SeqForeign (tcp_seq seg)

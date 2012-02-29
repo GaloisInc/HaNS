@@ -109,10 +109,10 @@ tcp_output_really curr_time window_probe ts_val' tcp_sock =
         have_data_to_send = (snd_nxt scb) < last_sndq_data_seq
         have_data_or_fin_to_send = (snd_nxt scb) < last_sndq_data_and_fin_seq
         window_update_delta = (min (tcp_maxwin `shiftL` (rcv_scale tcb))
-                                   (freebsd_so_rcvbuf - (bufc_length $ rcvq rcb))
+                                   (default_so_rcvbuf - (bufc_length $ rcvq rcb))
                               ) - ( (rcv_adv rcb) `seq_diff` (rcv_nxt rcb))
         need_to_send_a_window_update =  (window_update_delta >= 2 * (t_maxseg tcb)) ||
-                                        (2*window_update_delta >= freebsd_so_rcvbuf)
+                                        (2*window_update_delta >= default_so_rcvbuf)
         do_output = ( have_data_or_fin_to_send && (if have_data_to_send then snd_wnd_unused>0 else True) )
                     || need_to_send_a_window_update -- sndurp tcp_sock /= Nothing
                     || tf_shouldacknow rcb
@@ -157,7 +157,7 @@ tcp_output_really curr_time window_probe ts_val' tcp_sock =
         rcv_wnd'' = calculate_bsd_rcv_wnd tcp_sock
         rcv_wnd' = max (rcv_adv rcb `seq_diff` (rcv_nxt rcb))
                        (min (tcp_maxwin `shiftL` (rcv_scale tcb))
-                            (if rcv_wnd'' < (freebsd_so_rcvbuf `div` 4) && rcv_wnd'' < (t_maxseg tcb) 
+                            (if rcv_wnd'' < (default_so_rcvbuf `div` 4) && rcv_wnd'' < (t_maxseg tcb) 
                                 then 0 else rcv_wnd''))
         want_tstmp = if st tcp_sock == SYN_SENT then tf_req_tstmp tcb else tf_doing_tstmp tcb
         ts_ = do_tcp_options curr_time want_tstmp (ts_recent $ cb_time tcp_sock) ts_val'
