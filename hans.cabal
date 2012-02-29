@@ -29,6 +29,10 @@ flag halvm
         default:        False
         description:    Build for the HaLVM
 
+flag word32-in-random
+        default:        False
+        description:    Word32 in Random
+
 library
         if(flag(halvm))
                 build-depends:          XenDevice, communication
@@ -52,8 +56,14 @@ library
                                 containers >= 0.3.0.0 && < 0.5.0.0,
                                 monadLib   >= 3.6.0   && < 3.7.0,
                                 time       >= 1.1.0.0 && < 1.5.0.0,
-                                fingertree >= 0.0.1.0 && < 0.1.0.0,
-                                random     >= 1.0.0.0 && < 1.1.0.0
+                                fingertree >= 0.0.1.0 && < 0.1.0.0
+
+        if flag(word32-in-random)
+                build-depends:  random     >= 1.0.1.0 && < 1.1.0.0
+                cpp-options:    -DWORD32_IN_RANDOM
+        else
+                build-depends:  random     >= 1.0.0.0 && < 1.0.1.0
+
         exposed-modules:        Data.PrefixTree,
                                 Hans.Address,
                                 Hans.Utils.Checksum,

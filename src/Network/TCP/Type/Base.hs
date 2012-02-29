@@ -161,7 +161,7 @@ instance Seq32 Word32 where
     res = fromIntegral s - fromIntegral t
   {-# INLINE seq_diff #-}
 
-#if defined(xen_HOST_OS)
+#if defined(xen_HOST_OS) || !defined(WORD32_IN_RANDOM)
 instance Random Word32 where
   randomR (l,h) g = let l' :: Integer = fromIntegral l
                         h'            = fromIntegral h
