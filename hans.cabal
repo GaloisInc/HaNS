@@ -15,7 +15,7 @@ description:
 
 source-repository head
         type:           git
-        location:       git://src.galois.com/srv/git/HaNS.git
+        location:       git://github.com/GaloisInc/HaNS.git
 
 flag bounded-channels
         default:        False
