@@ -100,7 +100,7 @@ arpHandle  = ip4ArpHandle `fmap` get
 
 sendBytes :: IP4Protocol -> IP4 -> L.ByteString -> IP ()
 sendBytes prot dst bs = do
-  rule@(src,_,mtu) <- findRoute dst
+  rule@(src,_,_mtu) <- findRoute dst
   let hdr = emptyIP4Header prot src dst
 {-
   hdr' <- if fromIntegral (L.length bs) + 20 < mtu

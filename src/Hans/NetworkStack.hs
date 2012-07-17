@@ -1,31 +1,13 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module Hans.NetworkStack (
-    module Hans.NetworkStack
-
-    -- * Re-exported
-
-    -- ** TCP
-  , Tcp.Socket()
-  , Tcp.SocketError(..)
-  , Tcp.acceptSocket
-  , Tcp.connect
-  , Tcp.sendSocket
-  , Tcp.readBytes
-  , Tcp.readLine
-  , Tcp.closeSocket
-
-  , Tcp.getSocketHost
-  , Tcp.getSocketPort
-  ) where
+module Hans.NetworkStack where
 
 import Hans.Address (getMaskComponents)
 import Hans.Address.IP4 (IP4Mask,IP4)
 import Hans.Address.Mac (Mac)
 import Hans.Channel (newChannel)
 import Hans.Message.Ip4 (IP4Protocol)
-import Hans.Message.Tcp (TcpPort)
 import Hans.Message.Udp (UdpPort)
 import qualified Hans.Layer.Arp as Arp
 import qualified Hans.Layer.Ethernet as Eth
@@ -227,10 +209,6 @@ instance HasTcp Tcp.TcpHandle where tcpHandle = id
 startTcpLayer :: (HasIP4 stack, HasTimer stack, HasTcp stack) => stack -> IO ()
 startTcpLayer stack =
   Tcp.runTcpLayer (tcpHandle stack) (ip4Handle stack) (timerHandle stack)
-
--- | Open a socket.
-listenPort :: HasTcp stack => stack -> TcpPort -> IO Tcp.Socket
-listenPort stack = Tcp.listenPort (tcpHandle stack)
 
 
 -- Timer Layer Interface -------------------------------------------------------

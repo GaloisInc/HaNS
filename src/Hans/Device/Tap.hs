@@ -9,10 +9,10 @@ import Control.Concurrent (threadWaitRead)
 import Control.Monad (forever)
 import Data.Word (Word8)
 import Foreign.C.String (CString,withCString)
-import Foreign.C.Types (CLong,CSize)
+import Foreign.C.Types (CLong(..),CSize(..),CInt(..))
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
-import System.Posix.Types (Fd)
+import System.Posix.Types (Fd(..))
 import qualified Data.ByteString          as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy     as L
