@@ -13,18 +13,16 @@ import MonadLib (get)
 
 type TcpHandle = Channel (Tcp ())
 
-type Thread = IO ()
+type Tcp = Layer TcpState
 
-type Tcp = Layer (TcpState Thread)
-
-data TcpState t = TcpState
+data TcpState = TcpState
   { tcpSelf   :: TcpHandle
   , tcpIP4    :: IP4Handle
   , tcpTimers :: TimerHandle
   , tcpConns  :: Connections
   }
 
-emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState t
+emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
 emptyTcpState tcp ip4 timer = TcpState
   { tcpSelf   = tcp
   , tcpIP4    = ip4
