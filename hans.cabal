@@ -79,6 +79,7 @@ library
                                 Hans.Layer.IP4.Routing,
                                 Hans.Layer.Icmp4,
                                 Hans.Layer.Tcp,
+                                Hans.Layer.Tcp.Connection,
                                 Hans.Layer.Tcp.Handlers,
                                 Hans.Layer.Tcp.Monad,
                                 Hans.Layer.Timer,

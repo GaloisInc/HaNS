@@ -3,6 +3,7 @@ module Hans.Layer.Tcp.Monad where
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
+import Hans.Layer.Tcp.Connection
 import Hans.Layer.Timer
 
 import MonadLib (get)
@@ -20,6 +21,7 @@ data TcpState t = TcpState
   { tcpSelf   :: TcpHandle
   , tcpIP4    :: IP4Handle
   , tcpTimers :: TimerHandle
+  , tcpConns  :: Connections
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState t
@@ -27,6 +29,7 @@ emptyTcpState tcp ip4 timer = TcpState
   { tcpSelf   = tcp
   , tcpIP4    = ip4
   , tcpTimers = timer
+  , tcpConns  = emptyConnections
   }
 
 -- | The handle to this layer.
