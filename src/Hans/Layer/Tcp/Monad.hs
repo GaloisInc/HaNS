@@ -6,7 +6,7 @@ import Hans.Layer.IP4
 import Hans.Layer.Tcp.Connection
 import Hans.Layer.Timer
 
-import MonadLib (get)
+import MonadLib (get,set)
 
 
 -- TCP Monad -------------------------------------------------------------------
@@ -41,3 +41,11 @@ ip4Handle  = tcpIP4 `fmap` get
 -- | Get the handle to the Timer layer.
 timerHandle :: Tcp TimerHandle
 timerHandle  = tcpTimers `fmap` get
+
+getConnections :: Tcp Connections
+getConnections  = tcpConns `fmap` get
+
+setConnections :: Connections -> Tcp ()
+setConnections conns = do
+  rw <- get
+  set $! rw { tcpConns = conns }

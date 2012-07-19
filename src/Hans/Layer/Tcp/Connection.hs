@@ -15,6 +15,12 @@ type Connections = Map.Map ConnIdent Connection
 emptyConnections :: Connections
 emptyConnections  = Map.empty
 
+addConnection :: ConnIdent -> Connection -> Connections -> Connections
+addConnection  = Map.insert
+
+lookupConnection :: ConnIdent -> Connections -> Maybe Connection
+lookupConnection  = Map.lookup
+
 -- | Connection identifiers.  This is the pair of both host addresses, and both
 -- tcp ports.  In the future, this could have the address abstracted out,
 -- allowing for the implementation to bet network layer agnostic.  For now, it's
@@ -26,10 +32,23 @@ data ConnIdent = ConnIdent
   , ciLocalPort  :: !TcpPort
   } deriving (Show,Eq,Ord)
 
+incomingConnIdent :: IP4 -> IP4 -> TcpHeader -> ConnIdent
+incomingConnIdent remote local hdr = ConnIdent
+  { ciRemoteHost = remote
+  , ciRemotePort = tcpSourcePort hdr
+  , ciLocalHost  = local
+  , ciLocalPort  = tcpDestPort hdr
+  }
+
 -- | Connection buffering and state.
 data Connection = Connection
   { conState :: ConnectionState
   } deriving (Show)
+
+listenPassive :: Connection
+listenPassive  = Connection
+  { conState = Listen
+  }
 
 -- | TCP connection states.
 data ConnectionState

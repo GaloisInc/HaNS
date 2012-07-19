@@ -81,6 +81,7 @@ library
                                 Hans.Layer.Tcp,
                                 Hans.Layer.Tcp.Connection,
                                 Hans.Layer.Tcp.Handlers,
+                                Hans.Layer.Tcp.Messages,
                                 Hans.Layer.Tcp.Monad,
                                 Hans.Layer.Timer,
                                 Hans.Layer.Udp,
