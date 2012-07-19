@@ -4,22 +4,21 @@ import Hans.Address.IP4
 import Hans.Message.Tcp
 
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 
 -- Connections -----------------------------------------------------------------
 
--- | Active connections.
 type Connections = Map.Map ConnIdent Connection
 
--- | Empty, initial connections.
 emptyConnections :: Connections
 emptyConnections  = Map.empty
 
-addConnection :: ConnIdent -> Connection -> Connections -> Connections
-addConnection  = Map.insert
-
 lookupConnection :: ConnIdent -> Connections -> Maybe Connection
 lookupConnection  = Map.lookup
+
+addConnection :: ConnIdent -> Connection -> Connections -> Connections
+addConnection  = Map.insert
 
 -- | Connection identifiers.  This is the pair of both host addresses, and both
 -- tcp ports.  In the future, this could have the address abstracted out,
@@ -40,15 +39,9 @@ incomingConnIdent remote local hdr = ConnIdent
   , ciLocalPort  = tcpDestPort hdr
   }
 
--- | Connection buffering and state.
 data Connection = Connection
   { conState :: ConnectionState
   } deriving (Show)
-
-listenPassive :: Connection
-listenPassive  = Connection
-  { conState = Listen
-  }
 
 -- | TCP connection states.
 data ConnectionState
@@ -64,3 +57,22 @@ data ConnectionState
   | Established
   | LastAck
     deriving (Show)
+
+
+-- Listening Connections -------------------------------------------------------
+
+type ListenConnections = Set.Set ListenConnection
+
+emptyListenConnections :: ListenConnections
+emptyListenConnections  = Set.empty
+
+isListening :: ListenConnection -> ListenConnections -> Bool
+isListening  = Set.member
+
+addListenConnection :: ListenConnection -> ListenConnections -> ListenConnections
+addListenConnection  = Set.insert
+
+data ListenConnection = ListenConnection
+  { lcHost :: !IP4
+  , lcPort :: !TcpPort
+  } deriving (Show,Eq,Ord)

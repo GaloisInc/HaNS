@@ -16,18 +16,20 @@ type TcpHandle = Channel (Tcp ())
 type Tcp = Layer TcpState
 
 data TcpState = TcpState
-  { tcpSelf   :: TcpHandle
-  , tcpIP4    :: IP4Handle
-  , tcpTimers :: TimerHandle
-  , tcpConns  :: Connections
+  { tcpSelf        :: TcpHandle
+  , tcpIP4         :: IP4Handle
+  , tcpTimers      :: TimerHandle
+  , tcpListenConns :: ListenConnections
+  , tcpConns       :: Connections
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
 emptyTcpState tcp ip4 timer = TcpState
-  { tcpSelf   = tcp
-  , tcpIP4    = ip4
-  , tcpTimers = timer
-  , tcpConns  = emptyConnections
+  { tcpSelf        = tcp
+  , tcpIP4         = ip4
+  , tcpTimers      = timer
+  , tcpListenConns = emptyListenConnections
+  , tcpConns       = emptyConnections
   }
 
 -- | The handle to this layer.
@@ -46,6 +48,14 @@ getConnections :: Tcp Connections
 getConnections  = tcpConns `fmap` get
 
 setConnections :: Connections -> Tcp ()
-setConnections conns = do
+setConnections cons = do
   rw <- get
-  set $! rw { tcpConns = conns }
+  set $! rw { tcpConns = cons }
+
+getListenConnections :: Tcp ListenConnections
+getListenConnections  = tcpListenConns `fmap` get
+
+setListenConnections :: ListenConnections -> Tcp ()
+setListenConnections cons = do
+  rw <- get
+  set $! rw { tcpListenConns = cons }

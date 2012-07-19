@@ -10,6 +10,9 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (forever)
 
 
+localAddr :: IP4
+localAddr  = IP4 192 168 90 2
+
 main :: IO ()
 main  = do
   ns  <- newNetworkStack
@@ -17,6 +20,9 @@ main  = do
   deviceUp ns mac
   setAddress mac ns
   putStrLn "Network stack running..."
+
+  sock <- listen ns localAddr 8080
+
   forever (threadDelay maxBound)
 
 initEthernetDevice :: NetworkStack -> IO Mac
@@ -28,5 +34,5 @@ initEthernetDevice ns = do
 
 setAddress :: Mac -> NetworkStack -> IO ()
 setAddress mac ns = do
-  addIP4Addr ns (IP4 192 168 90 2 `withMask` 24) mac 1500
-  routeVia ns (IP4 0 0 0 0 `withMask` 0) (IP4 192 168 50 1)
+  addIP4Addr ns (localAddr `withMask` 24) mac 1500
+  routeVia ns (IP4 0 0 0 0 `withMask` 0) (IP4 192 168 90 1)

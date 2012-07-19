@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Hans.Message.Tcp where
 
@@ -29,7 +30,7 @@ tcpProtocol  = IP4Protocol 0x6
 
 newtype TcpPort = TcpPort
   { getPort :: Word16
-  } deriving (Eq,Ord,Read,Show)
+  } deriving (Eq,Ord,Read,Show,Num)
 
 putTcpPort :: Putter TcpPort
 putTcpPort (TcpPort w16) = putWord16be w16
