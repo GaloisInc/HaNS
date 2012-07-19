@@ -22,9 +22,9 @@ import qualified Data.ByteString.Lazy as L
 handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
-
   established src dst hdr body
-    `mplus` connecting src dst hdr body
+    `mplus` startConnection src dst hdr
+    `mplus` connected src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
 
 -- | Handle a message for an already established connection.
@@ -34,10 +34,19 @@ established remote local hdr _body = do
   output (print con)
 
 -- | Handle an attempt to create a connection on a listening port.
-connecting :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
-connecting remote local hdr _body = do
+startConnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
+startConnection remote local hdr = do
+  guard (isSyn hdr)
   requireListening local (tcpDestPort hdr)
-  output (putStrLn ("connection from: " ++ show (remote,local,hdr)))
+  output (putStrLn "startConnection")
+  synAck remote hdr
+
+-- | Record the fact that the connection has been established.
+connected :: IP4 -> IP4 -> TcpHeader -> Tcp ()
+connected remote local hdr = do
+  guard (isAck hdr)
+  newConnection remote local hdr Established
+  output (putStrLn "connected")
 
 
 -- Outgoing Packets ------------------------------------------------------------
@@ -49,6 +58,9 @@ sendSegment dst hdr body = do
   output $ IP4.withIP4Source ip4 dst $ \ src ->
     let pkt = renderWithTcpChecksumIP4 src dst hdr body
      in IP4.sendIP4Packet ip4 tcpProtocol dst pkt
+
+synAck :: IP4 -> TcpHeader -> Tcp ()
+synAck remote hdr = sendSegment remote (mkSynAck hdr) L.empty
 
 
 -- Guards ----------------------------------------------------------------------
@@ -69,3 +81,11 @@ getConnection remote local hdr = do
     Just con -> return con
     Nothing  -> do
       mzero
+
+-- | Create a new connection.
+newConnection :: IP4 -> IP4 -> TcpHeader -> ConnectionState -> Tcp ()
+newConnection remote local hdr state = do
+  cons <- getConnections
+  let ident = incomingConnIdent remote local hdr
+      con   = emptyConnection state
+  setConnections (addConnection ident con cons)

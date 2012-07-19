@@ -14,3 +14,25 @@ mkRstAck hdr = emptyTcpHeader
   , tcpAck        = True
   , tcpRst        = True
   }
+
+mkSynAck :: TcpHeader -> TcpHeader
+mkSynAck hdr = emptyTcpHeader
+  { tcpSeqNum     = tcpSeqNum hdr
+  , tcpAckNum     = TcpAckNum (getSeqNum (tcpSeqNum hdr) + 1)
+  , tcpSourcePort = tcpDestPort hdr
+  , tcpDestPort   = tcpSourcePort hdr
+  , tcpAck        = True
+  , tcpSyn        = True
+  }
+
+isSyn :: TcpHeader -> Bool
+isSyn hdr = foldr step (tcpSyn hdr) fields
+  where
+  step p r = r && not (p hdr)
+  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpFin ]
+
+isAck :: TcpHeader -> Bool
+isAck hdr = foldr step (tcpAck hdr) fields
+  where
+  step p r = r && not (p hdr)
+  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn, tcpFin ]

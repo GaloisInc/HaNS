@@ -43,6 +43,11 @@ data Connection = Connection
   { conState :: ConnectionState
   } deriving (Show)
 
+emptyConnection :: ConnectionState -> Connection
+emptyConnection state = Connection
+  { conState = state
+  }
+
 -- | TCP connection states.
 data ConnectionState
   = Closed
