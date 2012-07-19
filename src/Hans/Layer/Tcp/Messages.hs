@@ -15,9 +15,9 @@ mkRstAck hdr = emptyTcpHeader
   , tcpRst        = True
   }
 
-mkSynAck :: TcpHeader -> TcpHeader
-mkSynAck hdr = emptyTcpHeader
-  { tcpSeqNum     = tcpSeqNum hdr
+mkSynAck :: TcpSeqNum -> TcpHeader -> TcpHeader
+mkSynAck sn hdr = emptyTcpHeader
+  { tcpSeqNum     = sn
   , tcpAckNum     = TcpAckNum (getSeqNum (tcpSeqNum hdr) + 1)
   , tcpSourcePort = tcpDestPort hdr
   , tcpDestPort   = tcpSourcePort hdr

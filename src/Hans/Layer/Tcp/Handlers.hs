@@ -60,7 +60,7 @@ sendSegment dst hdr body = do
      in IP4.sendIP4Packet ip4 tcpProtocol dst pkt
 
 synAck :: IP4 -> TcpHeader -> Tcp ()
-synAck remote hdr = sendSegment remote (mkSynAck hdr) L.empty
+synAck remote hdr = sendSegment remote (mkSynAck (TcpSeqNum 0) hdr) L.empty
 
 
 -- Guards ----------------------------------------------------------------------
