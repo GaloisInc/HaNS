@@ -3,8 +3,8 @@ module Hans.Layer.Tcp.Connection where
 import Hans.Address.IP4
 import Hans.Message.Tcp
 
+import Control.Monad (mzero)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 
 
 -- Connections -----------------------------------------------------------------
@@ -66,18 +66,27 @@ data ConnectionState
 
 -- Listening Connections -------------------------------------------------------
 
-type ListenConnections = Set.Set ListenConnection
+type ListenConnections = Map.Map TcpPort ListenConnection
 
+-- | An empty set of listening connections.
 emptyListenConnections :: ListenConnections
-emptyListenConnections  = Set.empty
+emptyListenConnections  = Map.empty
 
-isListening :: ListenConnection -> ListenConnections -> Bool
-isListening  = Set.member
+-- | Lookup listening connection information.
+lookupListeningConnection :: IP4 -> TcpPort -> ListenConnections
+                          -> Maybe ListenConnection
+lookupListeningConnection local port cons = do
+  lc <- Map.lookup port cons
+  case lcHost lc of
+    Just addr | addr == local -> return lc
+              | otherwise     -> mzero
+    Nothing                   -> return lc
 
-addListenConnection :: ListenConnection -> ListenConnections -> ListenConnections
-addListenConnection  = Set.insert
+-- | Register a listening connection on a port.
+addListenConnection :: TcpPort -> ListenConnection
+                    -> ListenConnections -> ListenConnections
+addListenConnection  = Map.insert
 
 data ListenConnection = ListenConnection
-  { lcHost :: !IP4
-  , lcPort :: !TcpPort
+  { lcHost :: Maybe IP4
   } deriving (Show,Eq,Ord)

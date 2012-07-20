@@ -38,12 +38,14 @@ blockResult tcp action = do
 listen :: TcpHandle -> IP4 -> TcpPort -> IO Socket
 listen tcp src port = blockResult tcp $ \ res -> do
   ls <- getListenConnections
-  let lc = ListenConnection { lcHost = src, lcPort = port }
-  if isListening lc ls
-     then output (putMVar res SocketError)
-     else do
-       setListenConnections (addListenConnection lc ls)
-       output $ putMVar res $ SocketResult Socket
-         { sockHandle = tcp
-         , sockIdent  = lc
-         }
+  case lookupListeningConnection src port ls of
+
+    Nothing -> do
+      let lc = ListenConnection { lcHost = Just src }
+      setListenConnections (addListenConnection port lc ls)
+      output $ putMVar res $ SocketResult Socket
+        { sockHandle = tcp
+        , sockIdent  = lc
+        }
+
+    Just _ -> output (putMVar res SocketError)

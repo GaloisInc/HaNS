@@ -23,30 +23,28 @@ handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
   established src dst hdr body
-    `mplus` startConnection src dst hdr
-    `mplus` connected src dst hdr
+    `mplus` listening src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
 
 -- | Handle a message for an already established connection.
 established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 established remote local hdr _body = do
-  con <- getConnection remote local hdr
-  output (print con)
+  let ident = incomingConnIdent remote local hdr
+  con <- getConnection ident
+  case conState con of
+
+    SynRcvd | isAck hdr -> setConnection ident con { conState = Established }
+
+    _ -> mzero
 
 -- | Handle an attempt to create a connection on a listening port.
-startConnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-startConnection remote local hdr = do
+listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
+listening remote local hdr = do
   guard (isSyn hdr)
-  requireListening local (tcpDestPort hdr)
-  output (putStrLn "startConnection")
+  _con <- getListening local (tcpDestPort hdr)
+  let ident = incomingConnIdent remote local hdr
+  newConnection ident SynRcvd
   synAck remote hdr
-
--- | Record the fact that the connection has been established.
-connected :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-connected remote local hdr = do
-  guard (isAck hdr)
-  newConnection remote local hdr Established
-  output (putStrLn "connected")
 
 
 -- Outgoing Packets ------------------------------------------------------------
@@ -59,6 +57,7 @@ sendSegment dst hdr body = do
     let pkt = renderWithTcpChecksumIP4 src dst hdr body
      in IP4.sendIP4Packet ip4 tcpProtocol dst pkt
 
+-- | Respond to a SYN message with a SYN ACK message.
 synAck :: IP4 -> TcpHeader -> Tcp ()
 synAck remote hdr = sendSegment remote (mkSynAck (TcpSeqNum 0) hdr) L.empty
 
@@ -66,26 +65,27 @@ synAck remote hdr = sendSegment remote (mkSynAck (TcpSeqNum 0) hdr) L.empty
 -- Guards ----------------------------------------------------------------------
 
 -- | Require that a listening connection exists.
-requireListening :: IP4 -> TcpPort -> Tcp ()
-requireListening local port = do
+getListening :: IP4 -> TcpPort -> Tcp ListenConnection
+getListening local port = do
   cons <- getListenConnections
-  let lcon = ListenConnection { lcHost = local, lcPort = port }
-  guard (isListening lcon cons)
+  case lookupListeningConnection local port cons of
+    Just con -> return con
+    Nothing  -> mzero
 
 -- | Lookup a connection in the internal connection map.  If the connection does
 -- not exist, emit a RST ACK and fail the rest of the computation with mzero.
-getConnection :: IP4 -> IP4 -> TcpHeader -> Tcp Connection
-getConnection remote local hdr = do
+getConnection :: ConnIdent -> Tcp Connection
+getConnection ident = do
   cons <- getConnections
-  case lookupConnection (incomingConnIdent remote local hdr) cons of
+  case lookupConnection ident cons of
     Just con -> return con
-    Nothing  -> do
-      mzero
+    Nothing  -> mzero
+
+setConnection :: ConnIdent -> Connection -> Tcp ()
+setConnection ident con = do
+  cons <- getConnections
+  setConnections (addConnection ident con cons)
 
 -- | Create a new connection.
-newConnection :: IP4 -> IP4 -> TcpHeader -> ConnectionState -> Tcp ()
-newConnection remote local hdr state = do
-  cons <- getConnections
-  let ident = incomingConnIdent remote local hdr
-      con   = emptyConnection state
-  setConnections (addConnection ident con cons)
+newConnection :: ConnIdent -> ConnectionState -> Tcp ()
+newConnection ident state = setConnection ident (emptyConnection state)
