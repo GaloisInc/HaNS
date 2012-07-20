@@ -299,25 +299,56 @@ data DestinationUnreachableCode
   | PortUnreachable
   | FragmentationUnreachable
   | SourceRouteFailed
+  | DestinationNetworkUnknown
+  | DestinationHostUnknown
+  | SourceHostIsolatedError
+  | AdministrativelyProhibited
+  | HostAdministrativelyProhibited
+  | NetworkUnreachableForTOS
+  | HostUnreachableForTOS
+  | CommunicationAdministrativelyProhibited
+  | HostPrecedenceViolation
+  | PrecedenceCutoffInEffect
   deriving Show
 
 instance Serialize DestinationUnreachableCode where
   get = do b <- getWord8
            case b of
-             0 -> return NetUnreachable
-             1 -> return HostUnreachable
-             2 -> return ProtocolUnreachable
-             3 -> return PortUnreachable
-             4 -> return FragmentationUnreachable
-             5 -> return SourceRouteFailed
-             _ -> fail "Invalid code for Destination Unreachable"
+             0  -> return NetUnreachable
+             1  -> return HostUnreachable
+             2  -> return ProtocolUnreachable
+             3  -> return PortUnreachable
+             4  -> return FragmentationUnreachable
+             5  -> return SourceRouteFailed
+             6  -> return DestinationNetworkUnknown
+             7  -> return DestinationHostUnknown
+             8  -> return SourceHostIsolatedError
+             9  -> return AdministrativelyProhibited
+             10 -> return HostAdministrativelyProhibited
+             11 -> return NetworkUnreachableForTOS
+             12 -> return HostUnreachableForTOS
+             13 -> return CommunicationAdministrativelyProhibited
+             14 -> return HostPrecedenceViolation
+             15 -> return PrecedenceCutoffInEffect
+             _  -> fail "Invalid code for Destination Unreachable"
 
-  put NetUnreachable            = putWord8 0
-  put HostUnreachable           = putWord8 1
-  put ProtocolUnreachable       = putWord8 2
-  put PortUnreachable           = putWord8 3
-  put FragmentationUnreachable  = putWord8 4
-  put SourceRouteFailed         = putWord8 5
+  put code = case code of
+    NetUnreachable                          -> putWord8 0
+    HostUnreachable                         -> putWord8 1
+    ProtocolUnreachable                     -> putWord8 2
+    PortUnreachable                         -> putWord8 3
+    FragmentationUnreachable                -> putWord8 4
+    SourceRouteFailed                       -> putWord8 5
+    DestinationNetworkUnknown               -> putWord8 6
+    DestinationHostUnknown                  -> putWord8 7
+    SourceHostIsolatedError                 -> putWord8 8
+    AdministrativelyProhibited              -> putWord8 9
+    HostAdministrativelyProhibited          -> putWord8 10
+    NetworkUnreachableForTOS                -> putWord8 11
+    HostUnreachableForTOS                   -> putWord8 12
+    CommunicationAdministrativelyProhibited -> putWord8 13
+    HostPrecedenceViolation                 -> putWord8 14
+    PrecedenceCutoffInEffect                -> putWord8 15
 
 data TimeExceededCode
   = TimeToLiveExceededInTransit
