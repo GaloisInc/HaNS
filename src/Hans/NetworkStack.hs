@@ -8,6 +8,12 @@ module Hans.NetworkStack (
   , UdpPort
   , Tcp.Socket()
   , TcpPort
+
+    -- * Socket Functions
+  , Tcp.sockRemoteHost
+  , Tcp.sockRemotePort
+  , Tcp.sockLocalPort
+  , Tcp.accept
   ) where
 
 import Hans.Address (getMaskComponents)

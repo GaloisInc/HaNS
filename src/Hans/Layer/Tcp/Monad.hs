@@ -4,8 +4,10 @@ import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Layer.Tcp.Connection
+import Hans.Layer.Tcp.Types
 import Hans.Layer.Timer
 
+import Control.Monad (mzero)
 import MonadLib (get,set)
 
 
@@ -16,20 +18,18 @@ type TcpHandle = Channel (Tcp ())
 type Tcp = Layer TcpState
 
 data TcpState = TcpState
-  { tcpSelf        :: TcpHandle
-  , tcpIP4         :: IP4Handle
-  , tcpTimers      :: TimerHandle
-  , tcpListenConns :: ListenConnections
-  , tcpConns       :: Connections
+  { tcpSelf   :: TcpHandle
+  , tcpIP4    :: IP4Handle
+  , tcpTimers :: TimerHandle
+  , tcpConns  :: Connections
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
 emptyTcpState tcp ip4 timer = TcpState
-  { tcpSelf        = tcp
-  , tcpIP4         = ip4
-  , tcpTimers      = timer
-  , tcpListenConns = emptyListenConnections
-  , tcpConns       = emptyConnections
+  { tcpSelf   = tcp
+  , tcpIP4    = ip4
+  , tcpTimers = timer
+  , tcpConns  = emptyConnections
   }
 
 -- | The handle to this layer.
@@ -52,10 +52,20 @@ setConnections cons = do
   rw <- get
   set $! rw { tcpConns = cons }
 
-getListenConnections :: Tcp ListenConnections
-getListenConnections  = tcpListenConns `fmap` get
+getConnection :: SocketId -> Tcp TcpSocket
+getConnection sid = do
+  cs <- getConnections
+  case lookupConnection sid cs of
+    Just tcp -> return tcp
+    Nothing  -> mzero
 
-setListenConnections :: ListenConnections -> Tcp ()
-setListenConnections cons = do
-  rw <- get
-  set $! rw { tcpListenConns = cons }
+setConnection :: SocketId -> TcpSocket -> Tcp ()
+setConnection ident con = do
+  cons <- getConnections
+  setConnections (addConnection ident con cons)
+
+newConnection :: SocketId -> ConnState -> Tcp ()
+newConnection sid state = do
+  cons <- getConnections
+  let con = emptyTcpSocket { tcpState = state }
+  setConnections (addConnection sid con cons)

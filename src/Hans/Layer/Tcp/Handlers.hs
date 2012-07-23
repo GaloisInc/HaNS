@@ -4,9 +4,9 @@ module Hans.Layer.Tcp.Handlers (
 
 import Hans.Address.IP4
 import Hans.Layer
-import Hans.Layer.Tcp.Connection
 import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
+import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 import qualified Hans.Layer.IP4 as IP4
 
@@ -23,28 +23,51 @@ handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
   established src dst hdr body
-    `mplus` listening src dst hdr
+    `mplus` initializing src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
 
 -- | Handle a message for an already established connection.
 established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
-established remote local hdr _body = do
-  let ident = incomingConnIdent remote local hdr
+established remote _local hdr _body = do
+  let ident = incomingSocketId remote hdr
   con <- getConnection ident
-  case conState con of
+  case tcpState con of
 
-    SynRcvd | isAck hdr -> setConnection ident con { conState = Established }
+    -- connection has been accepted, yield out via the connections continuation
+    SynReceived | isAck hdr -> do
+      setConnection ident con { tcpState = Established }
 
-    _ -> mzero
+    Established -> do
+      output (putStrLn "got a message for an established connection")
+
+    _ -> do
+      output (print (tcpState con))
+      mzero
+
+-- | Different states for connections that are being established.
+initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
+initializing remote local hdr
+  | isSyn hdr = listening remote local hdr
+  | isAck hdr = startsConnnection remote local hdr
+  | otherwise = mzero
 
 -- | Handle an attempt to create a connection on a listening port.
 listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-listening remote local hdr = do
-  guard (isSyn hdr)
-  _con <- getListening local (tcpDestPort hdr)
-  let ident = incomingConnIdent remote local hdr
-  newConnection ident SynRcvd
+listening remote _local hdr = do
+  lcon <- getListeningConnection (listenSocketId (tcpDestPort hdr))
+  let child = incomingSocketId remote hdr
+  newConnection child SynSent
   synAck remote hdr
+
+-- | Handle a connection finalization.
+startsConnnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
+startsConnnection remote local hdr = do
+  let child = incomingSocketId remote hdr
+  -- XXX if this fails, the socket needs to be closed and gc'd
+  con <- getConnection child
+  k   <- getAcceptor (listenSocketId (tcpDestPort hdr))
+  setConnection child con { tcpState = Established }
+  output (k child)
 
 
 -- Outgoing Packets ------------------------------------------------------------
@@ -64,28 +87,18 @@ synAck remote hdr = sendSegment remote (mkSynAck (TcpSeqNum 0) hdr) L.empty
 
 -- Guards ----------------------------------------------------------------------
 
--- | Require that a listening connection exists.
-getListening :: IP4 -> TcpPort -> Tcp ListenConnection
-getListening local port = do
-  cons <- getListenConnections
-  case lookupListeningConnection local port cons of
-    Just con -> return con
-    Nothing  -> mzero
+getListeningConnection :: SocketId -> Tcp TcpSocket
+getListeningConnection sid = do
+  tcp <- getConnection sid
+  guard (tcpState tcp == Listen && isAccepting tcp)
+  return tcp
 
--- | Lookup a connection in the internal connection map.  If the connection does
--- not exist, emit a RST ACK and fail the rest of the computation with mzero.
-getConnection :: ConnIdent -> Tcp Connection
-getConnection ident = do
-  cons <- getConnections
-  case lookupConnection ident cons of
-    Just con -> return con
-    Nothing  -> mzero
-
-setConnection :: ConnIdent -> Connection -> Tcp ()
-setConnection ident con = do
-  cons <- getConnections
-  setConnections (addConnection ident con cons)
-
--- | Create a new connection.
-newConnection :: ConnIdent -> ConnectionState -> Tcp ()
-newConnection ident state = setConnection ident (emptyConnection state)
+getAcceptor :: SocketId -> Tcp Acceptor
+getAcceptor sid = do
+  tcp <- getConnection sid
+  guard (tcpState tcp == Listen)
+  case popAcceptor tcp of
+    Just (k,tcp') -> do
+      setConnection sid tcp'
+      return k
+    Nothing -> mzero

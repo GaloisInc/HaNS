@@ -23,7 +23,10 @@ main  = do
 
   sock <- listen ns localAddr 8080
 
-  forever (threadDelay maxBound)
+  forever $ do
+    client <- accept sock
+    putStrLn ("Got one: " ++ show (sockRemoteHost client))
+
 
 initEthernetDevice :: NetworkStack -> IO Mac
 initEthernetDevice ns = do

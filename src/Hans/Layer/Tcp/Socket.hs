@@ -1,6 +1,10 @@
 module Hans.Layer.Tcp.Socket (
     Socket()
+  , sockRemoteHost
+  , sockRemotePort
+  , sockLocalPort
   , listen
+  , accept
   ) where
 
 import Hans.Address.IP4
@@ -8,6 +12,7 @@ import Hans.Channel
 import Hans.Layer
 import Hans.Layer.Tcp.Connection
 import Hans.Layer.Tcp.Monad
+import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
@@ -17,13 +22,17 @@ import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 
 data Socket = Socket
   { sockHandle :: TcpHandle
-  , sockIdent  :: !ListenConnection
+  , sockId     :: !SocketId
   }
 
-data SocketResult a
-  = SocketResult a
-  | SocketError
-    deriving (Show)
+sockRemoteHost :: Socket -> IP4
+sockRemoteHost  = sidRemoteHost . sockId
+
+sockRemotePort :: Socket -> TcpPort
+sockRemotePort  = sidRemotePort . sockId
+
+sockLocalPort :: Socket -> TcpPort
+sockLocalPort  = sidLocalPort . sockId
 
 blockResult :: TcpHandle -> (MVar (SocketResult a) -> Tcp ()) -> IO a
 blockResult tcp action = do
@@ -32,20 +41,36 @@ blockResult tcp action = do
   sockRes <- takeMVar res
   case sockRes of
     SocketResult a -> return a
+    -- XXX throw real exceptions instead of fail
     SocketError    -> fail "SocketError"
 
-
 listen :: TcpHandle -> IP4 -> TcpPort -> IO Socket
-listen tcp src port = blockResult tcp $ \ res -> do
-  ls <- getListenConnections
-  case lookupListeningConnection src port ls of
+listen tcp _src port = blockResult tcp $ \ res -> do
+  ls <- getConnections
+  let sid = listenSocketId port
+  case lookupConnection sid ls of
 
     Nothing -> do
-      let lc = ListenConnection { lcHost = Just src }
-      setListenConnections (addListenConnection port lc ls)
+      let con = emptyTcpSocket { tcpState = Listen }
+      setConnections (addConnection sid con ls)
       output $ putMVar res $ SocketResult Socket
         { sockHandle = tcp
-        , sockIdent  = lc
+        , sockId     = sid
         }
 
     Just _ -> output (putMVar res SocketError)
+
+accept :: Socket -> IO Socket
+accept sock = blockResult (sockHandle sock) $ \ res -> do
+  ls <- getConnections
+  case lookupConnection (sockId sock) ls of
+
+    Just con | tcpState con == Listen -> do
+      let k sid = putMVar res $ SocketResult $ Socket
+            { sockHandle = sockHandle sock
+            , sockId     = sid
+            }
+      setConnections (addConnection (sockId sock) (pushAcceptor k con) ls)
+
+    -- XXX need more descriptive errors
+    _ -> output (putMVar res SocketError)
