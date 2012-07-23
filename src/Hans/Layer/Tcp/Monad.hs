@@ -3,12 +3,12 @@ module Hans.Layer.Tcp.Monad where
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
-import Hans.Layer.Tcp.Connection
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Timer
 
 import Control.Monad (mzero)
 import MonadLib (get,set)
+import qualified Data.Map as Map
 
 
 -- TCP Monad -------------------------------------------------------------------
@@ -16,6 +16,8 @@ import MonadLib (get,set)
 type TcpHandle = Channel (Tcp ())
 
 type Tcp = Layer TcpState
+
+type Connections = Map.Map SocketId TcpSocket
 
 data TcpState = TcpState
   { tcpSelf   :: TcpHandle
@@ -29,7 +31,7 @@ emptyTcpState tcp ip4 timer = TcpState
   { tcpSelf   = tcp
   , tcpIP4    = ip4
   , tcpTimers = timer
-  , tcpConns  = emptyConnections
+  , tcpConns  = Map.empty
   }
 
 -- | The handle to this layer.
@@ -52,20 +54,37 @@ setConnections cons = do
   rw <- get
   set $! rw { tcpConns = cons }
 
+lookupConnection :: SocketId -> Tcp (Maybe TcpSocket)
+lookupConnection sid = do
+  cons <- getConnections
+  return (Map.lookup sid cons)
+
 getConnection :: SocketId -> Tcp TcpSocket
 getConnection sid = do
   cs <- getConnections
-  case lookupConnection sid cs of
+  case Map.lookup sid cs of
     Just tcp -> return tcp
     Nothing  -> mzero
 
 setConnection :: SocketId -> TcpSocket -> Tcp ()
 setConnection ident con = do
   cons <- getConnections
-  setConnections (addConnection ident con cons)
+  setConnections (Map.insert ident con cons)
 
 newConnection :: SocketId -> ConnState -> Tcp ()
-newConnection sid state = do
+newConnection sid state = addConnection sid emptyTcpSocket { tcpState = state }
+
+addConnection :: SocketId -> TcpSocket -> Tcp ()
+addConnection sid tcp = do
   cons <- getConnections
-  let con = emptyTcpSocket { tcpState = state }
-  setConnections (addConnection sid con cons)
+  setConnections (Map.insert sid tcp cons)
+
+modifyConnection :: SocketId -> (TcpSocket -> TcpSocket) -> Tcp ()
+modifyConnection sid k = do
+  cons <- getConnections
+  setConnections (Map.adjust k sid cons)
+
+remConnection :: SocketId -> Tcp ()
+remConnection sid = do
+  cons <- getConnections
+  setConnections (Map.delete sid cons)

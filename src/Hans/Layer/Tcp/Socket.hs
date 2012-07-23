@@ -5,17 +5,21 @@ module Hans.Layer.Tcp.Socket (
   , sockLocalPort
   , listen
   , accept
+  , close
   ) where
 
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
-import Hans.Layer.Tcp.Connection
+import Hans.Layer.Tcp.Handlers
+import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
+import Control.Monad (mplus)
+import qualified Data.ByteString.Lazy as L
 
 
 -- Socket Interface ------------------------------------------------------------
@@ -37,7 +41,9 @@ sockLocalPort  = sidLocalPort . sockId
 blockResult :: TcpHandle -> (MVar (SocketResult a) -> Tcp ()) -> IO a
 blockResult tcp action = do
   res     <- newEmptyMVar
-  send tcp (action res)
+  -- XXX put a more meaningful error here
+  let unblock = output (putMVar res SocketError)
+  send tcp (action res `mplus` unblock)
   sockRes <- takeMVar res
   case sockRes of
     SocketResult a -> return a
@@ -46,13 +52,13 @@ blockResult tcp action = do
 
 listen :: TcpHandle -> IP4 -> TcpPort -> IO Socket
 listen tcp _src port = blockResult tcp $ \ res -> do
-  ls <- getConnections
   let sid = listenSocketId port
-  case lookupConnection sid ls of
+  mb <- lookupConnection sid
+  case mb of
 
     Nothing -> do
       let con = emptyTcpSocket { tcpState = Listen }
-      setConnections (addConnection sid con ls)
+      addConnection sid con
       output $ putMVar res $ SocketResult Socket
         { sockHandle = tcp
         , sockId     = sid
@@ -62,15 +68,47 @@ listen tcp _src port = blockResult tcp $ \ res -> do
 
 accept :: Socket -> IO Socket
 accept sock = blockResult (sockHandle sock) $ \ res -> do
-  ls <- getConnections
-  case lookupConnection (sockId sock) ls of
+  mb <- lookupConnection (sockId sock)
+  case mb of
 
     Just con | tcpState con == Listen -> do
       let k sid = putMVar res $ SocketResult $ Socket
             { sockHandle = sockHandle sock
             , sockId     = sid
             }
-      setConnections (addConnection (sockId sock) (pushAcceptor k con) ls)
+      addConnection (sockId sock) (pushAcceptor k con)
 
     -- XXX need more descriptive errors
     _ -> output (putMVar res SocketError)
+
+
+-- | Close an open socket.
+close :: Socket -> IO ()
+close sock = blockResult (sockHandle sock) $ \ res -> do
+  let unblock = putMVar res (SocketResult ())
+  mb <- lookupConnection (sockId sock)
+  case mb of
+
+    Just tcp -> case tcpState tcp of
+
+      Listen -> do
+        remConnection (sockId sock)
+        output unblock
+
+      Established -> do
+        closeFin tcp
+        modifyConnection (sockId sock)
+          (pushClose unblock . setConnState FinWait1)
+
+      _ -> output unblock
+
+
+    -- nothing to do, the socket doesn't exist.
+    Nothing -> output unblock
+
+
+-- Messages --------------------------------------------------------------------
+
+closeFin :: TcpSocket -> Tcp ()
+closeFin tcp =
+  sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkCloseFin tcp) L.empty

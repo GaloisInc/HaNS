@@ -40,17 +40,28 @@ data SocketResult a
 
 type Acceptor = SocketId -> IO ()
 
+type Close = IO ()
+
 data TcpSocket = TcpSocket
   { tcpSocketId  :: !SocketId
   , tcpState     :: !ConnState
   , tcpAcceptors :: Seq.Seq Acceptor
+  , tcpClose     :: Seq.Seq Close
+  , tcpSockSeq   :: !TcpSeqNum
+  , tcpSockAck   :: !TcpAckNum
   }
+
+setConnState :: ConnState -> TcpSocket -> TcpSocket
+setConnState state tcp = tcp { tcpState = state }
 
 emptyTcpSocket :: TcpSocket
 emptyTcpSocket  = TcpSocket
   { tcpSocketId  = emptySocketId
   , tcpState     = Closed
   , tcpAcceptors = Seq.empty
+  , tcpClose     = Seq.empty
+  , tcpSockSeq   = TcpSeqNum 0
+  , tcpSockAck   = TcpAckNum 0
   }
 
 isAccepting :: TcpSocket -> Bool
@@ -63,6 +74,9 @@ popAcceptor :: TcpSocket -> Maybe (Acceptor,TcpSocket)
 popAcceptor tcp = case Seq.viewl (tcpAcceptors tcp) of
   k Seq.:< ks -> Just (k,tcp { tcpAcceptors = ks })
   Seq.EmptyL  -> Nothing
+
+pushClose :: Close -> TcpSocket -> TcpSocket
+pushClose k tcp = tcp { tcpClose = tcpClose tcp Seq.|> k }
 
 data ConnState
   = Closed

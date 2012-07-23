@@ -1,5 +1,6 @@
 module Hans.Layer.Tcp.Messages where
 
+import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
 
@@ -15,6 +16,7 @@ mkRstAck hdr = emptyTcpHeader
   , tcpRst        = True
   }
 
+-- | Construct a SYN ACK packet, in response to a SYN.
 mkSynAck :: TcpSeqNum -> TcpHeader -> TcpHeader
 mkSynAck sn hdr = emptyTcpHeader
   { tcpSeqNum     = sn
@@ -23,6 +25,12 @@ mkSynAck sn hdr = emptyTcpHeader
   , tcpDestPort   = tcpSourcePort hdr
   , tcpAck        = True
   , tcpSyn        = True
+  }
+
+-- | Construct a FIN packet.
+mkCloseFin :: TcpSocket -> TcpHeader
+mkCloseFin tcp = emptyTcpHeader
+  { tcpFin = True
   }
 
 isSyn :: TcpHeader -> Bool

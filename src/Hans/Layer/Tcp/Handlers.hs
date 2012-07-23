@@ -1,5 +1,6 @@
 module Hans.Layer.Tcp.Handlers (
     handleIncomingTcp
+  , sendSegment
   ) where
 
 import Hans.Address.IP4

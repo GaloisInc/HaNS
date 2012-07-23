@@ -14,6 +14,7 @@ module Hans.NetworkStack (
   , Tcp.sockRemotePort
   , Tcp.sockLocalPort
   , Tcp.accept
+  , Tcp.close
   ) where
 
 import Hans.Address (getMaskComponents)
