@@ -26,6 +26,7 @@ main  = do
   forever $ do
     client <- accept sock
     putStrLn ("Got one: " ++ show (sockRemoteHost client))
+    close client
 
 
 initEthernetDevice :: NetworkStack -> IO Mac

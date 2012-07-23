@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 module Hans.Layer.Tcp.Socket (
     Socket()
   , sockRemoteHost
@@ -18,7 +20,9 @@ import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
+import Control.Exception (Exception,throwIO)
 import Control.Monad (mplus)
+import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
 
@@ -29,27 +33,44 @@ data Socket = Socket
   , sockId     :: !SocketId
   }
 
+-- | The remote host of a socket.
 sockRemoteHost :: Socket -> IP4
 sockRemoteHost  = sidRemoteHost . sockId
 
+-- | The remote port of a socket.
 sockRemotePort :: Socket -> TcpPort
 sockRemotePort  = sidRemotePort . sockId
 
+-- | The local port of a socket.
 sockLocalPort :: Socket -> TcpPort
 sockLocalPort  = sidLocalPort . sockId
 
+data SocketGenericError = SocketGenericError
+    deriving (Show,Typeable)
+
+instance Exception SocketGenericError
+
+-- | Block on the result of a Tcp action, from a different context.
 blockResult :: TcpHandle -> (MVar (SocketResult a) -> Tcp ()) -> IO a
 blockResult tcp action = do
   res     <- newEmptyMVar
   -- XXX put a more meaningful error here
-  let unblock = output (putMVar res SocketError)
+  let unblock = output (putMVar res (socketError SocketGenericError))
   send tcp (action res `mplus` unblock)
   sockRes <- takeMVar res
   case sockRes of
     SocketResult a -> return a
-    -- XXX throw real exceptions instead of fail
-    SocketError    -> fail "SocketError"
+    SocketError e  -> throwIO e
 
+
+-- Listen ----------------------------------------------------------------------
+
+data ListenError = ListenError
+    deriving (Show,Typeable)
+
+instance Exception ListenError
+
+-- | Open a new listening socket that can be used to accept new connections.
 listen :: TcpHandle -> IP4 -> TcpPort -> IO Socket
 listen tcp _src port = blockResult tcp $ \ res -> do
   let sid = listenSocketId port
@@ -64,8 +85,17 @@ listen tcp _src port = blockResult tcp $ \ res -> do
         , sockId     = sid
         }
 
-    Just _ -> output (putMVar res SocketError)
+    Just _ -> output (putMVar res (socketError ListenError))
 
+
+-- Accept ----------------------------------------------------------------------
+
+data AcceptError = AcceptError
+    deriving (Show,Typeable)
+
+instance Exception AcceptError
+
+-- | Accept new incoming connections on a listening socket.
 accept :: Socket -> IO Socket
 accept sock = blockResult (sockHandle sock) $ \ res -> do
   mb <- lookupConnection (sockId sock)
@@ -79,8 +109,10 @@ accept sock = blockResult (sockHandle sock) $ \ res -> do
       addConnection (sockId sock) (pushAcceptor k con)
 
     -- XXX need more descriptive errors
-    _ -> output (putMVar res SocketError)
+    _ -> output (putMVar res (socketError AcceptError))
 
+
+-- Close -----------------------------------------------------------------------
 
 -- | Close an open socket.
 close :: Socket -> IO ()
@@ -102,13 +134,11 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
 
       _ -> output unblock
 
-
     -- nothing to do, the socket doesn't exist.
+    -- XXX should this throw an error?
     Nothing -> output unblock
 
-
--- Messages --------------------------------------------------------------------
-
+-- | Send a FIN packet to begin closing a connection.
 closeFin :: TcpSocket -> Tcp ()
 closeFin tcp =
   sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkCloseFin tcp) L.empty

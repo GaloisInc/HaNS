@@ -3,6 +3,7 @@ module Hans.Layer.Tcp.Types where
 import Hans.Address.IP4
 import Hans.Message.Tcp
 
+import Control.Exception
 import qualified Data.Sequence as Seq
 
 
@@ -35,8 +36,11 @@ data SocketRequest
 
 data SocketResult a
   = SocketResult a
-  | SocketError
+  | SocketError SomeException
     deriving (Show)
+
+socketError :: Exception e => e -> SocketResult a
+socketError  = SocketError . toException
 
 type Acceptor = SocketId -> IO ()
 
