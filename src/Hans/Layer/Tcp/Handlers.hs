@@ -40,9 +40,6 @@ established remote _local hdr _body =
         | otherwise -> do
           outputS $ putStrLn "got a message for an established connection"
 
-      -- connection has been accepted, yield out via the connections continuation
-      SynReceived | isAck hdr -> setState Established
-
       _ -> do
         inTcp $ output $ print state
         mzero
