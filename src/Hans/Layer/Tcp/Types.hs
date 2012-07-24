@@ -31,10 +31,6 @@ incomingSocketId remote hdr = SocketId
   , sidRemoteHost = remote
   }
 
-data SocketRequest
-  = SockListen
-    deriving (Show)
-
 data SocketResult a
   = SocketResult a
   | SocketError SomeException
