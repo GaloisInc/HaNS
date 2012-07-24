@@ -13,6 +13,7 @@ import Hans.Message.Tcp
 import Control.Monad (MonadPlus(..),guard)
 import MonadLib (get,set,StateT,runStateT,inBase)
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Foldable as F
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
@@ -143,8 +144,8 @@ withParent m = do
       runSock sid p m
     Nothing  -> mzero
 
-addChildConnection :: SocketId -> TcpSocket -> Sock ()
-addChildConnection sid tcp = Sock (inBase (addConnection sid tcp))
+withChild :: TcpSocket -> Sock a -> Sock a
+withChild tcp m = inTcp (runSock (tcpSocketId tcp) tcp m)
 
 getTcpSocket :: Sock TcpSocket
 getTcpSocket  = Sock get
@@ -175,3 +176,15 @@ pushClose k = modifyTcpSocket $ \ tcp -> tcp
 -- | Output some IO to the Tcp layer.
 outputS :: IO () -> Sock ()
 outputS  = inTcp . output
+
+addAckNum :: TcpAckNum -> Sock ()
+addAckNum n = modifyTcpSocket (\tcp -> tcp { tcpSockAck = tcpSockAck tcp + n })
+
+addSeqNum :: TcpSeqNum -> Sock ()
+addSeqNum n = modifyTcpSocket (\tcp -> tcp { tcpSockSeq = tcpSockSeq tcp + n })
+
+runClosed :: Sock ()
+runClosed  = do
+  tcp <- getTcpSocket
+  modifyTcpSocket (\tcp' -> tcp' { tcpClose = Seq.empty })
+  outputS (F.sequence_ (tcpClose tcp))

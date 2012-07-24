@@ -12,6 +12,12 @@ mkSegment tcp = emptyTcpHeader
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSockSeq tcp
   , tcpAckNum     = tcpSockAck tcp
+  , tcpWindow     = tcpSockWin tcp
+  }
+
+mkAck :: TcpSocket -> TcpHeader
+mkAck tcp = (mkSegment tcp)
+  { tcpAck = True
   }
 
 
@@ -38,7 +44,7 @@ mkSynAck :: TcpSocket -> TcpHeader
 mkSynAck tcp = hdr
   { tcpAck    = True
   , tcpSyn    = True
-  , tcpAckNum = tcpAckNum hdr + 1
+  , tcpAckNum = tcpAckNum hdr
   , tcpSeqNum = tcpSeqNum hdr
   }
   where
@@ -48,9 +54,10 @@ mkSynAck tcp = hdr
 -- Connection Closing ----------------------------------------------------------
 
 -- | Construct a FIN packet.
-mkCloseFin :: TcpSocket -> TcpHeader
-mkCloseFin tcp = (mkSegment tcp)
+mkFinAck :: TcpSocket -> TcpHeader
+mkFinAck tcp = (mkSegment tcp)
   { tcpFin = True
+  , tcpAck = True
   }
 
 
@@ -73,3 +80,9 @@ isFin hdr = foldr step (tcpFin hdr) fields
   where
   step p r = r && not (p hdr)
   fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn ]
+
+isFinAck :: TcpHeader -> Bool
+isFinAck hdr = foldr step (tcpFin hdr && tcpAck hdr) fields
+  where
+  step p r = r && not (p hdr)
+  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn ]

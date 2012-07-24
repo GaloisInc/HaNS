@@ -4,6 +4,7 @@ import Hans.Address.IP4
 import Hans.Message.Tcp
 
 import Control.Exception
+import Data.Word (Word16)
 import qualified Data.Sequence as Seq
 
 
@@ -54,6 +55,7 @@ data TcpSocket = TcpSocket
   , tcpClose     :: Seq.Seq Close
   , tcpSockSeq   :: !TcpSeqNum
   , tcpSockAck   :: !TcpAckNum
+  , tcpSockWin   :: !Word16
   }
 
 emptyTcpSocket :: TcpSocket
@@ -65,6 +67,7 @@ emptyTcpSocket  = TcpSocket
   , tcpClose     = Seq.empty
   , tcpSockSeq   = 0
   , tcpSockAck   = 0
+  , tcpSockWin   = 0
   }
 
 isAccepting :: TcpSocket -> Bool

@@ -139,4 +139,5 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
 closeFin :: Sock ()
 closeFin  = do
   tcp <- getTcpSocket
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkCloseFin tcp) L.empty)
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
+  addSeqNum 1

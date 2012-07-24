@@ -36,9 +36,22 @@ established remote _local hdr _body =
       -- common case, sending data.
       Established
         | isFin hdr -> do
-          outputS $ putStrLn "closing the socket!"
+          outputS $ putStrLn "client closing"
         | otherwise -> do
-          outputS $ putStrLn "got a message for an established connection"
+          outputS $ putStrLn "established message"
+
+      FinWait1
+        | isFinAck hdr -> do
+          addAckNum 1
+          ack
+          setState Closed
+          runClosed
+        | isFin hdr -> do
+          addAckNum 1
+          setState FinWait2
+        | otherwise -> do
+          outputS (putStrLn "unexpected packet in FIN_WAIT_1")
+          outputS (print hdr)
 
       _ -> do
         inTcp $ output $ print state
@@ -56,17 +69,16 @@ listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
 listening remote _local hdr = do
   let parent = listenSocketId (tcpDestPort hdr)
   listeningConnection parent $ do
-    let child     = incomingSocketId remote hdr
-        childSock = emptyTcpSocket
-          { tcpState    = SynSent
-          , tcpParent   = Just parent
+    let childSock = emptyTcpSocket
+          { tcpParent   = Just parent
+          , tcpSocketId = incomingSocketId remote hdr
+          , tcpState    = SynSent
           -- XXX this should really be changed
           , tcpSockSeq  = 0
           , tcpSockAck  = tcpSeqNum hdr
-          , tcpSocketId = child
+          , tcpSockWin  = tcpWindow hdr
           }
-    addChildConnection child childSock
-    synAck childSock remote
+    withChild childSock (synAck remote)
 
 -- | Handle a connection finalization.
 startsConnnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
@@ -82,8 +94,17 @@ startsConnnection remote _local hdr = do
 -- Outgoing Packets ------------------------------------------------------------
 
 -- | Respond to a SYN message with a SYN ACK message.
-synAck :: TcpSocket -> IP4 -> Sock ()
-synAck tcp remote = inTcp (sendSegment remote (mkSynAck tcp) L.empty)
+synAck :: IP4 -> Sock ()
+synAck remote = do
+  addAckNum 1
+  tcp <- getTcpSocket
+  inTcp (sendSegment remote (mkSynAck tcp) L.empty)
+  addSeqNum 1
+
+ack :: Sock ()
+ack  = do
+  tcp <- getTcpSocket
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty)
 
 
 -- Guards ----------------------------------------------------------------------
