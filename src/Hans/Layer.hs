@@ -12,7 +12,7 @@ import Control.Applicative (Applicative(..),Alternative(..))
 import Control.Monad (ap,MonadPlus(mzero,mplus))
 import Data.Monoid (Monoid(..))
 import Data.Time.Clock.POSIX
-import MonadLib (StateM(get,set))
+import MonadLib (StateM(get,set),BaseM(inBase))
 import qualified Control.Exception as X
 import qualified Data.Map as Map
 
@@ -89,6 +89,9 @@ instance MonadPlus (Layer i) where
 instance StateM (Layer i) i where
   get   = Layer (\i0 o0 _ k -> k (lsState i0) i0 o0)
   set i = Layer (\i0 o0 _ k -> k () (i0 { lsState = i }) o0)
+
+instance BaseM (Layer i) (Layer i) where
+  inBase = id
 
 
 -- Utilities -------------------------------------------------------------------

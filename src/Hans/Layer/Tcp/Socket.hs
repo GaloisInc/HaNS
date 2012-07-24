@@ -21,7 +21,7 @@ import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
-import Control.Monad (mplus)
+import Control.Monad (mplus,when)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
@@ -97,19 +97,17 @@ instance Exception AcceptError
 
 -- | Accept new incoming connections on a listening socket.
 accept :: Socket -> IO Socket
-accept sock = blockResult (sockHandle sock) $ \ res -> do
-  mb <- lookupConnection (sockId sock)
-  case mb of
+accept sock = blockResult (sockHandle sock) $ \ res ->
+  establishedConnection (sockId sock) $ do
+    state <- getState
+    case state of
+      Listen -> pushAcceptor $ \ sid -> putMVar res $ SocketResult $ Socket
+        { sockHandle = sockHandle sock
+        , sockId     = sid
+        }
 
-    Just con | tcpState con == Listen -> do
-      let k sid = putMVar res $ SocketResult $ Socket
-            { sockHandle = sockHandle sock
-            , sockId     = sid
-            }
-      addConnection (sockId sock) (pushAcceptor k con)
-
-    -- XXX need more descriptive errors
-    _ -> output (putMVar res (socketError AcceptError))
+      -- XXX need more descriptive errors
+      _ -> outputS (putMVar res (socketError AcceptError))
 
 
 -- Close -----------------------------------------------------------------------
@@ -117,28 +115,29 @@ accept sock = blockResult (sockHandle sock) $ \ res -> do
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  let unblock = putMVar res (SocketResult ())
-  mb <- lookupConnection (sockId sock)
-  case mb of
-
-    Just tcp -> case tcpState tcp of
+  remove <- establishedConnection (sockId sock) $ do
+    let unblock = putMVar res (SocketResult ())
+    state <- getState
+    case state of
 
       Listen -> do
-        remConnection (sockId sock)
-        output unblock
+        outputS unblock
+        return True
 
       Established -> do
-        closeFin tcp
-        modifyConnection (sockId sock)
-          (pushClose unblock . setConnState FinWait1)
+        closeFin
+        pushClose unblock
+        setState FinWait1
+        return False
 
-      _ -> output unblock
+      _ -> do
+        outputS unblock
+        return False
 
-    -- nothing to do, the socket doesn't exist.
-    -- XXX should this throw an error?
-    Nothing -> output unblock
+  when remove (remConnection (sockId sock))
 
 -- | Send a FIN packet to begin closing a connection.
-closeFin :: TcpSocket -> Tcp ()
-closeFin tcp =
-  sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkCloseFin tcp) L.empty
+closeFin :: Sock ()
+closeFin  = do
+  tcp <- getTcpSocket
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkCloseFin tcp) L.empty)

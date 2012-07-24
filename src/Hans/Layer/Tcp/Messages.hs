@@ -44,3 +44,9 @@ isAck hdr = foldr step (tcpAck hdr) fields
   where
   step p r = r && not (p hdr)
   fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn, tcpFin ]
+
+isFin :: TcpHeader -> Bool
+isFin hdr = foldr step (tcpFin hdr) fields
+  where
+  step p r = r && not (p hdr)
+  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn ]

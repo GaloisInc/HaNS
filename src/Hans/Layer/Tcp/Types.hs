@@ -55,9 +55,6 @@ data TcpSocket = TcpSocket
   , tcpSockAck   :: !TcpAckNum
   }
 
-setConnState :: ConnState -> TcpSocket -> TcpSocket
-setConnState state tcp = tcp { tcpState = state }
-
 emptyTcpSocket :: TcpSocket
 emptyTcpSocket  = TcpSocket
   { tcpSocketId  = emptySocketId
@@ -71,16 +68,10 @@ emptyTcpSocket  = TcpSocket
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors
 
-pushAcceptor :: Acceptor -> TcpSocket -> TcpSocket
-pushAcceptor k tcp = tcp { tcpAcceptors = tcpAcceptors tcp Seq.|> k }
-
 popAcceptor :: TcpSocket -> Maybe (Acceptor,TcpSocket)
 popAcceptor tcp = case Seq.viewl (tcpAcceptors tcp) of
   k Seq.:< ks -> Just (k,tcp { tcpAcceptors = ks })
   Seq.EmptyL  -> Nothing
-
-pushClose :: Close -> TcpSocket -> TcpSocket
-pushClose k tcp = tcp { tcpClose = tcpClose tcp Seq.|> k }
 
 data ConnState
   = Closed

@@ -22,6 +22,7 @@ main  = do
   putStrLn "Network stack running..."
 
   sock <- listen ns localAddr 8080
+  putStrLn "listening"
 
   forever $ do
     client <- accept sock
