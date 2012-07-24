@@ -56,11 +56,13 @@ initializing remote local hdr
 
 -- | Handle an attempt to create a connection on a listening port.
 listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-listening remote _local hdr =
-  listeningConnection (listenSocketId (tcpDestPort hdr)) $ do
-    let child = incomingSocketId remote hdr
-    addChildConnection child emptyTcpSocket
-      { tcpState    = SynSent
+listening remote _local hdr = do
+  let parent = listenSocketId (tcpDestPort hdr)
+  listeningConnection parent $ do
+    let child     = incomingSocketId remote hdr
+        childSock = emptyTcpSocket
+          { tcpState    = SynSent
+          , tcpParent   = Just parent
       -- XXX this should really be changed
       , tcpSockSeq  = TcpSeqNum 0
       , tcpSockAck  = TcpAckNum (getSeqNum (tcpSeqNum hdr))

@@ -47,7 +47,8 @@ type Acceptor = SocketId -> IO ()
 type Close = IO ()
 
 data TcpSocket = TcpSocket
-  { tcpSocketId  :: !SocketId
+  { tcpParent    :: Maybe SocketId
+  , tcpSocketId  :: !SocketId
   , tcpState     :: !ConnState
   , tcpAcceptors :: Seq.Seq Acceptor
   , tcpClose     :: Seq.Seq Close
@@ -57,7 +58,8 @@ data TcpSocket = TcpSocket
 
 emptyTcpSocket :: TcpSocket
 emptyTcpSocket  = TcpSocket
-  { tcpSocketId  = emptySocketId
+  { tcpParent    = Nothing
+  , tcpSocketId  = emptySocketId
   , tcpState     = Closed
   , tcpAcceptors = Seq.empty
   , tcpClose     = Seq.empty

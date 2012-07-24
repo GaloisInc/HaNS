@@ -132,6 +132,17 @@ establishedConnection sid m = do
   tcp <- getConnection sid
   runSock sid tcp m
 
+-- | Run an action in the context of the socket's parent.  Fail the whole
+-- computation if no parent exists.
+withParent :: Sock a -> Sock a
+withParent m = do
+  tcp <- getTcpSocket
+  case tcpParent tcp of
+    Just sid -> inTcp $ do
+      p <- getConnection sid
+      runSock sid p m
+    Nothing  -> mzero
+
 addChildConnection :: SocketId -> TcpSocket -> Sock ()
 addChildConnection sid tcp = Sock (inBase (addConnection sid tcp))
 
