@@ -1,7 +1,4 @@
-module Hans.Layer.Tcp.Handlers (
-    handleIncomingTcp
-  , sendSegment
-  ) where
+module Hans.Layer.Tcp.Handlers where
 
 import Hans.Address.IP4
 import Hans.Layer
@@ -28,48 +25,66 @@ handleIncomingTcp src dst bytes = do
 
 -- | Handle a message for an already established connection.
 established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
-established remote _local hdr body =
-  establishedConnection (incomingSocketId remote hdr) $ do
+established remote _local hdr body = do
+  let sid = incomingSocketId remote hdr
+  establishedConnection sid $ do
     state <- getState
     case state of
 
-      -- common case, sending data.
       Established
-        | isFinAck hdr -> outputS (putStrLn "client trying to close")
-        | otherwise    -> deliverSegment hdr body
+        | isFinAck hdr -> do
+          addAckNum 1
+          ack
+          -- technically, we go to CloseWait now, but we'll transition out as
+          -- soon as we go to LastAck
+          finAck
+          setState LastAck
 
-      -- we've sent a fin ack, and are waiting for a response.
+      SynSent
+        | isAck hdr -> do
+          setState Established
+          k <- getAcceptor =<< getParent
+          outputS (k sid)
+
       FinWait1
           -- 3-way close
         | isFinAck hdr -> do
           addAckNum 1
           ack
           setState TimeWait
-          -- XXX schedule a delay to put the socket into a closed state
-          runClosed
+          closeSocket
           -- 4-way close
         | isAck hdr -> do
           addAckNum 1
           setState FinWait2
-        | otherwise -> deliverSegment hdr body
 
       FinWait2
         | isFinAck hdr -> do
           addSeqNum 1
           setState TimeWait
           ack
-          -- XXX schedule a delay to put the socket into a closed state
-          runClosed
+          closeSocket
+
+      LastAck
+        | isAck hdr -> do
+          setState TimeWait
+          closeSocket
 
       _ -> do
         outputS (print state)
-        mzero
+        deliverSegment hdr body
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
   addAckNum (fromIntegral (S.length body))
   outputS (putStrLn "deliverSegment")
   ack
+
+-- XXX schedule a delay to put the socket into a closed state.  it's a
+-- hack that
+closeSocket :: Sock ()
+closeSocket  = do
+  runClosed
 
 -- | Different states for connections that are being established.
 initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
@@ -115,10 +130,18 @@ synAck remote = do
   inTcp (sendSegment remote (mkSynAck tcp) L.empty)
   addSeqNum 1
 
+-- | Send an ACK packet.
 ack :: Sock ()
 ack  = do
   tcp <- getTcpSocket
   inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty)
+
+-- | Send a FIN packet to begin closing a connection.
+finAck :: Sock ()
+finAck  = do
+  tcp <- getTcpSocket
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
+  addSeqNum 1
 
 
 -- Guards ----------------------------------------------------------------------

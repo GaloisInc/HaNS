@@ -13,7 +13,7 @@ module Hans.Layer.Tcp.Socket (
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
-import Hans.Layer.Tcp.Messages
+import Hans.Layer.Tcp.Handlers
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
@@ -22,7 +22,6 @@ import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
 import Control.Monad (mplus,when)
 import Data.Typeable (Typeable)
-import qualified Data.ByteString.Lazy as L
 
 
 -- Socket Interface ------------------------------------------------------------
@@ -124,7 +123,7 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
         return True
 
       Established -> do
-        closeFin
+        finAck
         pushClose unblock
         setState FinWait1
         return False
@@ -134,10 +133,3 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
         return False
 
   when remove (remConnection (sockId sock))
-
--- | Send a FIN packet to begin closing a connection.
-closeFin :: Sock ()
-closeFin  = do
-  tcp <- getTcpSocket
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
-  addSeqNum 1

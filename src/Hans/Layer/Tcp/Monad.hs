@@ -133,16 +133,22 @@ establishedConnection sid m = do
   tcp <- getConnection sid
   runSock sid tcp m
 
+-- | Get the parent id of the current socket, and fail if it doesn't exist.
+getParent :: Sock SocketId
+getParent  = do
+  tcp <- getTcpSocket
+  case tcpParent tcp of
+    Just sid -> return sid
+    Nothing  -> mzero
+
 -- | Run an action in the context of the socket's parent.  Fail the whole
 -- computation if no parent exists.
 withParent :: Sock a -> Sock a
 withParent m = do
-  tcp <- getTcpSocket
-  case tcpParent tcp of
-    Just sid -> inTcp $ do
-      p <- getConnection sid
-      runSock sid p m
-    Nothing  -> mzero
+  pid <- getParent
+  inTcp $ do
+    p <- getConnection pid
+    runSock pid p m
 
 withChild :: TcpSocket -> Sock a -> Sock a
 withChild tcp m = inTcp (runSock (tcpSocketId tcp) tcp m)
