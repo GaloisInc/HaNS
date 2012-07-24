@@ -30,7 +30,9 @@ mkSynAck sn hdr = emptyTcpHeader
 -- | Construct a FIN packet.
 mkCloseFin :: TcpSocket -> TcpHeader
 mkCloseFin tcp = emptyTcpHeader
-  { tcpFin = True
+  { tcpFin        = True
+  , tcpDestPort   = sidRemotePort (tcpSocketId tcp)
+  , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   }
 
 isSyn :: TcpHeader -> Bool

@@ -60,10 +60,11 @@ listening remote _local hdr =
   listeningConnection (listenSocketId (tcpDestPort hdr)) $ do
     let child = incomingSocketId remote hdr
     addChildConnection child emptyTcpSocket
-      { tcpState   = SynSent
+      { tcpState    = SynSent
       -- XXX this should really be changed
-      , tcpSockSeq = TcpSeqNum 0
-      , tcpSockAck = TcpAckNum (getSeqNum (tcpSeqNum hdr))
+      , tcpSockSeq  = TcpSeqNum 0
+      , tcpSockAck  = TcpAckNum (getSeqNum (tcpSeqNum hdr))
+      , tcpSocketId = child
       }
     synAck remote hdr
 
