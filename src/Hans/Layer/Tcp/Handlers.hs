@@ -70,7 +70,7 @@ listening remote _local hdr = do
 
 -- | Handle a connection finalization.
 startsConnnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-startsConnnection remote local hdr = do
+startsConnnection remote _local hdr = do
   let child = incomingSocketId remote hdr
   -- XXX if this fails, the socket needs to be closed and gc'd
   establishedConnection child $ do
