@@ -63,8 +63,8 @@ emptyTcpSocket  = TcpSocket
   , tcpState     = Closed
   , tcpAcceptors = Seq.empty
   , tcpClose     = Seq.empty
-  , tcpSockSeq   = TcpSeqNum 0
-  , tcpSockAck   = TcpAckNum 0
+  , tcpSockSeq   = 0
+  , tcpSockAck   = 0
   }
 
 isAccepting :: TcpSocket -> Bool

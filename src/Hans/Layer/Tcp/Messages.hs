@@ -4,36 +4,57 @@ import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
 
+-- Generic Packets -------------------------------------------------------------
+
+mkSegment :: TcpSocket -> TcpHeader
+mkSegment tcp = emptyTcpHeader
+  { tcpDestPort   = sidRemotePort (tcpSocketId tcp)
+  , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
+  , tcpSeqNum     = tcpSockSeq tcp
+  , tcpAckNum     = tcpSockAck tcp
+  }
+
+
+-- Connection Refusal ----------------------------------------------------------
+
 -- | Given a tcp header, generate the next header in the sequence that
 -- corresponds to the RST ACK response.
 mkRstAck :: TcpHeader -> TcpHeader
 mkRstAck hdr = emptyTcpHeader
-  { tcpSeqNum     = TcpSeqNum 0
-  , tcpAckNum     = TcpAckNum (getSeqNum (tcpSeqNum hdr) + 1)
+  -- XXX need a story for what to set the SN to here
+  { tcpSeqNum     = 0
+  , tcpAckNum     = tcpSeqNum hdr + 1
   , tcpSourcePort = tcpDestPort hdr
   , tcpDestPort   = tcpSourcePort hdr
   , tcpAck        = True
   , tcpRst        = True
   }
 
+
+-- Connection Establishment ----------------------------------------------------
+
 -- | Construct a SYN ACK packet, in response to a SYN.
-mkSynAck :: TcpSeqNum -> TcpHeader -> TcpHeader
-mkSynAck sn hdr = emptyTcpHeader
-  { tcpSeqNum     = sn
-  , tcpAckNum     = TcpAckNum (getSeqNum (tcpSeqNum hdr) + 1)
-  , tcpSourcePort = tcpDestPort hdr
-  , tcpDestPort   = tcpSourcePort hdr
-  , tcpAck        = True
-  , tcpSyn        = True
+mkSynAck :: TcpSocket -> TcpHeader
+mkSynAck tcp = hdr
+  { tcpAck    = True
+  , tcpSyn    = True
+  , tcpAckNum = tcpAckNum hdr + 1
+  , tcpSeqNum = tcpSeqNum hdr
   }
+  where
+  hdr = mkSegment tcp
+
+
+-- Connection Closing ----------------------------------------------------------
 
 -- | Construct a FIN packet.
 mkCloseFin :: TcpSocket -> TcpHeader
-mkCloseFin tcp = emptyTcpHeader
-  { tcpFin        = True
-  , tcpDestPort   = sidRemotePort (tcpSocketId tcp)
-  , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
+mkCloseFin tcp = (mkSegment tcp)
+  { tcpFin = True
   }
+
+
+-- Flag Tests ------------------------------------------------------------------
 
 isSyn :: TcpHeader -> Bool
 isSyn hdr = foldr step (tcpSyn hdr) fields

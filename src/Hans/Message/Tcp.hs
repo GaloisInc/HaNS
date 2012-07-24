@@ -41,7 +41,7 @@ getTcpPort  = TcpPort `fmap` getWord16be
 
 newtype TcpSeqNum = TcpSeqNum
   { getSeqNum :: Word32
-  } deriving (Eq,Ord,Show)
+  } deriving (Eq,Ord,Show,Num)
 
 putTcpSeqNum :: Putter TcpSeqNum
 putTcpSeqNum (TcpSeqNum w32) = putWord32be w32
@@ -50,15 +50,14 @@ getTcpSeqNum :: Get TcpSeqNum
 getTcpSeqNum  = TcpSeqNum `fmap` getWord32be
 
 
-newtype TcpAckNum = TcpAckNum
-  { getAckNum :: Word32
-  } deriving (Eq,Ord,Show)
+-- | An alias to TcpSeqNum, as these two are used in the same role.
+type TcpAckNum = TcpSeqNum
 
 putTcpAckNum :: Putter TcpAckNum
-putTcpAckNum (TcpAckNum w32) = putWord32be w32
+putTcpAckNum  = putTcpSeqNum
 
 getTcpAckNum :: Get TcpAckNum
-getTcpAckNum  = TcpAckNum `fmap` getWord32be
+getTcpAckNum  = getTcpSeqNum
 
 
 -- Tcp Header ------------------------------------------------------------------
@@ -109,8 +108,8 @@ emptyTcpHeader :: TcpHeader
 emptyTcpHeader  = TcpHeader
   { tcpSourcePort    = TcpPort 0
   , tcpDestPort      = TcpPort 0
-  , tcpSeqNum        = TcpSeqNum 0
-  , tcpAckNum        = TcpAckNum 0
+  , tcpSeqNum        = 0
+  , tcpAckNum        = 0
   , tcpCwr           = False
   , tcpEce           = False
   , tcpUrg           = False

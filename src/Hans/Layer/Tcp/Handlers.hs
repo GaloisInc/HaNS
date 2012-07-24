@@ -63,12 +63,13 @@ listening remote _local hdr = do
         childSock = emptyTcpSocket
           { tcpState    = SynSent
           , tcpParent   = Just parent
-      -- XXX this should really be changed
-      , tcpSockSeq  = TcpSeqNum 0
-      , tcpSockAck  = TcpAckNum (getSeqNum (tcpSeqNum hdr))
-      , tcpSocketId = child
-      }
-    synAck remote hdr
+          -- XXX this should really be changed
+          , tcpSockSeq  = 0
+          , tcpSockAck  = tcpSeqNum hdr
+          , tcpSocketId = child
+          }
+    addChildConnection child childSock
+    synAck childSock remote
 
 -- | Handle a connection finalization.
 startsConnnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
@@ -84,9 +85,8 @@ startsConnnection remote local hdr = do
 -- Outgoing Packets ------------------------------------------------------------
 
 -- | Respond to a SYN message with a SYN ACK message.
-synAck :: IP4 -> TcpHeader -> Sock ()
-synAck remote hdr =
-  inTcp (sendSegment remote (mkSynAck (TcpSeqNum 0) hdr) L.empty)
+synAck :: TcpSocket -> IP4 -> Sock ()
+synAck tcp remote = inTcp (sendSegment remote (mkSynAck tcp) L.empty)
 
 
 -- Guards ----------------------------------------------------------------------
