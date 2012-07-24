@@ -28,34 +28,48 @@ handleIncomingTcp src dst bytes = do
 
 -- | Handle a message for an already established connection.
 established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
-established remote _local hdr _body =
+established remote _local hdr body =
   establishedConnection (incomingSocketId remote hdr) $ do
     state <- getState
     case state of
 
       -- common case, sending data.
       Established
-        | isFin hdr -> do
-          outputS $ putStrLn "client closing"
-        | otherwise -> do
-          outputS $ putStrLn "established message"
+        | isFinAck hdr -> outputS (putStrLn "client trying to close")
+        | otherwise    -> deliverSegment hdr body
 
+      -- we've sent a fin ack, and are waiting for a response.
       FinWait1
+          -- 3-way close
         | isFinAck hdr -> do
           addAckNum 1
           ack
-          setState Closed
+          setState TimeWait
+          -- XXX schedule a delay to put the socket into a closed state
           runClosed
-        | isFin hdr -> do
+          -- 4-way close
+        | isAck hdr -> do
           addAckNum 1
           setState FinWait2
-        | otherwise -> do
-          outputS (putStrLn "unexpected packet in FIN_WAIT_1")
-          outputS (print hdr)
+        | otherwise -> deliverSegment hdr body
+
+      FinWait2
+        | isFinAck hdr -> do
+          addSeqNum 1
+          setState TimeWait
+          ack
+          -- XXX schedule a delay to put the socket into a closed state
+          runClosed
 
       _ -> do
-        inTcp $ output $ print state
+        outputS (print state)
         mzero
+
+deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
+deliverSegment _hdr body = do
+  addAckNum (fromIntegral (S.length body))
+  outputS (putStrLn "deliverSegment")
+  ack
 
 -- | Different states for connections that are being established.
 initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()

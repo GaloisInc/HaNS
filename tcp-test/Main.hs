@@ -27,6 +27,7 @@ main  = do
   forever $ do
     client <- accept sock
     putStrLn ("Got one: " ++ show (sockRemoteHost client))
+    threadDelay (10 * 1000 * 1000)
     close client
 
 
