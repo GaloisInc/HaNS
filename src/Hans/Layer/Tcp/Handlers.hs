@@ -70,9 +70,7 @@ established remote _local hdr body = do
           setState TimeWait
           closeSocket
 
-      _ -> do
-        outputS (print state)
-        deliverSegment hdr body
+      _ -> deliverSegment hdr body
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
@@ -90,7 +88,6 @@ closeSocket  = do
 initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
 initializing remote local hdr
   | isSyn hdr = listening remote local hdr
-  | isAck hdr = startsConnnection remote local hdr
   | otherwise = mzero
 
 -- | Handle an attempt to create a connection on a listening port.
@@ -108,16 +105,6 @@ listening remote _local hdr = do
           , tcpSockWin  = tcpWindow hdr
           }
     withChild childSock (synAck remote)
-
--- | Handle a connection finalization.
-startsConnnection :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-startsConnnection remote _local hdr = do
-  let child = incomingSocketId remote hdr
-  -- XXX if this fails, the socket needs to be closed and gc'd
-  establishedConnection child $ do
-    k <- getAcceptor (listenSocketId (tcpDestPort hdr))
-    setState Established
-    outputS (k child)
 
 
 -- Outgoing Packets ------------------------------------------------------------
