@@ -10,8 +10,8 @@ mkSegment :: TcpSocket -> TcpHeader
 mkSegment tcp = emptyTcpHeader
   { tcpDestPort   = sidRemotePort (tcpSocketId tcp)
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
-  , tcpSeqNum     = tcpSockSeq tcp
-  , tcpAckNum     = tcpSockAck tcp
+  , tcpSeqNum     = tcpSndNxt tcp
+  , tcpAckNum     = tcpRcvNxt tcp
   , tcpWindow     = tcpSockWin tcp
   }
 
@@ -44,8 +44,6 @@ mkSynAck :: TcpSocket -> TcpHeader
 mkSynAck tcp = hdr
   { tcpAck    = True
   , tcpSyn    = True
-  , tcpAckNum = tcpAckNum hdr
-  , tcpSeqNum = tcpSeqNum hdr
   }
   where
   hdr = mkSegment tcp

@@ -183,11 +183,11 @@ pushClose k = modifyTcpSocket $ \ tcp -> tcp
 outputS :: IO () -> Sock ()
 outputS  = inTcp . output
 
-addAckNum :: TcpAckNum -> Sock ()
-addAckNum n = modifyTcpSocket (\tcp -> tcp { tcpSockAck = tcpSockAck tcp + n })
+advanceRcvNxt :: TcpSeqNum -> Sock ()
+advanceRcvNxt n = modifyTcpSocket (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n })
 
-addSeqNum :: TcpSeqNum -> Sock ()
-addSeqNum n = modifyTcpSocket (\tcp -> tcp { tcpSockSeq = tcpSockSeq tcp + n })
+advanceSndNxt :: TcpSeqNum -> Sock ()
+advanceSndNxt n = modifyTcpSocket (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
 
 runClosed :: Sock ()
 runClosed  = do

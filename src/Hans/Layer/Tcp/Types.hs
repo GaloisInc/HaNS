@@ -49,8 +49,9 @@ data TcpSocket = TcpSocket
   , tcpState     :: !ConnState
   , tcpAcceptors :: Seq.Seq Acceptor
   , tcpClose     :: Seq.Seq Close
-  , tcpSockSeq   :: !TcpSeqNum
-  , tcpSockAck   :: !TcpAckNum
+  , tcpSndNxt    :: !TcpSeqNum
+  , tcpSndUna    :: !TcpSeqNum
+  , tcpRcvNxt    :: !TcpSeqNum
   , tcpSockWin   :: !Word16
   }
 
@@ -61,8 +62,9 @@ emptyTcpSocket  = TcpSocket
   , tcpState     = Closed
   , tcpAcceptors = Seq.empty
   , tcpClose     = Seq.empty
-  , tcpSockSeq   = 0
-  , tcpSockAck   = 0
+  , tcpSndNxt    = 0
+  , tcpSndUna    = 0
+  , tcpRcvNxt    = 0
   , tcpSockWin   = 0
   }
 

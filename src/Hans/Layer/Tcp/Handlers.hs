@@ -33,7 +33,7 @@ established remote _local hdr body = do
 
       Established
         | isFinAck hdr -> do
-          addAckNum 1
+          advanceRcvNxt 1
           ack
           -- technically, we go to CloseWait now, but we'll transition out as
           -- soon as we go to LastAck
@@ -49,18 +49,17 @@ established remote _local hdr body = do
       FinWait1
           -- 3-way close
         | isFinAck hdr -> do
-          addAckNum 1
+          advanceRcvNxt 1
           ack
           setState TimeWait
           closeSocket
           -- 4-way close
         | isAck hdr -> do
-          addAckNum 1
+          advanceRcvNxt 1
           setState FinWait2
 
       FinWait2
         | isFinAck hdr -> do
-          addSeqNum 1
           setState TimeWait
           ack
           closeSocket
@@ -74,7 +73,7 @@ established remote _local hdr body = do
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
-  addAckNum (fromIntegral (S.length body))
+  advanceRcvNxt (fromIntegral (S.length body))
   outputS (putStrLn "deliverSegment")
   ack
 
@@ -100,8 +99,9 @@ listening remote _local hdr = do
           , tcpSocketId = incomingSocketId remote hdr
           , tcpState    = SynSent
           -- XXX this should really be changed
-          , tcpSockSeq  = 0
-          , tcpSockAck  = tcpSeqNum hdr
+          , tcpSndNxt   = 0
+          , tcpSndUna   = 0
+          , tcpRcvNxt   = tcpSeqNum hdr
           , tcpSockWin  = tcpWindow hdr
           }
     withChild childSock (synAck remote)
@@ -112,10 +112,10 @@ listening remote _local hdr = do
 -- | Respond to a SYN message with a SYN ACK message.
 synAck :: IP4 -> Sock ()
 synAck remote = do
-  addAckNum 1
+  advanceRcvNxt 1
   tcp <- getTcpSocket
   inTcp (sendSegment remote (mkSynAck tcp) L.empty)
-  addSeqNum 1
+  advanceSndNxt 1
 
 -- | Send an ACK packet.
 ack :: Sock ()
@@ -128,7 +128,7 @@ finAck :: Sock ()
 finAck  = do
   tcp <- getTcpSocket
   inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
-  addSeqNum 1
+  advanceSndNxt 1
 
 
 -- Guards ----------------------------------------------------------------------
