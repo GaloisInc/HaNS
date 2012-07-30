@@ -12,6 +12,7 @@ import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Layer.Tcp.Handlers
 import Hans.Layer.Tcp.Monad
+import Hans.Layer.Tcp.Timers
 import Hans.Layer.Timer
 import Hans.Message.Tcp
 import Hans.Utils
@@ -25,6 +26,9 @@ runTcpLayer tcp ip4 t = do
   let s0 = emptyTcpState tcp ip4 t
   void (forkIO (loopLayer s0 (receive tcp) id))
   addIP4Handler ip4 tcpProtocol (queueTcp tcp)
+
+  -- initialize the timers
+  send tcp initTimers
 
 -- | Queue a tcp packet.
 queueTcp :: TcpHandle -> IP4 -> IP4 -> S.ByteString -> IO ()

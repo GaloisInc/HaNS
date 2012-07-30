@@ -83,6 +83,7 @@ library
                                 Hans.Layer.Tcp.Messages,
                                 Hans.Layer.Tcp.Monad,
                                 Hans.Layer.Tcp.Socket,
+                                Hans.Layer.Tcp.Timers,
                                 Hans.Layer.Tcp.Types,
                                 Hans.Layer.Timer,
                                 Hans.Layer.Udp,
