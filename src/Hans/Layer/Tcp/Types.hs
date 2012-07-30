@@ -71,11 +71,6 @@ emptyTcpSocket  = TcpSocket
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors
 
-popAcceptor :: TcpSocket -> Maybe (Acceptor,TcpSocket)
-popAcceptor tcp = case Seq.viewl (tcpAcceptors tcp) of
-  k Seq.:< ks -> Just (k,tcp { tcpAcceptors = ks })
-  Seq.EmptyL  -> Nothing
-
 data ConnState
   = Closed
   | Listen

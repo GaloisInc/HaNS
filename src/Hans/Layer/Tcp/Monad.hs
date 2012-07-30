@@ -143,8 +143,8 @@ getParent  = do
 
 -- | Run an action in the context of the socket's parent.  Fail the whole
 -- computation if no parent exists.
-withParent :: Sock a -> Sock a
-withParent m = do
+inParent :: Sock a -> Sock a
+inParent m = do
   pid <- getParent
   inTcp $ do
     p <- getConnection pid
@@ -156,26 +156,44 @@ withChild tcp m = inTcp (runSock (tcpSocketId tcp) tcp m)
 getTcpSocket :: Sock TcpSocket
 getTcpSocket  = Sock get
 
-modifyTcpSocket :: (TcpSocket -> TcpSocket) -> Sock ()
+setTcpSocket :: TcpSocket -> Sock ()
+setTcpSocket tcp = Sock (set tcp)
+
+modifyTcpSocket :: (TcpSocket -> (a,TcpSocket)) -> Sock a
 modifyTcpSocket k = Sock $ do
-  sock <- get
-  set $! k sock
+  tcp <- get
+  let (a,tcp') = k tcp
+  set $! tcp'
+  return a
+
+modifyTcpSocket_ :: (TcpSocket -> TcpSocket) -> Sock ()
+modifyTcpSocket_ k = modifyTcpSocket (\tcp -> ((), k tcp))
 
 -- | Set the state of the current connection.
 setState :: ConnState -> Sock ()
-setState state = modifyTcpSocket (\tcp -> tcp { tcpState = state })
+setState state = modifyTcpSocket_ (\tcp -> tcp { tcpState = state })
 
 -- | Get the state of the current connection.
 getState :: Sock ConnState
 getState  = tcpState `fmap` getTcpSocket
 
 pushAcceptor :: Acceptor -> Sock ()
-pushAcceptor k = modifyTcpSocket $ \ tcp -> tcp
+pushAcceptor k = modifyTcpSocket_ $ \ tcp -> tcp
   { tcpAcceptors = tcpAcceptors tcp Seq.|> k
   }
 
+-- | Pop off an acceptor, failing if none exist.
+popAcceptor :: Sock Acceptor
+popAcceptor  = do
+  tcp <- getTcpSocket
+  case Seq.viewl (tcpAcceptors tcp) of
+    a Seq.:< as -> do
+      setTcpSocket $! tcp { tcpAcceptors = as }
+      return a
+    Seq.EmptyL -> mzero
+
 pushClose :: Close -> Sock ()
-pushClose k = modifyTcpSocket $ \ tcp -> tcp
+pushClose k = modifyTcpSocket_ $ \ tcp -> tcp
   { tcpClose = tcpClose tcp Seq.|> k
   }
 
@@ -184,13 +202,13 @@ outputS :: IO () -> Sock ()
 outputS  = inTcp . output
 
 advanceRcvNxt :: TcpSeqNum -> Sock ()
-advanceRcvNxt n = modifyTcpSocket (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n })
+advanceRcvNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n })
 
 advanceSndNxt :: TcpSeqNum -> Sock ()
-advanceSndNxt n = modifyTcpSocket (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
+advanceSndNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
 
 runClosed :: Sock ()
 runClosed  = do
   tcp <- getTcpSocket
-  modifyTcpSocket (\tcp' -> tcp' { tcpClose = Seq.empty })
+  modifyTcpSocket_ (\tcp' -> tcp' { tcpClose = Seq.empty })
   outputS (F.sequence_ (tcpClose tcp))

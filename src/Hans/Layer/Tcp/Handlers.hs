@@ -7,7 +7,7 @@ import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
-import Control.Monad (mzero,mplus,guard)
+import Control.Monad (mzero,mplus)
 import Data.Serialize (runGet)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -39,11 +39,12 @@ established remote _local hdr body = do
           -- soon as we go to LastAck
           finAck
           setState LastAck
+        | otherwise -> deliverSegment hdr body
 
       SynSent
         | isAck hdr -> do
           setState Established
-          k <- getAcceptor =<< getParent
+          k <- inParent popAcceptor
           outputS (k sid)
 
       FinWait1
@@ -69,7 +70,8 @@ established remote _local hdr body = do
           setState TimeWait
           closeSocket
 
-      _ -> deliverSegment hdr body
+      _ -> outputS (putStrLn "Unexpected packet")
+
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
@@ -129,16 +131,3 @@ finAck  = do
   tcp <- getTcpSocket
   inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
   advanceSndNxt 1
-
-
--- Guards ----------------------------------------------------------------------
-
-getAcceptor :: SocketId -> Sock Acceptor
-getAcceptor sid = inTcp $ do
-  tcp <- getConnection sid
-  guard (tcpState tcp == Listen)
-  case popAcceptor tcp of
-    Just (k,tcp') -> do
-      setConnection sid tcp'
-      return k
-    Nothing -> mzero
