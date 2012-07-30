@@ -44,28 +44,30 @@ type Acceptor = SocketId -> IO ()
 type Close = IO ()
 
 data TcpSocket = TcpSocket
-  { tcpParent    :: Maybe SocketId
-  , tcpSocketId  :: !SocketId
-  , tcpState     :: !ConnState
-  , tcpAcceptors :: Seq.Seq Acceptor
-  , tcpClose     :: Seq.Seq Close
-  , tcpSndNxt    :: !TcpSeqNum
-  , tcpSndUna    :: !TcpSeqNum
-  , tcpRcvNxt    :: !TcpSeqNum
-  , tcpSockWin   :: !Word16
+  { tcpParent      :: Maybe SocketId
+  , tcpSocketId    :: !SocketId
+  , tcpState       :: !ConnState
+  , tcpAcceptors   :: Seq.Seq Acceptor
+  , tcpClose       :: Seq.Seq Close
+  , tcpSndNxt      :: !TcpSeqNum
+  , tcpSndUna      :: !TcpSeqNum
+  , tcpRcvNxt      :: !TcpSeqNum
+  , tcpSockWin     :: !Word16
+  , tcpNeedsDelAck :: Bool
   }
 
 emptyTcpSocket :: TcpSocket
 emptyTcpSocket  = TcpSocket
-  { tcpParent    = Nothing
-  , tcpSocketId  = emptySocketId
-  , tcpState     = Closed
-  , tcpAcceptors = Seq.empty
-  , tcpClose     = Seq.empty
-  , tcpSndNxt    = 0
-  , tcpSndUna    = 0
-  , tcpRcvNxt    = 0
-  , tcpSockWin   = 0
+  { tcpParent      = Nothing
+  , tcpSocketId    = emptySocketId
+  , tcpState       = Closed
+  , tcpAcceptors   = Seq.empty
+  , tcpClose       = Seq.empty
+  , tcpSndNxt      = 0
+  , tcpSndUna      = 0
+  , tcpRcvNxt      = 0
+  , tcpSockWin     = 0
+  , tcpNeedsDelAck = False
   }
 
 isAccepting :: TcpSocket -> Bool

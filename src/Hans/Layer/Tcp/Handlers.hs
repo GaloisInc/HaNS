@@ -52,7 +52,6 @@ established remote _local hdr body = do
         | isFinAck hdr -> do
           advanceRcvNxt 1
           ack
-          setState TimeWait
           closeSocket
           -- 4-way close
         | isAck hdr -> do
@@ -61,28 +60,26 @@ established remote _local hdr body = do
 
       FinWait2
         | isFinAck hdr -> do
-          setState TimeWait
           ack
           closeSocket
 
       LastAck
         | isAck hdr -> do
-          setState TimeWait
           closeSocket
 
-      _ -> outputS (putStrLn "Unexpected packet")
+      _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
   advanceRcvNxt (fromIntegral (S.length body))
   outputS (putStrLn "deliverSegment")
-  ack
+  delayedAck
 
--- XXX schedule a delay to put the socket into a closed state.  it's a
--- hack that
+-- XXX schedule a delay to put the socket into a closed state.
 closeSocket :: Sock ()
 closeSocket  = do
+  setState TimeWait
   runClosed
 
 -- | Different states for connections that are being established.

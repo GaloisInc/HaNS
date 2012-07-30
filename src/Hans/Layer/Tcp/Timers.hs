@@ -11,6 +11,8 @@ import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Timer
 
+import Control.Monad (guard)
+
 
 -- Timer Handlers --------------------------------------------------------------
 
@@ -37,8 +39,9 @@ slowTimer :: Tcp ()
 slowTimer  = do
   output (putStrLn "slow timer")
 
+-- | Handle only the delayed ack timer.
 fastTimer :: Tcp ()
-fastTimer  = do
-  output (putStrLn "fast timer")
-
-
+fastTimer  = eachConnection $ do
+  tcp <- getTcpSocket
+  guard (tcpNeedsDelAck tcp)
+  ack

@@ -16,6 +16,7 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
+import qualified Data.Traversable as T
 
 
 -- TCP Monad -------------------------------------------------------------------
@@ -116,6 +117,13 @@ runSock sid tcp (Sock m) = do
   (a,tcp') <- runStateT tcp m
   addConnection sid tcp'
   return a
+
+-- | Iterate for each connection, rolling back to its previous state if the
+-- computation fails.
+eachConnection :: Sock () -> Tcp ()
+eachConnection (Sock body) = setConnections =<< T.mapM sandbox =<< getConnections
+  where
+  sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
 
 newConnection :: SocketId -> TcpSocket -> Sock a -> Tcp a
 newConnection  = runSock
