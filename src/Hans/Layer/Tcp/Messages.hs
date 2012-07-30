@@ -1,7 +1,11 @@
 module Hans.Layer.Tcp.Messages where
 
+import Hans.Address.IP4
+import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
+
+import qualified Data.ByteString.Lazy as L
 
 
 -- Generic Packets -------------------------------------------------------------
@@ -57,6 +61,37 @@ mkFinAck tcp = (mkSegment tcp)
   { tcpFin = True
   , tcpAck = True
   }
+
+
+-- Socket Actions --------------------------------------------------------------
+
+-- | Respond to a SYN message with a SYN ACK message.
+synAck :: IP4 -> Sock ()
+synAck remote = do
+  advanceRcvNxt 1
+  tcp <- getTcpSocket
+  inTcp (sendSegment remote (mkSynAck tcp) L.empty)
+  advanceSndNxt 1
+
+-- | Send an ACK packet.
+ack :: Sock ()
+ack  = do
+  tcp <- getTcpSocket
+  setTcpSocket $! tcp { tcpNeedsDelAck = False }
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty)
+
+-- | Schedule a delayed ACK packet.
+delayedAck :: Sock ()
+delayedAck  = do
+  tcp <- getTcpSocket
+  setTcpSocket $! tcp { tcpNeedsDelAck = True }
+
+-- | Send a FIN packet to begin closing a connection.
+finAck :: Sock ()
+finAck  = do
+  tcp <- getTcpSocket
+  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
+  advanceSndNxt 1
 
 
 -- Flag Tests ------------------------------------------------------------------

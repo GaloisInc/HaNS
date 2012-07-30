@@ -107,27 +107,3 @@ listening remote _local hdr = do
           , tcpSockWin  = tcpWindow hdr
           }
     withChild childSock (synAck remote)
-
-
--- Outgoing Packets ------------------------------------------------------------
-
--- | Respond to a SYN message with a SYN ACK message.
-synAck :: IP4 -> Sock ()
-synAck remote = do
-  advanceRcvNxt 1
-  tcp <- getTcpSocket
-  inTcp (sendSegment remote (mkSynAck tcp) L.empty)
-  advanceSndNxt 1
-
--- | Send an ACK packet.
-ack :: Sock ()
-ack  = do
-  tcp <- getTcpSocket
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty)
-
--- | Send a FIN packet to begin closing a connection.
-finAck :: Sock ()
-finAck  = do
-  tcp <- getTcpSocket
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
-  advanceSndNxt 1

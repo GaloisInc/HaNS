@@ -13,7 +13,7 @@ module Hans.Layer.Tcp.Socket (
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
-import Hans.Layer.Tcp.Handlers
+import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp

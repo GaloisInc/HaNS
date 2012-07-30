@@ -6,7 +6,9 @@ module Hans.Layer.Tcp.Timers (
 
 import Hans.Channel
 import Hans.Layer
+import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
+import Hans.Layer.Tcp.Types
 import Hans.Layer.Timer
 
 
