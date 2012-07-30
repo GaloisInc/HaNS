@@ -12,18 +12,24 @@ import Hans.Layer.Timer
 
 -- Timer Handlers --------------------------------------------------------------
 
+-- | Schedule a @Tcp@ action to run every n milliseconds.
+--
+-- XXX we should investigate timing the time that body takes to run, and making
+-- the decision about how long to delay based on that.
 every :: Milliseconds -> Tcp () -> Tcp ()
 every len body = do
   tcp    <- self
   timers <- timerHandle
-  output $ delay timers len $ send tcp $ do
-    body
-    every len body
+  let loop = output $ delay timers len $ send tcp $ do
+        body
+        loop
+  loop
 
+-- | Schedule the timers to run on the fast and slow intervals.
 initTimers :: Tcp ()
 initTimers  = do
   every 500 slowTimer
-  every 100 fastTimer
+  every 200 fastTimer
 
 slowTimer :: Tcp ()
 slowTimer  = do
