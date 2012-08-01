@@ -13,7 +13,6 @@ import Hans.Message.Tcp
 import Control.Monad (MonadPlus(..),guard)
 import MonadLib (get,set,StateT,runStateT,inBase)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Foldable as F
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Traversable as T
@@ -148,7 +147,7 @@ runSock sid tcp (Sock m) = do
 -- computation fails.
 eachConnection :: Sock () -> Tcp ()
 eachConnection (Sock body) =
-  setConnections =<< T.mapM sandbox =<< getConnections
+  setConnections . removeClosed =<< T.mapM sandbox =<< getConnections
   where
   sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
 
@@ -224,11 +223,6 @@ popAcceptor  = do
       return a
     Seq.EmptyL -> mzero
 
-pushClose :: Close -> Sock ()
-pushClose k = modifyTcpSocket_ $ \ tcp -> tcp
-  { tcpClose = tcpClose tcp Seq.|> k
-  }
-
 -- | Output some IO to the Tcp layer.
 outputS :: IO () -> Sock ()
 outputS  = inTcp . output
@@ -238,12 +232,6 @@ advanceRcvNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n 
 
 advanceSndNxt :: TcpSeqNum -> Sock ()
 advanceSndNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
-
-runClosed :: Sock ()
-runClosed  = do
-  tcp <- getTcpSocket
-  modifyTcpSocket_ (\tcp' -> tcp' { tcpClose = Seq.empty })
-  outputS (F.sequence_ (tcpClose tcp))
 
 -- | Send a TCP segment in the context of a socket.
 tcpOutput :: IP4 -> TcpHeader -> L.ByteString -> Sock ()

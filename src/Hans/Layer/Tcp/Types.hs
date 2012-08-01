@@ -28,6 +28,10 @@ emptyHost  = Host
 
 type Connections = Map.Map SocketId TcpSocket
 
+removeClosed :: Connections -> Connections
+removeClosed  =
+  Map.filter (\tcp -> tcpState tcp /= Closed || not (tcpUserClosed tcp))
+
 data SocketId = SocketId
   { sidLocalPort  :: !TcpPort
   , sidRemotePort :: !TcpPort
@@ -70,11 +74,12 @@ data TcpSocket = TcpSocket
   , tcpSocketId    :: !SocketId
   , tcpState       :: !ConnState
   , tcpAcceptors   :: Seq.Seq Acceptor
-  , tcpClose       :: Seq.Seq Close
   , tcpSndNxt      :: !TcpSeqNum
   , tcpSndUna      :: !TcpSeqNum
   , tcpRcvNxt      :: !TcpSeqNum
   , tcpSockWin     :: !Word16
+
+  , tcpUserClosed  :: Bool
 
   , tcpNeedsDelAck :: Bool
   , tcpMaxIdle     :: !SlowTicks
@@ -89,11 +94,12 @@ emptyTcpSocket  = TcpSocket
   , tcpSocketId    = emptySocketId
   , tcpState       = Closed
   , tcpAcceptors   = Seq.empty
-  , tcpClose       = Seq.empty
   , tcpSndNxt      = 0
   , tcpSndUna      = 0
   , tcpRcvNxt      = 0
   , tcpSockWin     = 0
+
+  , tcpUserClosed  = False
 
   , tcpNeedsDelAck = False
   , tcpMaxIdle     = 10 * 60 * 2

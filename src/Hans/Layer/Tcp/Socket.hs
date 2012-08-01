@@ -118,23 +118,26 @@ instance Exception CloseError
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  let unblock      = putMVar res (SocketResult ())
-      established  = establishedConnection (sockId sock) $ do
-        pushClose unblock
+  let unblock = output . putMVar res
+      established = establishedConnection (sockId sock) $ do
+        userClose
         state <- getState
         case state of
-
-          -- XXX how should we close a listening socket?
-          Listen -> do
-            setState Closed
 
           Established -> do
             finAck
             setState FinWait1
 
-          Closed -> return ()
+          -- XXX how should we close a listening socket?
+          Listen -> do
+            setState Closed
 
           _ -> return ()
 
+        return (SocketResult ())
+
   -- closing a connection that doesn't exist causes a CloseError
-  established `mplus` output (putMVar res (socketError CloseError))
+  unblock =<< established `mplus` return (socketError CloseError)
+
+userClose :: Sock ()
+userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })

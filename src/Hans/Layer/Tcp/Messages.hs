@@ -72,6 +72,7 @@ synAck remote = do
   tcp <- getTcpSocket
   tcpOutput remote (mkSynAck tcp) L.empty
   advanceSndNxt 1
+  outputS (putStrLn "syn ack")
 
 -- | Send an ACK packet.
 ack :: Sock ()

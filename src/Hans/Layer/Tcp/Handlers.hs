@@ -65,9 +65,7 @@ established remote _local hdr body = do
           enterTimeWait
 
       LastAck
-        | isAck hdr -> do
-          setState Closed
-          runClosed
+        | isAck hdr -> setState Closed
 
       _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
@@ -82,7 +80,6 @@ enterTimeWait :: Sock ()
 enterTimeWait  = do
   set2MSL mslTimeout
   setState TimeWait
-  runClosed
 
 -- | Different states for connections that are being established.
 initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
