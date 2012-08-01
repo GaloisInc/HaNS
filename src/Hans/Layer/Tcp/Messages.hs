@@ -70,7 +70,7 @@ synAck :: IP4 -> Sock ()
 synAck remote = do
   advanceRcvNxt 1
   tcp <- getTcpSocket
-  inTcp (sendSegment remote (mkSynAck tcp) L.empty)
+  tcpOutput remote (mkSynAck tcp) L.empty
   advanceSndNxt 1
 
 -- | Send an ACK packet.
@@ -78,7 +78,7 @@ ack :: Sock ()
 ack  = do
   tcp <- getTcpSocket
   setTcpSocket $! tcp { tcpNeedsDelAck = False }
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty)
+  tcpOutput (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty
 
 -- | Schedule a delayed ACK packet.
 delayedAck :: Sock ()
@@ -90,7 +90,7 @@ delayedAck  = do
 finAck :: Sock ()
 finAck  = do
   tcp <- getTcpSocket
-  inTcp (sendSegment (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty)
+  tcpOutput (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty
   advanceSndNxt 1
 
 

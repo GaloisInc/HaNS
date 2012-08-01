@@ -5,8 +5,28 @@ import Hans.Message.Tcp
 
 import Control.Exception
 import Data.Word (Word16)
+import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
+
+-- Hosts Information -----------------------------------------------------------
+
+data Host = Host
+  { hostConnections   :: Connections
+  , hostInitialSeqNum :: !TcpSeqNum
+  }
+
+emptyHost :: Host
+emptyHost  = Host
+  { hostConnections   = Map.empty
+    -- XXX what should we seed this with?
+  , hostInitialSeqNum = 0
+  }
+
+
+-- Connections -----------------------------------------------------------------
+
+type Connections = Map.Map SocketId TcpSocket
 
 data SocketId = SocketId
   { sidLocalPort  :: !TcpPort
@@ -43,6 +63,8 @@ type Acceptor = SocketId -> IO ()
 
 type Close = IO ()
 
+type SlowTicks = Int
+
 data TcpSocket = TcpSocket
   { tcpParent      :: Maybe SocketId
   , tcpSocketId    :: !SocketId
@@ -53,7 +75,12 @@ data TcpSocket = TcpSocket
   , tcpSndUna      :: !TcpSeqNum
   , tcpRcvNxt      :: !TcpSeqNum
   , tcpSockWin     :: !Word16
+
   , tcpNeedsDelAck :: Bool
+  , tcpMaxIdle     :: !SlowTicks
+  , tcpIdle        :: !SlowTicks
+
+  , tcpTimer2MSL   :: !SlowTicks
   }
 
 emptyTcpSocket :: TcpSocket
@@ -67,7 +94,12 @@ emptyTcpSocket  = TcpSocket
   , tcpSndUna      = 0
   , tcpRcvNxt      = 0
   , tcpSockWin     = 0
+
   , tcpNeedsDelAck = False
+  , tcpMaxIdle     = 10 * 60 * 2
+  , tcpIdle        = 0
+
+  , tcpTimer2MSL   = 0
   }
 
 isAccepting :: TcpSocket -> Bool

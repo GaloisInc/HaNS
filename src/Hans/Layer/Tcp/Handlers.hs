@@ -4,6 +4,7 @@ import Hans.Address.IP4
 import Hans.Layer
 import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
+import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
 
@@ -52,7 +53,7 @@ established remote _local hdr body = do
         | isFinAck hdr -> do
           advanceRcvNxt 1
           ack
-          closeSocket
+          enterTimeWait
           -- 4-way close
         | isAck hdr -> do
           advanceRcvNxt 1
@@ -61,11 +62,12 @@ established remote _local hdr body = do
       FinWait2
         | isFinAck hdr -> do
           ack
-          closeSocket
+          enterTimeWait
 
       LastAck
         | isAck hdr -> do
-          closeSocket
+          setState Closed
+          runClosed
 
       _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
@@ -76,9 +78,9 @@ deliverSegment _hdr body = do
   outputS (putStrLn "deliverSegment")
   delayedAck
 
--- XXX schedule a delay to put the socket into a closed state.
-closeSocket :: Sock ()
-closeSocket  = do
+enterTimeWait :: Sock ()
+enterTimeWait  = do
+  set2MSL mslTimeout
   setState TimeWait
   runClosed
 
@@ -92,14 +94,14 @@ initializing remote local hdr
 listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
 listening remote _local hdr = do
   let parent = listenSocketId (tcpDestPort hdr)
+  isn <- initialSeqNum
   listeningConnection parent $ do
     let childSock = emptyTcpSocket
           { tcpParent   = Just parent
           , tcpSocketId = incomingSocketId remote hdr
           , tcpState    = SynSent
-          -- XXX this should really be changed
-          , tcpSndNxt   = 0
-          , tcpSndUna   = 0
+          , tcpSndNxt   = isn
+          , tcpSndUna   = isn
           , tcpRcvNxt   = tcpSeqNum hdr
           , tcpSockWin  = tcpWindow hdr
           }

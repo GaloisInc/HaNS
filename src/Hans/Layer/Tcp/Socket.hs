@@ -20,7 +20,7 @@ import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
-import Control.Monad (mplus,when)
+import Control.Monad (mplus)
 import Data.Typeable (Typeable)
 
 
@@ -110,26 +110,31 @@ accept sock = blockResult (sockHandle sock) $ \ res ->
 
 -- Close -----------------------------------------------------------------------
 
+data CloseError = CloseError
+    deriving (Show,Typeable)
+
+instance Exception CloseError
+
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  remove <- establishedConnection (sockId sock) $ do
-    let unblock = putMVar res (SocketResult ())
-    state <- getState
-    case state of
-
-      Listen -> do
-        outputS unblock
-        return True
-
-      Established -> do
-        finAck
+  let unblock      = putMVar res (SocketResult ())
+      established  = establishedConnection (sockId sock) $ do
         pushClose unblock
-        setState FinWait1
-        return False
+        state <- getState
+        case state of
 
-      _ -> do
-        outputS unblock
-        return False
+          -- XXX how should we close a listening socket?
+          Listen -> do
+            setState Closed
 
-  when remove (remConnection (sockId sock))
+          Established -> do
+            finAck
+            setState FinWait1
+
+          Closed -> return ()
+
+          _ -> return ()
+
+  -- closing a connection that doesn't exist causes a CloseError
+  established `mplus` output (putMVar res (socketError CloseError))

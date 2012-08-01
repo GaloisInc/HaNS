@@ -25,13 +25,11 @@ type TcpHandle = Channel (Tcp ())
 
 type Tcp = Layer TcpState
 
-type Connections = Map.Map SocketId TcpSocket
-
 data TcpState = TcpState
-  { tcpSelf   :: TcpHandle
-  , tcpIP4    :: IP4Handle
-  , tcpTimers :: TimerHandle
-  , tcpConns  :: Connections
+  { tcpSelf      :: TcpHandle
+  , tcpIP4       :: IP4Handle
+  , tcpTimers    :: TimerHandle
+  , tcpHost      :: Host
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
@@ -39,7 +37,7 @@ emptyTcpState tcp ip4 timer = TcpState
   { tcpSelf   = tcp
   , tcpIP4    = ip4
   , tcpTimers = timer
-  , tcpConns  = Map.empty
+  , tcpHost   = emptyHost
   }
 
 -- | The handle to this layer.
@@ -54,19 +52,36 @@ ip4Handle  = tcpIP4 `fmap` get
 timerHandle :: Tcp TimerHandle
 timerHandle  = tcpTimers `fmap` get
 
+
+-- Host Operations -------------------------------------------------------------
+
+getHost :: Tcp Host
+getHost  = tcpHost `fmap` get
+
+setHost :: Host -> Tcp ()
+setHost host = do
+  rw <- get
+  set $! rw { tcpHost = host }
+
+modifyHost :: (Host -> Host) -> Tcp ()
+modifyHost f = do
+  host <- getHost
+  setHost $! f host
+
 getConnections :: Tcp Connections
-getConnections  = tcpConns `fmap` get
+getConnections  = hostConnections `fmap` getHost
 
 setConnections :: Connections -> Tcp ()
-setConnections cons = do
-  rw <- get
-  set $! rw { tcpConns = cons }
+setConnections cons = modifyHost (\host -> host { hostConnections = cons })
 
+-- | Lookup a connection, returning @Nothing@ if the connection doesn't exist.
 lookupConnection :: SocketId -> Tcp (Maybe TcpSocket)
 lookupConnection sid = do
   cons <- getConnections
   return (Map.lookup sid cons)
 
+-- | Retrieve a connection from the host.  The computation fails if the
+-- connection doesn't exist.
 getConnection :: SocketId -> Tcp TcpSocket
 getConnection sid = do
   cs <- getConnections
@@ -74,21 +89,23 @@ getConnection sid = do
     Just tcp -> return tcp
     Nothing  -> mzero
 
+-- | Assign a connection to a socket id.
 setConnection :: SocketId -> TcpSocket -> Tcp ()
 setConnection ident con = do
   cons <- getConnections
   setConnections (Map.insert ident con cons)
 
+-- | Add a new connection to the host.
 addConnection :: SocketId -> TcpSocket -> Tcp ()
-addConnection sid tcp = do
-  cons <- getConnections
-  setConnections (Map.insert sid tcp cons)
+addConnection  = setConnection
 
+-- | Modify an existing connection in the host.
 modifyConnection :: SocketId -> (TcpSocket -> TcpSocket) -> Tcp ()
 modifyConnection sid k = do
   cons <- getConnections
   setConnections (Map.adjust k sid cons)
 
+-- | Remove a connection from the host.
 remConnection :: SocketId -> Tcp ()
 remConnection sid = do
   cons <- getConnections
@@ -101,6 +118,15 @@ sendSegment dst hdr body = do
   output $ withIP4Source ip4 dst $ \ src ->
     let pkt = renderWithTcpChecksumIP4 src dst hdr body
      in sendIP4Packet ip4 tcpProtocol dst pkt
+
+-- | Get the initial sequence number.
+initialSeqNum :: Tcp TcpSeqNum
+initialSeqNum  = hostInitialSeqNum `fmap` getHost
+
+-- | Increment the initial sequence number by a value.
+addInitialSeqNum :: TcpSeqNum -> Tcp ()
+addInitialSeqNum sn =
+  modifyHost (\host -> host { hostInitialSeqNum = hostInitialSeqNum host + sn })
 
 
 -- Socket Monad ----------------------------------------------------------------
@@ -121,16 +147,14 @@ runSock sid tcp (Sock m) = do
 -- | Iterate for each connection, rolling back to its previous state if the
 -- computation fails.
 eachConnection :: Sock () -> Tcp ()
-eachConnection (Sock body) = setConnections =<< T.mapM sandbox =<< getConnections
+eachConnection (Sock body) =
+  setConnections =<< T.mapM sandbox =<< getConnections
   where
   sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
 
-newConnection :: SocketId -> TcpSocket -> Sock a -> Tcp a
-newConnection  = runSock
-
 listeningConnection :: SocketId -> Sock a -> Tcp a
 listeningConnection sid m = do
-  tcp      <- getConnection sid
+  tcp <- getConnection sid
   guard (tcpState tcp == Listen && isAccepting tcp)
   runSock sid tcp m
 
@@ -220,3 +244,7 @@ runClosed  = do
   tcp <- getTcpSocket
   modifyTcpSocket_ (\tcp' -> tcp' { tcpClose = Seq.empty })
   outputS (F.sequence_ (tcpClose tcp))
+
+-- | Send a TCP segment in the context of a socket.
+tcpOutput :: IP4 -> TcpHeader -> L.ByteString -> Sock ()
+tcpOutput dst hdr body = inTcp (sendSegment dst hdr body)
