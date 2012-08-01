@@ -67,6 +67,10 @@ established remote _local hdr body = do
       LastAck
         | isAck hdr -> setState Closed
 
+      -- avoid sending things to a closed socket; this socket might just be
+      -- waiting for a user signal to be gc'd
+      Closed -> mzero
+
       _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
 
