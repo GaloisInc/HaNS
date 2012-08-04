@@ -5,6 +5,8 @@ module Hans.Layer.Tcp.Timers (
 
   , mslTimeout
   , set2MSL
+
+  , closeSocket
   ) where
 
 import Hans.Channel
@@ -55,13 +57,10 @@ tcpKeepIntVal  = 75 * 2
 -- | The timer that handles the TIME_WAIT, as well as the idle timeout.
 handle2MSL :: Sock ()
 handle2MSL  = whenTimer tcpTimer2MSL $ do
-  outputS (putStrLn "2MSL")
   tcp <- getTcpSocket
   if tcpState tcp /= TimeWait && tcpIdle tcp <= tcpMaxIdle tcp
      then set2MSL tcpKeepIntVal
-     else do
-       outputS (putStrLn "closing socket!")
-       setState Closed
+     else closeSocket
 
 incIdle :: Sock ()
 incIdle  = modifyTcpSocket_ (\tcp -> tcp { tcpIdle = tcpIdle tcp + 1 })
@@ -99,7 +98,7 @@ whenTimer prj body = do
 
 -- | Maximum segment lifetime, two minutes in this case.
 mslTimeout :: SlowTicks
-mslTimeout  = 8 --2 * 60 * 2
+mslTimeout  = 2 * 60 * 2
 
 -- | Set the value of the 2MSL timer.
 set2MSL :: SlowTicks -> Sock ()

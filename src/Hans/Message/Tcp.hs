@@ -13,6 +13,7 @@ import Hans.Utils.Checksum
 import Control.Monad (when,unless,ap)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
 import Data.List (foldl',find)
+import Data.Monoid (Monoid(..))
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
     ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut
@@ -42,6 +43,10 @@ getTcpPort  = TcpPort `fmap` getWord16be
 newtype TcpSeqNum = TcpSeqNum
   { getSeqNum :: Word32
   } deriving (Eq,Ord,Show,Num)
+
+instance Monoid TcpSeqNum where
+  mempty  = 0
+  mappend = (+)
 
 putTcpSeqNum :: Putter TcpSeqNum
 putTcpSeqNum (TcpSeqNum w32) = putWord32be w32

@@ -1,6 +1,5 @@
 module Hans.Layer.Tcp.Messages where
 
-import Hans.Address.IP4
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Message.Tcp
@@ -63,23 +62,32 @@ mkFinAck tcp = (mkSegment tcp)
   }
 
 
+-- Data Packets ----------------------------------------------------------------
+
+mkData :: TcpSocket -> TcpHeader
+mkData tcp = (mkSegment tcp)
+  { tcpAck    = True
+  , tcpPsh    = True
+  , tcpSeqNum = tcpSndNxt tcp
+  }
+
+
 -- Socket Actions --------------------------------------------------------------
 
 -- | Respond to a SYN message with a SYN ACK message.
-synAck :: IP4 -> Sock ()
-synAck remote = do
+synAck :: Sock ()
+synAck  = do
   advanceRcvNxt 1
   tcp <- getTcpSocket
-  tcpOutput remote (mkSynAck tcp) L.empty
+  tcpOutput (mkSynAck tcp) L.empty
   advanceSndNxt 1
-  outputS (putStrLn "syn ack")
 
 -- | Send an ACK packet.
 ack :: Sock ()
 ack  = do
   tcp <- getTcpSocket
   setTcpSocket $! tcp { tcpNeedsDelAck = False }
-  tcpOutput (sidRemoteHost (tcpSocketId tcp)) (mkAck tcp) L.empty
+  tcpOutput (mkAck tcp) L.empty
 
 -- | Schedule a delayed ACK packet.
 delayedAck :: Sock ()
@@ -91,7 +99,7 @@ delayedAck  = do
 finAck :: Sock ()
 finAck  = do
   tcp <- getTcpSocket
-  tcpOutput (sidRemoteHost (tcpSocketId tcp)) (mkFinAck tcp) L.empty
+  tcpOutput (mkFinAck tcp) L.empty
   advanceSndNxt 1
 
 

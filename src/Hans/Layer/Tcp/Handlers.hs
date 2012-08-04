@@ -40,6 +40,7 @@ established remote _local hdr body = do
           -- soon as we go to LastAck
           finAck
           setState LastAck
+        | isAck hdr -> handleAck hdr
         | otherwise -> deliverSegment hdr body
 
       SynSent
@@ -65,7 +66,7 @@ established remote _local hdr body = do
           enterTimeWait
 
       LastAck
-        | isAck hdr -> setState Closed
+        | isAck hdr -> closeSocket
 
       -- avoid sending things to a closed socket; this socket might just be
       -- waiting for a user signal to be gc'd
@@ -79,6 +80,14 @@ deliverSegment _hdr body = do
   advanceRcvNxt (fromIntegral (S.length body))
   outputS (putStrLn "deliverSegment")
   delayedAck
+
+-- | Handle an ACK to a sent data segment.
+handleAck :: TcpHeader -> Sock ()
+handleAck hdr = maybe (return ()) outputS =<< modifyTcpSocket updateAck
+  where
+  updateAck tcp = (mb,tcp { tcpOut = out' })
+    where
+    (mb,out') = registerAck hdr (tcpOut tcp)
 
 enterTimeWait :: Sock ()
 enterTimeWait  = do
@@ -106,4 +115,4 @@ listening remote _local hdr = do
           , tcpRcvNxt   = tcpSeqNum hdr
           , tcpSockWin  = tcpWindow hdr
           }
-    withChild childSock (synAck remote)
+    withChild childSock synAck

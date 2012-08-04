@@ -233,6 +233,25 @@ advanceRcvNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n 
 advanceSndNxt :: TcpSeqNum -> Sock ()
 advanceSndNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
 
+remoteHost :: Sock IP4
+remoteHost  = (sidRemoteHost . tcpSocketId) `fmap` getTcpSocket
+
 -- | Send a TCP segment in the context of a socket.
-tcpOutput :: IP4 -> TcpHeader -> L.ByteString -> Sock ()
-tcpOutput dst hdr body = inTcp (sendSegment dst hdr body)
+tcpOutput :: TcpHeader -> L.ByteString -> Sock ()
+tcpOutput hdr body = do
+  dst <- remoteHost
+  inTcp (sendSegment dst hdr body)
+
+-- | Set the socket state to closed, and unblock any waiting processes.
+closeSocket :: Sock ()
+closeSocket  = do
+  runSendFinalizers
+  setState Closed
+
+-- | Run all send finalizers now, replacing the finalizers with @Nothing@.
+runSendFinalizers :: Sock ()
+runSendFinalizers  = do
+  fs <- modifyTcpSocket $ \ tcp -> 
+      let (fs,out') = removeFinalizers (tcpOut tcp)
+       in (fs,tcp { tcpOut = out' })
+  outputS (sequence_ fs)

@@ -8,6 +8,7 @@ import Hans.NetworkStack
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forever)
+import qualified Data.ByteString.Lazy as L
 
 
 localAddr :: IP4
@@ -27,9 +28,17 @@ main  = do
     putStrLn "accepting"
     client <- accept sock
     putStrLn ("Got one: " ++ show (sockRemoteHost client))
-    threadDelay (10 * 1000 * 1000)
+    sendBytes client message
+    putStrLn "sent 1"
+    sendBytes client message
+    putStrLn "sent 2"
+    sleep 5
     close client
 
+message = L.pack (map (toEnum . fromEnum) "Hello, world\n")
+
+sleep :: Int -> IO ()
+sleep s = threadDelay (s * 1000 * 1000)
 
 initEthernetDevice :: NetworkStack -> IO Mac
 initEthernetDevice ns = do

@@ -1,10 +1,13 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 module Hans.Layer.Tcp.Types where
 
 import Hans.Address.IP4
 import Hans.Message.Tcp
 
-import Control.Exception
+import Control.Exception (Exception,SomeException,toException)
 import Data.Word (Word16)
+import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
@@ -80,6 +83,7 @@ data TcpSocket = TcpSocket
   , tcpSockWin     :: !Word16
 
   , tcpUserClosed  :: Bool
+  , tcpOut         :: Output
 
   , tcpNeedsDelAck :: Bool
   , tcpMaxIdle     :: !SlowTicks
@@ -100,6 +104,7 @@ emptyTcpSocket  = TcpSocket
   , tcpSockWin     = 0
 
   , tcpUserClosed  = False
+  , tcpOut         = emptyOutput
 
   , tcpNeedsDelAck = False
   , tcpMaxIdle     = 10 * 60 * 2
@@ -124,3 +129,44 @@ data ConnState
   | LastAck
   | TimeWait
     deriving (Show,Eq,Ord)
+
+
+-- Output ACK Management -------------------------------------------------------
+
+type Output = Map.Map TcpSeqNum Segment
+
+emptyOutput :: Output
+emptyOutput  = Map.empty
+
+waitForAck :: Segment -> Output -> Output
+waitForAck seg = Map.insert ix seg
+  where
+  -- the acked seq num
+  ix = tcpSeqNum (segHeader seg) + fromIntegral (L.length (segBody seg))
+
+-- | Clear out a packet waiting for an ack.
+registerAck :: TcpHeader -> Output -> (Maybe Finalizer,Output)
+registerAck hdr out = (segFinalizer =<< mb, out')
+  where
+  (mb,out')  = Map.updateLookupWithKey remove (tcpAckNum hdr) out
+  remove _ _ = Nothing
+
+-- | Remove all finalizers from the Output queue.
+removeFinalizers :: Output -> ([Finalizer],Output)
+removeFinalizers  = Map.mapAccum step []
+  where
+  step fs seg = case segFinalizer seg of
+    Just f  -> (f:fs, seg { segFinalizer = Nothing })
+    Nothing -> (fs, seg)
+
+type Finalizer = IO ()
+
+-- | A delivered segment.
+data Segment = Segment
+  { segHeader    :: !TcpHeader
+  , segBody      :: !L.ByteString
+  , segFinalizer :: Maybe Finalizer
+  }
+
+segSize :: Num a => Segment -> a
+segSize  = fromIntegral . L.length . segBody

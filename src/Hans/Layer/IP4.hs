@@ -15,6 +15,8 @@ module Hans.Layer.IP4 (
   , addIP4RoutingRule
   , addIP4Handler, Handler
   , removeIP4Handler
+
+  , Mtu
   ) where
 
 import Hans.Address
