@@ -85,6 +85,7 @@ library
                                 Hans.Layer.Tcp.Socket,
                                 Hans.Layer.Tcp.Timers,
                                 Hans.Layer.Tcp.Types,
+                                Hans.Layer.Tcp.Window,
                                 Hans.Layer.Timer,
                                 Hans.Layer.Udp,
                                 Hans.Message.Arp,

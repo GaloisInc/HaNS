@@ -182,12 +182,13 @@ bytesToSegments mtu bytes0 final sock0 = loop bytes0 sock0
     where
     (body,r) = L.splitAt mtu' bytes
 
-    seg = Segment
-      { segHeader    = mkData sock
-      , segBody      = body
-      , segFinalizer = Nothing
-      }
-
     sock' = sock { tcpSndNxt = tcpSndNxt sock + fromIntegral (L.length body) }
 
     (rest,sockFinal) = loop r sock'
+
+    seg = Segment
+      { segSeqNum    = tcpSndNxt sock'
+      , segHeader    = mkData sock
+      , segBody      = body
+      , segFinalizer = Nothing
+      }

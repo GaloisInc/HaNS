@@ -163,7 +163,8 @@ type Finalizer = IO ()
 
 -- | A delivered segment.
 data Segment = Segment
-  { segHeader    :: !TcpHeader
+  { segSeqNum    :: !TcpSeqNum
+  , segHeader    :: !TcpHeader
   , segBody      :: !L.ByteString
   , segFinalizer :: Maybe Finalizer
   }
