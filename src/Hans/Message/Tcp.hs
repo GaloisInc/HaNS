@@ -439,14 +439,11 @@ computeTcpChecksumIP4 src dst hdr body =
 
 -- | Re-create the checksum, minimizing duplication of the original, rendered
 -- TCP packet.
-recreateTcpChecksumIP4 :: IP4 -> IP4 -> S.ByteString -> Word16
-recreateTcpChecksumIP4 src dst bytes =
-  finalizeChecksum (computePartialChecksum hdrcs rest)
+validateTcpChecksumIP4 :: IP4 -> IP4 -> S.ByteString -> Bool
+validateTcpChecksumIP4 src dst bytes =
+  finalizeChecksum (computePartialChecksum phcs bytes) == 0
   where
-  phcs         = computePartialChecksum emptyPartialChecksum
-               $ mkIP4PseudoHeader src dst tcpProtocol
-               $ S.length bytes
-  (hdrbs,rest) = S.splitAt 18 bytes
-  hdrbs'       = unsafePerformIO (pokeChecksum 0 (S.copy hdrbs) 16)
-  hdrcs        = computePartialChecksum phcs hdrbs'
+  phcs = computePartialChecksum emptyPartialChecksum
+       $ mkIP4PseudoHeader src dst tcpProtocol
+       $ S.length bytes
 

@@ -24,9 +24,8 @@ import qualified Data.Sequence as Seq
 -- | Process a single incoming tcp packet.
 handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
+  guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
-  let cs = recreateTcpChecksumIP4 src dst bytes
-  guard (cs == tcpChecksum hdr)
   established src dst hdr body
     `mplus` initializing src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty

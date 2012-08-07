@@ -25,6 +25,7 @@ import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Icmp4 as Icmp4
 
 import Control.Concurrent (forkIO)
+import Control.Monad (guard)
 import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
@@ -111,7 +112,8 @@ handleRemoveHandler sp = do
 
 
 handleIncoming :: IP4 -> IP4 -> S.ByteString -> Udp ()
-handleIncoming src _dst bs = do
+handleIncoming src dst bs = do
+  guard (validateUdpChecksum src dst bs)
   (hdr,pkt) <- liftRight (runGet parseUdpPacket bs)
   h         <- getHandler (udpDestPort hdr)
   output (h src (udpSourcePort hdr) pkt)

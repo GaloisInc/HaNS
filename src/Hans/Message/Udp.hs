@@ -2,6 +2,7 @@
 
 module Hans.Message.Udp where
 
+import Hans.Address.IP4
 import Hans.Message.Ip4
 import Hans.Utils
 import Hans.Utils.Checksum
@@ -90,3 +91,13 @@ renderUdpPacket hdr body mk = do
   -- body, and final checksum
   hcs = computePartialChecksum pcs hdrBytes
   cs  = finalizeChecksum (computePartialChecksumLazy hcs body)
+
+-- | Recreate the UDP checksum, given a rendered packet, and the source and
+-- destination.
+validateUdpChecksum :: IP4 -> IP4 -> S.ByteString -> Bool
+validateUdpChecksum src dst bytes =
+  finalizeChecksum (computePartialChecksum phcs bytes) == 0
+  where
+  phcs = computePartialChecksum emptyPartialChecksum
+       $ mkIP4PseudoHeader src dst udpProtocol
+       $ S.length bytes
