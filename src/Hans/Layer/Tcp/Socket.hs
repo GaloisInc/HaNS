@@ -9,6 +9,7 @@ module Hans.Layer.Tcp.Socket (
   , accept
   , close
   , sendBytes
+  , recvBytes
   ) where
 
 import Hans.Address.IP4
@@ -175,3 +176,25 @@ sendBytes sock bytes = blockResult (sockHandle sock) performSend
       Just len -> outputS (putMVar res (SocketResult len))
       Nothing  -> return ()
     outputSegments
+
+-- Reading ---------------------------------------------------------------------
+
+data RecvError = RecvError
+    deriving (Show,Typeable)
+
+instance Exception RecvError
+
+
+recvBytes :: Socket -> Int64 -> IO L.ByteString
+recvBytes sock len = blockResult (sockHandle sock) performRecv
+  where
+  performRecv res = establishedConnection (sockId sock) $ do
+    let wakeup continue
+          | continue  = send (sockHandle sock) (performRecv res)
+          | otherwise = putMVar res (socketError RecvError)
+    mbRead <- modifyTcpSocket $ \ tcp ->
+      let (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
+       in (mbRead,tcp { tcpInBuffer = bufIn })
+    case mbRead of
+      Just bytes -> outputS (putMVar res (SocketResult bytes))
+      Nothing    -> return ()

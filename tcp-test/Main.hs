@@ -6,7 +6,7 @@ import Hans.Address.IP4
 import Hans.Device.Tap
 import Hans.NetworkStack
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay,forkIO)
 import Control.Monad (forever)
 import qualified Data.ByteString.Lazy as L
 
@@ -27,13 +27,10 @@ main  = do
   forever $ do
     putStrLn "accepting"
     client <- accept sock
-    putStrLn ("Got one: " ++ show (sockRemoteHost client))
-    sendBytes client message
-    putStrLn "sent 1"
-    sendBytes client message
-    putStrLn "sent 2"
-    sleep 5
-    close client
+    forkIO $ do
+      putStrLn ("Got one: " ++ show (sockRemoteHost client))
+      forever (sendBytes client =<< recvBytes client 512)
+    return ()
 
 message = L.pack (map (toEnum . fromEnum) "Hello, world\n")
 

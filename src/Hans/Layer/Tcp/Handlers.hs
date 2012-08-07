@@ -8,6 +8,7 @@ import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
+import Hans.Utils
 
 import Control.Monad (mzero,mplus)
 import Data.Maybe (fromMaybe)
@@ -81,9 +82,18 @@ established remote _local hdr body = do
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment _hdr body = do
-  advanceRcvNxt (fromIntegral (S.length body))
-  outputS (putStrLn "deliverSegment")
-  delayedAck
+  mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
+    (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
+    let tcp' = tcp
+          { tcpRcvNxt      = tcpRcvNxt tcp + fromIntegral (S.length body)
+          , tcpInBuffer    = bufIn
+          , tcpNeedsDelAck = True
+          }
+    return (wakeup, tcp')
+
+  case mb of
+    Just wakeup -> outputS (tryAgain wakeup)
+    Nothing     -> return ()
 
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()
