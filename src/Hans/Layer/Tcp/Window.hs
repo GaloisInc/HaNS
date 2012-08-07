@@ -6,6 +6,7 @@ import Hans.Message.Tcp
 
 import Control.Monad (guard)
 import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -88,17 +89,19 @@ abort f = f False
 
 
 data Buffer d = Buffer
-  { bufBytes   :: L.ByteString
-  , bufWaiting :: Seq.Seq Wakeup
-  , bufSize    :: !Int64
+  { bufBytes     :: L.ByteString
+  , bufWaiting   :: Seq.Seq Wakeup
+  , bufSize      :: !Int64
+  , bufAvailable :: !Int64
   }
 
 -- | An empty buffer, with a limit.
 emptyBuffer :: Int64 -> Buffer d
 emptyBuffer size = Buffer
-  { bufBytes   = L.empty
-  , bufWaiting = Seq.empty
-  , bufSize    = size
+  { bufBytes     = L.empty
+  , bufWaiting   = Seq.empty
+  , bufSize      = size
+  , bufAvailable = size
   }
 
 -- | Queue a wakeup action into a buffer.
@@ -114,13 +117,25 @@ takeWaiting buf = case Seq.viewl (bufWaiting buf) of
 -- | Queue bytes into a buffer that has some available size.
 queueBytes :: L.ByteString -> Buffer d -> (Maybe Int64, Buffer d)
 queueBytes bytes buf
-  | avail <= 0 = (Nothing,buf)
-  | otherwise  = (Just (L.length queued), buf')
+  | bufAvailable buf <= 0 = (Nothing,buf)
+  | otherwise             = (Just qlen, buf')
   where
-  used   = L.length (bufBytes buf)
-  avail  = bufSize buf - used
-  queued = L.take avail bytes
-  buf'   = buf { bufBytes = bufBytes buf `L.append` queued }
+  queued = L.take (bufAvailable buf) bytes
+  qlen   = L.length queued
+  buf'   = buf
+    { bufBytes     = bufBytes buf `L.append` queued
+    , bufAvailable = bufAvailable buf - qlen
+    }
+
+removeBytes :: Int64 -> Buffer d -> Maybe (L.ByteString, Buffer d)
+removeBytes len buf = do
+  guard (not (L.null (bufBytes buf)))
+  let (bytes,rest) = L.splitAt len (bufBytes buf)
+      buf' = buf
+        { bufBytes     = rest
+        , bufAvailable = bufAvailable buf + L.length bytes
+        }
+  return (bytes,buf')
 
 -- | Run all waiting continuations with a parameter of False, 
 shutdownWaiting :: Buffer d -> (IO (), Buffer d)
@@ -147,10 +162,8 @@ bytesAvailable  = not . L.null . bufBytes
 takeBytes :: Int64 -> Buffer Outgoing
           -> Maybe (Maybe Wakeup,L.ByteString,Buffer Outgoing)
 takeBytes len buf = do
-  guard (bytesAvailable buf)
-  let (bytes,rest) = L.splitAt len (bufBytes buf)
-      buf'         = buf { bufBytes = rest }
-  case Seq.viewl (bufWaiting buf) of
+  (bytes,buf') <- removeBytes len buf
+  case Seq.viewl (bufWaiting buf') of
     Seq.EmptyL  -> return (Nothing, bytes, buf')
     w Seq.:< ws -> return (Just w, bytes, buf' { bufWaiting = ws })
 
@@ -160,11 +173,11 @@ takeBytes len buf = do
 -- | Read bytes from an incoming buffer, queueing if there are no bytes to read.
 readBytes :: Int64 -> Wakeup -> Buffer Incoming
           -> (Maybe L.ByteString, Buffer Incoming)
-readBytes len wakeup buf
-  | L.null (bufBytes buf) = (Nothing, queueWaiting wakeup buf)
-  | otherwise             = (Just bytes, buf { bufBytes = rest })
+readBytes len wakeup buf = fromMaybe (Nothing,waitBuf) $ do
+  (bytes,buf') <- removeBytes len buf
+  return (Just bytes,buf')
   where
-  (bytes,rest) = L.splitAt len (bufBytes buf)
+  waitBuf = queueWaiting wakeup buf
 
 -- | Place bytes on the incoming buffer, provided that there is enough space for
 -- all of the bytes.

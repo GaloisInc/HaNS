@@ -16,7 +16,7 @@ mkSegment tcp = emptyTcpHeader
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSndNxt tcp
   , tcpAckNum     = tcpRcvNxt tcp
-  , tcpWindow     = winAvailable (tcpIn tcp)
+  , tcpWindow     = fromIntegral (bufAvailable (tcpInBuffer tcp))
   }
 
 mkAck :: TcpSocket -> TcpHeader
@@ -67,9 +67,8 @@ mkFinAck tcp = (mkSegment tcp)
 
 mkData :: TcpSocket -> TcpHeader
 mkData tcp = (mkSegment tcp)
-  { tcpAck    = True
-  , tcpPsh    = True
-  , tcpSeqNum = tcpSndNxt tcp
+  { tcpAck = True
+  , tcpPsh = True
   }
 
 
@@ -86,15 +85,17 @@ synAck  = do
 -- | Send an ACK packet.
 ack :: Sock ()
 ack  = do
+  clearDelayedAck
   tcp <- getTcpSocket
-  setTcpSocket $! tcp { tcpNeedsDelAck = False }
   tcpOutput (mkAck tcp) L.empty
 
 -- | Schedule a delayed ACK packet.
 delayedAck :: Sock ()
-delayedAck  = do
-  tcp <- getTcpSocket
-  setTcpSocket $! tcp { tcpNeedsDelAck = True }
+delayedAck  = modifyTcpSocket_ (\tcp -> tcp { tcpNeedsDelAck = True })
+
+-- | Unschedule a delayed ACK packet.
+clearDelayedAck :: Sock ()
+clearDelayedAck  = modifyTcpSocket_ (\tcp -> tcp { tcpNeedsDelAck = False })
 
 -- | Send a FIN packet to begin closing a connection.
 finAck :: Sock ()
@@ -102,6 +103,12 @@ finAck  = do
   tcp <- getTcpSocket
   tcpOutput (mkFinAck tcp) L.empty
   advanceSndNxt 1
+
+-- | Send a segment.
+outputSegment :: Segment -> Sock ()
+outputSegment seg = do
+  clearDelayedAck
+  tcpOutput (segHeader seg) (segBody seg)
 
 
 -- Flag Tests ------------------------------------------------------------------

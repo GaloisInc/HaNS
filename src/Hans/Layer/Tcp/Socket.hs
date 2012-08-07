@@ -85,7 +85,7 @@ listen tcp _src port = blockResult tcp $ \ res -> do
   case mb of
 
     Nothing -> do
-      let con = (emptyTcpSocket 0 0) { tcpState = Listen }
+      let con = (emptyTcpSocket 0) { tcpState = Listen }
       addConnection sid con
       output $ putMVar res $ SocketResult Socket
         { sockHandle = tcp

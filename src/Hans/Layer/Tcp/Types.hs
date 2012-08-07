@@ -86,7 +86,6 @@ data TcpSocket = TcpSocket
   , tcpMaxSegSize  :: !Int64
   , tcpOut         :: Window Outgoing
   , tcpOutBuffer   :: Buffer Outgoing
-  , tcpIn          :: Window Incoming
   , tcpInBuffer    :: Buffer Incoming
 
   , tcpNeedsDelAck :: Bool
@@ -96,8 +95,8 @@ data TcpSocket = TcpSocket
   , tcpTimer2MSL   :: !SlowTicks
   }
 
-emptyTcpSocket :: Word16 -> Word16 -> TcpSocket
-emptyTcpSocket sendWindow receiveWindow = TcpSocket
+emptyTcpSocket :: Word16 -> TcpSocket
+emptyTcpSocket sendWindow = TcpSocket
   { tcpParent      = Nothing
   , tcpSocketId    = emptySocketId
   , tcpState       = Closed
@@ -110,7 +109,6 @@ emptyTcpSocket sendWindow receiveWindow = TcpSocket
   , tcpMaxSegSize  = 1400
   , tcpOut         = emptyWindow sendWindow
   , tcpOutBuffer   = emptyBuffer 16384
-  , tcpIn          = emptyWindow receiveWindow
   , tcpInBuffer    = emptyBuffer 16384
 
   , tcpNeedsDelAck = False

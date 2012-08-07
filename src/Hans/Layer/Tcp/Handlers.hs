@@ -122,7 +122,7 @@ listening remote _local hdr = do
   let parent = listenSocketId (tcpDestPort hdr)
   isn <- initialSeqNum
   listeningConnection parent $ do
-    let childSock = (emptyTcpSocket (tcpWindow hdr) 16384)
+    let childSock = (emptyTcpSocket (tcpWindow hdr))
           { tcpParent   = Just parent
           , tcpSocketId = incomingSocketId remote hdr
           , tcpState    = SynSent
@@ -167,7 +167,3 @@ genSegments tcp0 = loop Nothing Seq.empty tcp0
       return (loop (mb `mplus` mbWakeup) (segs Seq.|> seg) tcp')
     where
     done = ((mb,segs),tcp)
-
--- | Send a segment.
-outputSegment :: Segment -> Sock ()
-outputSegment seg = tcpOutput (segHeader seg) (segBody seg)
