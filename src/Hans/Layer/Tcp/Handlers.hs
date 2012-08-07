@@ -10,7 +10,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 import Hans.Utils
 
-import Control.Monad (mzero,mplus)
+import Control.Monad (mzero,mplus,guard)
 import Data.Maybe (fromMaybe)
 import Data.Serialize (runGet)
 import qualified Data.ByteString as S
@@ -25,6 +25,8 @@ import qualified Data.Sequence as Seq
 handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
 handleIncomingTcp src dst bytes = do
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
+  let cs = recreateTcpChecksumIP4 src dst bytes
+  guard (cs == tcpChecksum hdr)
   established src dst hdr body
     `mplus` initializing src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
