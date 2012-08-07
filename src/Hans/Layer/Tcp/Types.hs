@@ -3,11 +3,12 @@
 module Hans.Layer.Tcp.Types where
 
 import Hans.Address.IP4
+import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import Control.Exception (Exception,SomeException,toException)
+import Data.Int (Int64)
 import Data.Word (Word16)
-import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
@@ -80,10 +81,13 @@ data TcpSocket = TcpSocket
   , tcpSndNxt      :: !TcpSeqNum
   , tcpSndUna      :: !TcpSeqNum
   , tcpRcvNxt      :: !TcpSeqNum
-  , tcpSockWin     :: !Word16
 
   , tcpUserClosed  :: Bool
-  , tcpOut         :: Output
+  , tcpMaxSegSize  :: !Int64
+  , tcpOut         :: Window Outgoing
+  , tcpOutBuffer   :: Buffer Outgoing
+  , tcpIn          :: Window Incoming
+  , tcpInBuffer    :: Buffer Incoming
 
   , tcpNeedsDelAck :: Bool
   , tcpMaxIdle     :: !SlowTicks
@@ -92,8 +96,8 @@ data TcpSocket = TcpSocket
   , tcpTimer2MSL   :: !SlowTicks
   }
 
-emptyTcpSocket :: TcpSocket
-emptyTcpSocket  = TcpSocket
+emptyTcpSocket :: Word16 -> Word16 -> TcpSocket
+emptyTcpSocket sendWindow receiveWindow = TcpSocket
   { tcpParent      = Nothing
   , tcpSocketId    = emptySocketId
   , tcpState       = Closed
@@ -101,10 +105,13 @@ emptyTcpSocket  = TcpSocket
   , tcpSndNxt      = 0
   , tcpSndUna      = 0
   , tcpRcvNxt      = 0
-  , tcpSockWin     = 0
 
   , tcpUserClosed  = False
-  , tcpOut         = emptyOutput
+  , tcpMaxSegSize  = 1400
+  , tcpOut         = emptyWindow sendWindow
+  , tcpOutBuffer   = emptyBuffer 16384
+  , tcpIn          = emptyWindow receiveWindow
+  , tcpInBuffer    = emptyBuffer 16384
 
   , tcpNeedsDelAck = False
   , tcpMaxIdle     = 10 * 60 * 2
@@ -112,6 +119,10 @@ emptyTcpSocket  = TcpSocket
 
   , tcpTimer2MSL   = 0
   }
+
+nextSegSize :: TcpSocket -> Int64
+nextSegSize tcp =
+  min (fromIntegral (winAvailable (tcpOut tcp))) (tcpMaxSegSize tcp)
 
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors
@@ -129,45 +140,3 @@ data ConnState
   | LastAck
   | TimeWait
     deriving (Show,Eq,Ord)
-
-
--- Output ACK Management -------------------------------------------------------
-
-type Output = Map.Map TcpSeqNum Segment
-
-emptyOutput :: Output
-emptyOutput  = Map.empty
-
-waitForAck :: Segment -> Output -> Output
-waitForAck seg = Map.insert ix seg
-  where
-  -- the acked seq num
-  ix = tcpSeqNum (segHeader seg) + fromIntegral (L.length (segBody seg))
-
--- | Clear out a packet waiting for an ack.
-registerAck :: TcpHeader -> Output -> (Maybe Finalizer,Output)
-registerAck hdr out = (segFinalizer =<< mb, out')
-  where
-  (mb,out')  = Map.updateLookupWithKey remove (tcpAckNum hdr) out
-  remove _ _ = Nothing
-
--- | Remove all finalizers from the Output queue.
-removeFinalizers :: Output -> ([Finalizer],Output)
-removeFinalizers  = Map.mapAccum step []
-  where
-  step fs seg = case segFinalizer seg of
-    Just f  -> (f:fs, seg { segFinalizer = Nothing })
-    Nothing -> (fs, seg)
-
-type Finalizer = IO ()
-
--- | A delivered segment.
-data Segment = Segment
-  { segSeqNum    :: !TcpSeqNum
-  , segHeader    :: !TcpHeader
-  , segBody      :: !L.ByteString
-  , segFinalizer :: Maybe Finalizer
-  }
-
-segSize :: Num a => Segment -> a
-segSize  = fromIntegral . L.length . segBody

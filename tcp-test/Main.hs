@@ -22,7 +22,7 @@ main  = do
   setAddress mac ns
   putStrLn "Network stack running..."
 
-  sock <- listen ns localAddr 8080
+  sock <- listen ns localAddr 9001
 
   forever $ do
     putStrLn "accepting"

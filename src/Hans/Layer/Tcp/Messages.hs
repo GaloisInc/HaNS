@@ -2,6 +2,7 @@ module Hans.Layer.Tcp.Messages where
 
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import qualified Data.ByteString.Lazy as L
@@ -15,7 +16,7 @@ mkSegment tcp = emptyTcpHeader
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSndNxt tcp
   , tcpAckNum     = tcpRcvNxt tcp
-  , tcpWindow     = tcpSockWin tcp
+  , tcpWindow     = winAvailable (tcpIn tcp)
   }
 
 mkAck :: TcpSocket -> TcpHeader

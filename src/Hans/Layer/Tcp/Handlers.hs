@@ -6,12 +6,16 @@ import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import Control.Monad (mzero,mplus)
+import Data.Maybe (fromMaybe)
 import Data.Serialize (runGet)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Foldable as F
+import qualified Data.Sequence as Seq
 
 
 -- Incoming Packets ------------------------------------------------------------
@@ -83,11 +87,13 @@ deliverSegment _hdr body = do
 
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()
-handleAck hdr = maybe (return ()) outputS =<< modifyTcpSocket updateAck
+handleAck hdr = do
+  modifyTcpSocket_ updateAck
+  outputSegments
   where
-  updateAck tcp = (mb,tcp { tcpOut = out' })
-    where
-    (mb,out') = registerAck hdr (tcpOut tcp)
+  updateAck tcp = case receiveAck hdr (tcpOut tcp) of
+    Just out' -> tcp { tcpOut = out' }
+    Nothing   -> tcp
 
 enterTimeWait :: Sock ()
 enterTimeWait  = do
@@ -106,13 +112,52 @@ listening remote _local hdr = do
   let parent = listenSocketId (tcpDestPort hdr)
   isn <- initialSeqNum
   listeningConnection parent $ do
-    let childSock = emptyTcpSocket
+    let childSock = (emptyTcpSocket (tcpWindow hdr) 16384)
           { tcpParent   = Just parent
           , tcpSocketId = incomingSocketId remote hdr
           , tcpState    = SynSent
           , tcpSndNxt   = isn
           , tcpSndUna   = isn
           , tcpRcvNxt   = tcpSeqNum hdr
-          , tcpSockWin  = tcpWindow hdr
           }
     withChild childSock synAck
+
+
+-- Buffer Delivery -------------------------------------------------------------
+
+-- | Fill up the remote window with segments.
+outputSegments :: Sock ()
+outputSegments  = do
+  (mb,segs) <- modifyTcpSocket genSegments
+  F.mapM_ outputSegment segs
+  case mb of
+    Nothing     -> return ()
+    Just wakeup -> outputS (tryAgain wakeup)
+
+-- | Take data from the output buffer, and turn it into segments.
+genSegments :: TcpSocket -> ((Maybe Wakeup,Seq.Seq Segment),TcpSocket)
+genSegments tcp0 = loop Nothing Seq.empty tcp0
+  where
+  loop mb segs tcp
+    | winAvailable (tcpOut tcp) <= 0 = done
+    | otherwise                      = fromMaybe done $ do
+      let len = nextSegSize tcp
+      (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
+      let seg  = Segment
+            { segAckNum = tcpSndNxt tcp + fromIntegral (L.length body)
+            , segHeader = mkData tcp
+            , segBody   = body
+            }
+          tcp' = tcp
+            { tcpSndNxt    = segAckNum seg
+            , tcpOut       = addSegment seg (tcpOut tcp)
+            , tcpOutBuffer = bufOut
+            }
+
+      return (loop (mb `mplus` mbWakeup) (segs Seq.|> seg) tcp')
+    where
+    done = ((mb,segs),tcp)
+
+-- | Send a segment.
+outputSegment :: Segment -> Sock ()
+outputSegment seg = tcpOutput (segHeader seg) (segBody seg)

@@ -14,15 +14,17 @@ module Hans.Layer.Tcp.Socket (
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
-import Hans.Layer.IP4 (Mtu)
+import Hans.Layer.Tcp.Handlers
 import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
 import Control.Monad (mplus)
+import Data.Int (Int64)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
@@ -82,7 +84,7 @@ listen tcp _src port = blockResult tcp $ \ res -> do
   case mb of
 
     Nothing -> do
-      let con = emptyTcpSocket { tcpState = Listen }
+      let con = (emptyTcpSocket 0 0) { tcpState = Listen }
       addConnection sid con
       output $ putMVar res $ SocketResult Socket
         { sockHandle = tcp
@@ -124,8 +126,8 @@ instance Exception CloseError
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  let unblock = output . putMVar res
-      established = establishedConnection (sockId sock) $ do
+  let unblock   = output . putMVar res
+      connected = establishedConnection (sockId sock) $ do
         userClose
         state <- getState
         case state of
@@ -143,7 +145,7 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
         return (SocketResult ())
 
   -- closing a connection that doesn't exist causes a CloseError
-  unblock =<< established `mplus` return (socketError CloseError)
+  unblock =<< connected `mplus` return (socketError CloseError)
 
 userClose :: Sock ()
 userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
@@ -151,44 +153,25 @@ userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
 
 -- Writing ---------------------------------------------------------------------
 
+data SendError = SendError
+    deriving (Show,Typeable)
+
+instance Exception SendError
+
+
 -- | Send bytes over a socket.  The operation returns once the bytes have been
 -- confirmed delivered.
-sendBytes :: Socket -> L.ByteString -> IO ()
-sendBytes sock bytes = blockResult (sockHandle sock) $ \ res ->
-  establishedConnection (sockId sock) $ do
-    let final = putMVar res (SocketResult ())
-        -- XXX where should we get the MTU from?
-        mtu   = 8 -- 1400
-    mapM_ emitSegment =<< modifyTcpSocket (bytesToSegments mtu bytes final)
-
--- | Emit a segment to the other end.
-emitSegment :: Segment -> Sock ()
-emitSegment seg = do
-  tcpOutput (segHeader seg) (segBody seg)
-  modifyTcpSocket_ (\ tcp -> tcp { tcpOut = waitForAck seg (tcpOut tcp) })
-
--- | Wrap up the bytestring into a number of segments.
---
--- XXX start paying attention to the available window
--- XXX this should probably know about the MTU, how should this be communicated?
-bytesToSegments :: Mtu -> L.ByteString -> Finalizer -> TcpSocket
-                -> ([Segment],TcpSocket)
-bytesToSegments mtu bytes0 final sock0 = loop bytes0 sock0
+sendBytes :: Socket -> L.ByteString -> IO Int64
+sendBytes sock bytes = blockResult (sockHandle sock) performSend
   where
-  mtu'          = fromIntegral mtu
-  loop bytes sock
-    | L.null r  = ([seg { segFinalizer = Just final }],sock')
-    | otherwise = (seg:rest,sockFinal)
-    where
-    (body,r) = L.splitAt mtu' bytes
-
-    sock' = sock { tcpSndNxt = tcpSndNxt sock + fromIntegral (L.length body) }
-
-    (rest,sockFinal) = loop r sock'
-
-    seg = Segment
-      { segSeqNum    = tcpSndNxt sock'
-      , segHeader    = mkData sock
-      , segBody      = body
-      , segFinalizer = Nothing
-      }
+  performSend res = establishedConnection (sockId sock) $ do
+    let wakeup continue
+          | continue  = send (sockHandle sock) (performSend res)
+          | otherwise = putMVar res (socketError SendError)
+    mbWritten <- modifyTcpSocket $ \ tcp ->
+      let (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
+       in (mbWritten,tcp { tcpOutBuffer = bufOut })
+    case mbWritten of
+      Just len -> outputS (putMVar res (SocketResult len))
+      Nothing  -> return ()
+    outputSegments

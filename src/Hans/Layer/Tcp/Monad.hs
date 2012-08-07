@@ -7,6 +7,7 @@ import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
 import Hans.Layer.Timer
 import Hans.Message.Tcp
 
@@ -114,9 +115,9 @@ remConnection sid = do
 sendSegment :: IP4 -> TcpHeader -> L.ByteString -> Tcp ()
 sendSegment dst hdr body = do
   ip4 <- ip4Handle
-  output $ withIP4Source ip4 dst $ \ src ->
+  output $ withIP4Source ip4 dst $ \ src -> do
     let pkt = renderWithTcpChecksumIP4 src dst hdr body
-     in sendIP4Packet ip4 tcpProtocol dst pkt
+    sendIP4Packet ip4 tcpProtocol dst pkt
 
 -- | Get the initial sequence number.
 initialSeqNum :: Tcp TcpSeqNum
@@ -245,13 +246,9 @@ tcpOutput hdr body = do
 -- | Set the socket state to closed, and unblock any waiting processes.
 closeSocket :: Sock ()
 closeSocket  = do
-  runSendFinalizers
+  fin <- modifyTcpSocket $ \ tcp -> 
+      let (wOut,bufOut) = shutdownWaiting (tcpOutBuffer tcp)
+          (wIn,bufIn)   = shutdownWaiting (tcpInBuffer tcp)
+       in (wOut >> wIn,tcp { tcpOutBuffer = bufOut, tcpInBuffer = bufIn })
+  outputS fin
   setState Closed
-
--- | Run all send finalizers now, replacing the finalizers with @Nothing@.
-runSendFinalizers :: Sock ()
-runSendFinalizers  = do
-  fs <- modifyTcpSocket $ \ tcp -> 
-      let (fs,out') = removeFinalizers (tcpOut tcp)
-       in (fs,tcp { tcpOut = out' })
-  outputS (sequence_ fs)
