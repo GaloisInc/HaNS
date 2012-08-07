@@ -7,8 +7,6 @@ import Hans.Address.IP4 (IP4)
 import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
 import Hans.Utils (chunk)
 import Hans.Utils.Checksum
-    (finalizeChecksum,computePartialChecksum,computeChecksum,pokeChecksum
-    ,computePartialChecksumLazy)
 
 import Control.Monad (when,unless,ap)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
@@ -432,7 +430,7 @@ computeTcpChecksumIP4 src dst hdr body =
   -- its creation time.
   (cs `seq` unsafePerformIO (pokeChecksum cs hdrbs 16), cs)
   where
-  phcs  = computePartialChecksum 0
+  phcs  = computePartialChecksum emptyPartialChecksum
         $ mkIP4PseudoHeader src dst tcpProtocol
         $ S.length hdrbs + fromIntegral (L.length body)
   hdrbs = runPut (putTcpHeader hdr { tcpChecksum = 0 })
@@ -442,9 +440,10 @@ computeTcpChecksumIP4 src dst hdr body =
 -- | Re-create the checksum, minimizing duplication of the original, rendered
 -- TCP packet.
 recreateTcpChecksumIP4 :: IP4 -> IP4 -> S.ByteString -> Word16
-recreateTcpChecksumIP4 src dst bytes = computeChecksum hdrcs rest
+recreateTcpChecksumIP4 src dst bytes =
+  finalizeChecksum (computePartialChecksum hdrcs rest)
   where
-  phcs         = computePartialChecksum 0
+  phcs         = computePartialChecksum emptyPartialChecksum
                $ mkIP4PseudoHeader src dst tcpProtocol
                $ S.length bytes
   (hdrbs,rest) = S.splitAt 18 bytes

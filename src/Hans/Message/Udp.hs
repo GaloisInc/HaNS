@@ -82,7 +82,7 @@ renderUdpPacket hdr body mk = do
   -- pseudo header
   bodyLen  = fromIntegral (L.length body)
   ph       = mk (bodyLen + udpHeaderSize)
-  pcs      = computePartialChecksum 0 ph
+  pcs      = computePartialChecksum emptyPartialChecksum ph
 
   -- real header
   hdrBytes = runPut (renderUdpHeader (hdr { udpChecksum = 0 }) bodyLen)
