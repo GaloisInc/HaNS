@@ -154,47 +154,39 @@ userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
 
 -- Writing ---------------------------------------------------------------------
 
-data SendError = SendError
-    deriving (Show,Typeable)
-
-instance Exception SendError
-
-
--- | Send bytes over a socket.  The operation returns once the bytes have been
--- confirmed delivered.
+-- | Send bytes over a socket.  The number of bytes delivered will be returned,
+-- with 0 representing the other side having closed the connection.
 sendBytes :: Socket -> L.ByteString -> IO Int64
 sendBytes sock bytes = blockResult (sockHandle sock) performSend
   where
   performSend res = establishedConnection (sockId sock) $ do
+    let result len    = putMVar res (SocketResult len)
     let wakeup continue
           | continue  = send (sockHandle sock) (performSend res)
-          | otherwise = putMVar res (socketError SendError)
+          | otherwise = result 0
     mbWritten <- modifyTcpSocket $ \ tcp ->
       let (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
        in (mbWritten,tcp { tcpOutBuffer = bufOut })
     case mbWritten of
-      Just len -> outputS (putMVar res (SocketResult len))
+      Just len -> outputS (result len)
       Nothing  -> return ()
     outputSegments
 
 -- Reading ---------------------------------------------------------------------
 
-data RecvError = RecvError
-    deriving (Show,Typeable)
-
-instance Exception RecvError
-
-
+-- | Receive bytes from a socket.  A null ByteString represents the other end
+-- closing the socket.
 recvBytes :: Socket -> Int64 -> IO L.ByteString
 recvBytes sock len = blockResult (sockHandle sock) performRecv
   where
   performRecv res = establishedConnection (sockId sock) $ do
-    let wakeup continue
+    let result bytes  = putMVar res (SocketResult bytes)
+        wakeup continue
           | continue  = send (sockHandle sock) (performRecv res)
-          | otherwise = putMVar res (socketError RecvError)
+          | otherwise = result L.empty
     mbRead <- modifyTcpSocket $ \ tcp ->
       let (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
        in (mbRead,tcp { tcpInBuffer = bufIn })
     case mbRead of
-      Just bytes -> outputS (putMVar res (SocketResult bytes))
+      Just bytes -> outputS (result bytes)
       Nothing    -> return ()
