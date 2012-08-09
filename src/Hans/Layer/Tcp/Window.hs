@@ -6,11 +6,13 @@ import Hans.Message.Tcp
 
 import Control.Monad (guard)
 import Data.Int (Int64)
+import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
+import qualified Data.Traversable as T
 
 
 -- | Incoming data window.
@@ -19,10 +21,12 @@ data Incoming
 -- | Outgoing data window.
 data Outgoing
 
+type Segments = Seq.Seq Segment
+
 -- | TCP windows, with a phantom type that determines the direction of packet
 -- flow.
 data Window d = Window
-  { winSegments  :: Seq.Seq Segment
+  { winSegments  :: Segments
   , winAvailable :: !Word16
   , winSize      :: !Word16
   } deriving (Show)
@@ -45,7 +49,7 @@ addSegment seg win = win
 -- | Process an incoming ack, returning a finalizer, and a new window if there
 -- was a matching set of packets waiting for an ack.
 receiveAck :: TcpHeader -> Window Outgoing
-           -> Maybe (Window Outgoing)
+           -> Maybe (Segment,Window Outgoing)
 receiveAck hdr win = do
   let match seg = segAckNum seg == tcpAckNum hdr
       (acks,rest) = Seq.spanl match (winSegments win)
@@ -55,7 +59,21 @@ receiveAck hdr win = do
         { winSegments  = rest
         , winAvailable = winAvailable win + len
         }
-  return win'
+  case Seq.viewr acks of
+    _ Seq.:> seg -> return (seg, win')
+    _            -> fail "impossible"
+
+-- | Update the RTO timer on all segments waiting for an ack.  When the timer
+-- runs out, output the segment for retransmission.
+genRetransmitSegments :: Window Outgoing -> (Segments,Window Outgoing)
+genRetransmitSegments win = (outSegs, win { winSegments = segs' })
+  where
+  (outSegs,segs') = T.mapAccumL step Seq.empty (winSegments win)
+  step rts seg = (rts',seg')
+    where
+    seg'                    = decrementRTO seg
+    rts' | segRTO seg' <= 0 = rts Seq.|> seg'
+         | otherwise        = rts
 
 
 -- Segments --------------------------------------------------------------------
@@ -63,6 +81,9 @@ receiveAck hdr win = do
 -- | A delivered segment.
 data Segment = Segment
   { segAckNum :: !TcpSeqNum
+  , segTime   :: !POSIXTime
+  , segFresh  :: Bool       -- ^ Whether or not this is a retransmission
+  , segRTO    :: !Int       -- ^ Retransmit timer for this segment
   , segHeader :: !TcpHeader
   , segBody   :: !L.ByteString
   } deriving (Show)
@@ -70,6 +91,15 @@ data Segment = Segment
 -- | The size of a segment body.
 segSize :: Num a => Segment -> a
 segSize  = fromIntegral . L.length . segBody
+
+-- | Decrement the RTO value on a segment by the timer granularity (500ms).
+-- Once the RTO value dips below 1, mark the segment as no longer fresh.
+decrementRTO :: Segment -> Segment
+decrementRTO seg
+  | segRTO seg' <= 0 = seg' { segFresh = False }
+  | otherwise        = seg'
+  where
+  seg' = seg { segRTO = segRTO seg - 1 }
 
 
 -- Chunk Buffering -------------------------------------------------------------

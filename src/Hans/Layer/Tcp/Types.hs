@@ -7,6 +7,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import Control.Exception (Exception,SomeException,toException)
+import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Int (Int64)
 import Data.Word (Word16)
 import qualified Data.Map as Map
@@ -92,7 +93,13 @@ data TcpSocket = TcpSocket
   , tcpMaxIdle     :: !SlowTicks
   , tcpIdle        :: !SlowTicks
 
+    -- retransmit timer
+  , tcpRTO         :: !SlowTicks
+  , tcpSRTT        :: !POSIXTime
+  , tcpRTTVar      :: !POSIXTime
+
   , tcpTimer2MSL   :: !SlowTicks
+  , tcpTimerRTO    :: !SlowTicks
   }
 
 emptyTcpSocket :: Word16 -> TcpSocket
@@ -115,7 +122,12 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpMaxIdle     = 10 * 60 * 2
   , tcpIdle        = 0
 
+  , tcpRTO         = 2
+  , tcpSRTT        = 0
+  , tcpRTTVar      = 0
+
   , tcpTimer2MSL   = 0
+  , tcpTimerRTO    = 0
   }
 
 nextSegSize :: TcpSocket -> Int64

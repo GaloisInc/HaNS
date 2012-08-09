@@ -13,6 +13,7 @@ import Hans.Utils
 import Control.Monad (mzero,mplus,guard)
 import Data.Maybe (fromMaybe)
 import Data.Serialize (runGet)
+import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -99,12 +100,20 @@ deliverSegment _hdr body = do
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()
 handleAck hdr = do
-  modifyTcpSocket_ updateAck
+  now <- inTcp time
+  modifyTcpSocket_ (updateAck now)
   outputSegments
   where
-  updateAck tcp = case receiveAck hdr (tcpOut tcp) of
-    Just out' -> tcp { tcpOut = out' }
-    Nothing   -> tcp
+  -- using Karns algorithm, only calibrate the RTO if the packet that was ack'd
+  -- is fresh.
+  updateAck now tcp = case receiveAck hdr (tcpOut tcp) of
+    Just (seg,out') ->
+      let tcp' = tcp { tcpOut = out', tcpSndUna = tcpAckNum hdr }
+       in if segFresh seg
+             then calibrateRTO now (segTime seg) tcp'
+             else tcp'
+
+    Nothing -> tcp
 
 enterTimeWait :: Sock ()
 enterTimeWait  = do
@@ -139,15 +148,16 @@ listening remote _local hdr = do
 -- | Fill up the remote window with segments.
 outputSegments :: Sock ()
 outputSegments  = do
-  (mb,segs) <- modifyTcpSocket genSegments
+  now <- inTcp time
+  (mb,segs) <- modifyTcpSocket (genSegments now)
   F.mapM_ outputSegment segs
   case mb of
     Nothing     -> return ()
     Just wakeup -> outputS (tryAgain wakeup)
 
 -- | Take data from the output buffer, and turn it into segments.
-genSegments :: TcpSocket -> ((Maybe Wakeup,Seq.Seq Segment),TcpSocket)
-genSegments tcp0 = loop Nothing Seq.empty tcp0
+genSegments :: POSIXTime -> TcpSocket -> ((Maybe Wakeup,Seq.Seq Segment),TcpSocket)
+genSegments now tcp0 = loop Nothing Seq.empty tcp0
   where
   loop mb segs tcp
     | winAvailable (tcpOut tcp) <= 0 = done
@@ -156,7 +166,10 @@ genSegments tcp0 = loop Nothing Seq.empty tcp0
       (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
       let seg  = Segment
             { segAckNum = tcpSndNxt tcp + fromIntegral (L.length body)
+            , segTime   = now
+            , segFresh  = True
             , segHeader = mkData tcp
+            , segRTO    = tcpRTO tcp
             , segBody   = body
             }
           tcp' = tcp
@@ -167,4 +180,5 @@ genSegments tcp0 = loop Nothing Seq.empty tcp0
 
       return (loop (mb `mplus` mbWakeup) (segs Seq.|> seg) tcp')
     where
-    done = ((mb,segs),tcp)
+    done | not (Seq.null segs) = ((mb,segs),tcp)
+         | otherwise           = ((mb,segs),tcp)

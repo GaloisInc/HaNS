@@ -6,7 +6,7 @@ module Hans.Layer.Tcp.Timers (
   , mslTimeout
   , set2MSL
 
-  , closeSocket
+  , calibrateRTO
   ) where
 
 import Hans.Channel
@@ -14,9 +14,12 @@ import Hans.Layer
 import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
 import Hans.Layer.Timer
 
 import Control.Monad (when,guard)
+import Data.Time.Clock.POSIX (POSIXTime)
+import qualified Data.Foldable as F
 
 
 -- Timer Handlers --------------------------------------------------------------
@@ -44,6 +47,7 @@ slowTimer :: Tcp ()
 slowTimer  = do
   eachConnection $ do
     handle2MSL
+    handleRTO
     decrementTimers
     incIdle
 
@@ -53,14 +57,6 @@ slowTimer  = do
 -- | 75 second delay.
 tcpKeepIntVal :: SlowTicks
 tcpKeepIntVal  = 75 * 2
-
--- | The timer that handles the TIME_WAIT, as well as the idle timeout.
-handle2MSL :: Sock ()
-handle2MSL  = whenTimer tcpTimer2MSL $ do
-  tcp <- getTcpSocket
-  if tcpState tcp /= TimeWait && tcpIdle tcp <= tcpMaxIdle tcp
-     then set2MSL tcpKeepIntVal
-     else closeSocket
 
 incIdle :: Sock ()
 incIdle  = modifyTcpSocket_ (\tcp -> tcp { tcpIdle = tcpIdle tcp + 1 })
@@ -96,6 +92,9 @@ whenTimer prj body = do
   tcp <- getTcpSocket
   when (prj tcp == 1) body
 
+
+-- 2MSL ------------------------------------------------------------------------
+
 -- | Maximum segment lifetime, two minutes in this case.
 mslTimeout :: SlowTicks
 mslTimeout  = 2 * 60 * 2
@@ -103,3 +102,54 @@ mslTimeout  = 2 * 60 * 2
 -- | Set the value of the 2MSL timer.
 set2MSL :: SlowTicks -> Sock ()
 set2MSL val = modifyTcpSocket_ (\tcp -> tcp { tcpTimer2MSL = val })
+
+-- | The timer that handles the TIME_WAIT, as well as the idle timeout.
+handle2MSL :: Sock ()
+handle2MSL  = whenTimer tcpTimer2MSL $ do
+  tcp <- getTcpSocket
+  if tcpState tcp /= TimeWait && tcpIdle tcp <= tcpMaxIdle tcp
+     then set2MSL tcpKeepIntVal
+     else closeSocket
+
+
+-- RTO -------------------------------------------------------------------------
+
+-- | Update segments in the outgoing window, decrementing their RTO timers, and
+-- retransmitting them if it expires.
+handleRTO :: Sock ()
+handleRTO  = F.mapM_ outputSegment =<< modifyTcpSocket update
+  where
+  update tcp = (segs,tcp { tcpOut = win' })
+    where
+    (segs,win') = genRetransmitSegments (tcpOut tcp)
+
+-- | Calibrate the RTO timer, as specified by RFC-6298.
+calibrateRTO :: POSIXTime -> POSIXTime -> TcpSocket -> TcpSocket
+calibrateRTO sent ackd tcp
+  | tcpSRTT tcp == 0 = initial
+  | otherwise        = rolling
+  where
+
+  -- round trip measurement
+  r = ackd - sent
+
+  -- no data has been sent before, seed the RTO values.
+  initial = updateRTO tcp
+    { tcpSRTT   = r
+    , tcpRTTVar = r / 2
+    }
+
+  -- data has been sent, update based on previous values
+  alpha   = 0.125
+  beta    = 0.25
+  rttvar  = (1 - beta)  * tcpRTTVar tcp + beta  * abs (tcpSRTT tcp * r)
+  srtt    = (1 - alpha) * tcpSRTT   tcp + alpha * r
+  rolling = updateRTO tcp
+    { tcpRTTVar = rttvar
+    , tcpSRTT   = srtt
+    }
+
+  -- update the RTO timer length
+  updateRTO tcp' = tcp'
+    { tcpRTO = ceiling (tcpSRTT tcp' + max 0.5 (2 * tcpRTTVar tcp'))
+    }
