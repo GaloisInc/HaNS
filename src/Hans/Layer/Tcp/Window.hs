@@ -4,10 +4,11 @@ module Hans.Layer.Tcp.Window where
 
 import Hans.Message.Tcp
 
-import Control.Monad (guard)
+import Control.Monad (guard,mzero)
 import Data.Int (Int64)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Maybe (fromMaybe)
+import Data.Monoid (Sum(..))
 import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -16,6 +17,7 @@ import qualified Data.Traversable as T
 
 
 type Segments = Seq.Seq Segment
+-- Remote Window ---------------------------------------------------------------
 
 -- | TCP windows, with a phantom type that determines the direction of packet
 -- flow.
@@ -46,15 +48,18 @@ receiveAck :: TcpHeader -> Window -> Maybe (Segment,Window)
 receiveAck hdr win = do
   let match seg = segAckNum seg == tcpAckNum hdr
       (acks,rest) = Seq.spanl match (winSegments win)
-  guard (not (Seq.null acks)) -- something got ack'd
-  let len  = F.foldl (\l seg -> l + segSize seg) 0 acks
-      win' = win
-        { winSegments  = rest
-        , winAvailable = winAvailable win + len
-        }
+
+  -- require that there was something to ack.
   case Seq.viewr acks of
-    _ Seq.:> seg -> return (seg, win')
-    _            -> fail "impossible"
+    _ Seq.:> seg -> do
+      let len  = getSum (F.foldMap (Sum . segSize) acks)
+          win' = win
+            { winSegments  = rest
+            , winSize      = tcpWindow hdr
+            , winAvailable = min (tcpWindow hdr) (winAvailable win + len)
+            }
+      return (seg, win')
+    Seq.EmptyR -> mzero
 
 -- | Update the RTO timer on all segments waiting for an ack.  When the timer
 -- runs out, output the segment for retransmission.

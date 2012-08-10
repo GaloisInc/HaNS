@@ -16,6 +16,7 @@ mkSegment tcp = emptyTcpHeader
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSndNxt tcp
   , tcpAckNum     = tcpRcvNxt tcp
+    -- XXX this doesn't really reflect the right number
   , tcpWindow     = fromIntegral (bufAvailable (tcpInBuffer tcp))
   }
 
