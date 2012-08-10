@@ -16,7 +16,6 @@ import qualified Data.Sequence as Seq
 import qualified Data.Traversable as T
 
 
-type Segments = Seq.Seq Segment
 -- Remote Window ---------------------------------------------------------------
 
 -- | TCP windows, with a phantom type that determines the direction of packet
@@ -75,6 +74,8 @@ genRetransmitSegments win = (outSegs, win { winSegments = segs' })
 
 
 -- Segments --------------------------------------------------------------------
+
+type Segments = Seq.Seq Segment
 
 -- | A delivered segment.
 data Segment = Segment
