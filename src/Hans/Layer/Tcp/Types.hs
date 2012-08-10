@@ -85,7 +85,7 @@ data TcpSocket = TcpSocket
 
   , tcpUserClosed  :: Bool
   , tcpMaxSegSize  :: !Int64
-  , tcpOut         :: Window Outgoing
+  , tcpOut         :: Window
   , tcpOutBuffer   :: Buffer Outgoing
   , tcpInBuffer    :: Buffer Incoming
 

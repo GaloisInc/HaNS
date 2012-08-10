@@ -15,24 +15,18 @@ import qualified Data.Sequence as Seq
 import qualified Data.Traversable as T
 
 
--- | Incoming data window.
-data Incoming
-
--- | Outgoing data window.
-data Outgoing
-
 type Segments = Seq.Seq Segment
 
 -- | TCP windows, with a phantom type that determines the direction of packet
 -- flow.
-data Window d = Window
+data Window = Window
   { winSegments  :: Segments
   , winAvailable :: !Word16
   , winSize      :: !Word16
   } deriving (Show)
 
 -- | The empty window, seeded with an initial size.
-emptyWindow :: Word16 -> Window d
+emptyWindow :: Word16 -> Window
 emptyWindow size = Window
   { winSegments  = Seq.empty
   , winAvailable = size
@@ -40,7 +34,7 @@ emptyWindow size = Window
   }
 
 -- | Add a segment to the window.
-addSegment :: Segment -> Window d -> Window d
+addSegment :: Segment -> Window -> Window
 addSegment seg win = win
   { winSegments  = winSegments win Seq.|> seg
   , winAvailable = winAvailable win - segSize seg
@@ -48,8 +42,7 @@ addSegment seg win = win
 
 -- | Process an incoming ack, returning a finalizer, and a new window if there
 -- was a matching set of packets waiting for an ack.
-receiveAck :: TcpHeader -> Window Outgoing
-           -> Maybe (Segment,Window Outgoing)
+receiveAck :: TcpHeader -> Window -> Maybe (Segment,Window)
 receiveAck hdr win = do
   let match seg = segAckNum seg == tcpAckNum hdr
       (acks,rest) = Seq.spanl match (winSegments win)
@@ -65,7 +58,7 @@ receiveAck hdr win = do
 
 -- | Update the RTO timer on all segments waiting for an ack.  When the timer
 -- runs out, output the segment for retransmission.
-genRetransmitSegments :: Window Outgoing -> (Segments,Window Outgoing)
+genRetransmitSegments :: Window -> (Segments,Window)
 genRetransmitSegments win = (outSegs, win { winSegments = segs' })
   where
   (outSegs,segs') = T.mapAccumL step Seq.empty (winSegments win)
@@ -117,7 +110,13 @@ tryAgain f = f True
 abort :: Wakeup -> IO ()
 abort f = f False
 
+-- | Incoming data.
+data Incoming
 
+-- | Outgoing data.
+data Outgoing
+
+-- | Data Buffers, in a direction.
 data Buffer d = Buffer
   { bufBytes     :: L.ByteString
   , bufWaiting   :: Seq.Seq Wakeup
