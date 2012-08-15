@@ -8,10 +8,10 @@ import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
 import Hans.Utils (chunk)
 import Hans.Utils.Checksum
 
-import Control.Monad (when,unless,ap)
+import Control.Monad (unless,ap)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
-import Data.List (foldl',find)
-import Data.Monoid (Monoid(..))
+import Data.List (find)
+import Data.Monoid (Monoid(..),Sum(..))
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
     ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut
@@ -20,6 +20,7 @@ import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
+import qualified Data.Foldable        as F
 
 
 -- Tcp Support Types -----------------------------------------------------------
@@ -134,7 +135,7 @@ tcpFixedHeaderLength  = 5
 -- | Calculate the length of a TcpHeader, in 4-byte octets.
 tcpHeaderLength :: TcpHeader -> Int
 tcpHeaderLength hdr =
-  tcpFixedHeaderLength + tcpOptionsLength (tcpOptions hdr)
+  tcpFixedHeaderLength + fst (tcpOptionsLength (tcpOptions hdr))
 
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
@@ -144,12 +145,14 @@ putTcpHeader hdr = do
   putTcpPort (tcpDestPort hdr)
   putTcpSeqNum (tcpSeqNum hdr)
   putTcpAckNum (tcpAckNum hdr)
-  putWord8 (fromIntegral (tcpHeaderLength hdr) `shiftL` 4)
+  let (optLen,padding) = tcpOptionsLength (tcpOptions hdr)
+  putWord8 (fromIntegral ((tcpFixedHeaderLength + optLen) `shiftL` 4))
   putTcpControl hdr
   putWord16be (tcpWindow hdr)
   putWord16be 0
   putWord16be (tcpUrgentPointer hdr)
-  putTcpOptions (tcpOptions hdr)
+  mapM_ putTcpOption (tcpOptions hdr)
+  putByteString (S.replicate padding 0)
 
 -- | Parse out a TcpHeader, and its length.  The resulting length is in bytes,
 -- and is derived from the data offset.
@@ -166,7 +169,7 @@ getTcpHeader  = do
   cs     <- getWord16be
   urgent <- getWord16be
   let optsLen = len - tcpFixedHeaderLength
-  opts   <- getTcpOptions optsLen
+  opts   <- isolate (optsLen `shiftL` 2) getTcpOptions
   let hdr = setTcpControl cont emptyTcpHeader
         { tcpSourcePort    = src
         , tcpDestPort      = dst
@@ -214,6 +217,9 @@ setTcpControl w hdr = hdr
 class HasTcpOptions a where
   findTcpOption :: TcpOptionTag -> a -> Maybe TcpOption
   setTcpOption  :: TcpOption    -> a -> a
+
+setTcpOptions :: HasTcpOptions a => [TcpOption] -> a -> a
+setTcpOptions opts a = foldr setTcpOption a opts
 
 data TcpOptionTag
   = OptTagEndOfOptions
@@ -277,15 +283,14 @@ tcpOptionTag opt = case opt of
   OptTimestamp{}      -> OptTagTimestamp
   OptUnknown ty _ _   -> OptTagUnknown ty
 
--- | Get the length of a TcpOptions, in 4-byte words.  This rounds up to the
--- nearest 4-byte word.
-tcpOptionsLength :: [TcpOption] -> Int
+-- | Get the rendered length of a list of TcpOptions, in 4-byte words, and the
+-- number of padding bytes required.  This rounds up to the nearest 4-byte word.
+tcpOptionsLength :: [TcpOption] -> (Int,Int)
 tcpOptionsLength opts
-  | left == 0 = len
-  | otherwise = len + 1
+  | left == 0 = (len,0)
+  | otherwise = (len + 1,left)
   where
-  (len,left)   = foldl' step 0 opts `quotRem` 4
-  step acc opt = tcpOptionLength opt + acc
+  (len,left) = getSum (F.foldMap (Sum . tcpOptionLength) opts) `quotRem` 4
 
 tcpOptionLength :: TcpOption -> Int
 tcpOptionLength OptEndOfOptions{}    = 1
@@ -296,39 +301,27 @@ tcpOptionLength OptTimestamp{}       = 10
 tcpOptionLength (OptUnknown _ len _) = fromIntegral len
 
 
--- | Render out the tcp options, and pad with zeros if they don't fall on a
--- 4-byte boundary.
-putTcpOptions :: Putter [TcpOption]
-putTcpOptions opts = do
-  let len     = tcpOptionsLength opts
-      left    = len `rem` 4
-      padding
-        | left == 0 = 0
-        | otherwise = 4 - left
-  mapM_ putTcpOption opts
-  when (padding > 0) (putByteString (S.replicate padding 0))
-
 putTcpOption :: Putter TcpOption
-putTcpOption opt =
+putTcpOption opt = do
+  putTcpOptionTag (tcpOptionTag opt)
   case opt of
-    OptEndOfOptions       -> putWord8 0
-    OptNoOption           -> putWord8 1
+    OptEndOfOptions       -> return ()
+    OptNoOption           -> return ()
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
     OptTimestamp v r      -> putTimestamp v r
     OptUnknown ty len bs  -> putUnknown ty len bs
 
 -- | Parse in known tcp options.
-getTcpOptions :: Int -> Get [TcpOption]
-getTcpOptions len = label ("Tcp Options (" ++ show len ++ ")")
-                  $ isolate (len * 4) loop
+getTcpOptions :: Get [TcpOption]
+getTcpOptions  = label "Tcp Options" loop
   where
   loop = do
     left <- remaining
-    if left <= 0 then return [] else body
+    if left > 0 then body else return []
 
   body = do
-    opt  <- getTcpOption
+    opt <- getTcpOption
     case opt of
       OptNoOption -> loop
 

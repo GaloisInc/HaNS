@@ -11,7 +11,7 @@ import qualified Data.ByteString.Lazy as L
 -- Generic Packets -------------------------------------------------------------
 
 mkSegment :: TcpSocket -> TcpHeader
-mkSegment tcp = emptyTcpHeader
+mkSegment tcp = setTcpOptions opts emptyTcpHeader
   { tcpDestPort   = sidRemotePort (tcpSocketId tcp)
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSndNxt tcp
@@ -19,6 +19,10 @@ mkSegment tcp = emptyTcpHeader
     -- XXX this doesn't really reflect the right number
   , tcpWindow     = fromIntegral (bufAvailable (tcpInBuffer tcp))
   }
+  where
+  opts =
+    [ OptMaxSegmentSize (fromIntegral (tcpInMSS tcp))
+    ]
 
 mkAck :: TcpSocket -> TcpHeader
 mkAck tcp = (mkSegment tcp)

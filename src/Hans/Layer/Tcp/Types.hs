@@ -84,10 +84,11 @@ data TcpSocket = TcpSocket
   , tcpRcvNxt      :: !TcpSeqNum
 
   , tcpUserClosed  :: Bool
-  , tcpMaxSegSize  :: !Int64
   , tcpOut         :: Window
   , tcpOutBuffer   :: Buffer Outgoing
+  , tcpOutMSS      :: !Int64
   , tcpInBuffer    :: Buffer Incoming
+  , tcpInMSS       :: !Int64
 
   , tcpNeedsDelAck :: Bool
   , tcpMaxIdle     :: !SlowTicks
@@ -113,10 +114,11 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpRcvNxt      = 0
 
   , tcpUserClosed  = False
-  , tcpMaxSegSize  = 1400
   , tcpOut         = emptyWindow sendWindow
   , tcpOutBuffer   = emptyBuffer 16384
+  , tcpOutMSS      = 1400
   , tcpInBuffer    = emptyBuffer 16384
+  , tcpInMSS       = 1400
 
   , tcpNeedsDelAck = False
   , tcpMaxIdle     = 10 * 60 * 2
@@ -132,7 +134,7 @@ emptyTcpSocket sendWindow = TcpSocket
 
 nextSegSize :: TcpSocket -> Int64
 nextSegSize tcp =
-  min (fromIntegral (winAvailable (tcpOut tcp))) (tcpMaxSegSize tcp)
+  min (fromIntegral (winAvailable (tcpOut tcp))) (tcpOutMSS tcp)
 
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors

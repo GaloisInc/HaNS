@@ -139,6 +139,9 @@ listening remote _local hdr = do
           , tcpSndNxt   = isn
           , tcpSndUna   = isn
           , tcpRcvNxt   = tcpSeqNum hdr
+          , tcpOutMSS   = case findTcpOption OptTagMaxSegmentSize hdr of
+              Just (OptMaxSegmentSize n) -> fromIntegral n
+              _                          -> tcpInMSS childSock
           }
     withChild childSock synAck
 
