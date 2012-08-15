@@ -132,11 +132,6 @@ emptyTcpHeader  = TcpHeader
 tcpFixedHeaderLength :: Int
 tcpFixedHeaderLength  = 5
 
--- | Calculate the length of a TcpHeader, in 4-byte octets.
-tcpHeaderLength :: TcpHeader -> Int
-tcpHeaderLength hdr =
-  tcpFixedHeaderLength + fst (tcpOptionsLength (tcpOptions hdr))
-
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
 putTcpHeader :: Putter TcpHeader
