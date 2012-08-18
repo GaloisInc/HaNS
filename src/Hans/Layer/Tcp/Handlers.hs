@@ -11,6 +11,7 @@ import Hans.Message.Tcp
 import Hans.Utils
 
 import Control.Monad (mzero,mplus,guard)
+import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Serialize (runGet)
 import Data.Time.Clock.POSIX (POSIXTime)
@@ -50,11 +51,27 @@ established remote _local hdr body = do
         | isAck hdr -> handleAck hdr
         | otherwise -> deliverSegment hdr body
 
-      SynSent
+      SynReceived
         | isAck hdr -> do
           setState Established
           k <- inParent popAcceptor
           outputS (k sid)
+
+      SynSent
+        | isSynAck hdr -> do
+          modifyTcpSocket_ $ \ tcp -> tcp
+            { tcpState  = Established
+            , tcpRcvNxt = tcpSeqNum hdr
+            , tcpOutMSS = fromMaybe (tcpInMSS tcp) (getMSS hdr)
+            , tcpOut    = resizeWindow (tcpWindow hdr) (tcpOut tcp)
+            }
+          advanceRcvNxt 1
+          ack
+          k <- popAcceptor
+          outputS (k sid)
+
+          tcp <- getTcpSocket
+          outputS (print (tcpOutMSS tcp, tcpOut tcp))
 
       FinWait1
           -- 3-way close
@@ -135,15 +152,18 @@ listening remote _local hdr = do
     let childSock = (emptyTcpSocket (tcpWindow hdr))
           { tcpParent   = Just parent
           , tcpSocketId = incomingSocketId remote hdr
-          , tcpState    = SynSent
+          , tcpState    = SynReceived
           , tcpSndNxt   = isn
           , tcpSndUna   = isn
           , tcpRcvNxt   = tcpSeqNum hdr
-          , tcpOutMSS   = case findTcpOption OptTagMaxSegmentSize hdr of
-              Just (OptMaxSegmentSize n) -> fromIntegral n
-              _                          -> tcpInMSS childSock
+          , tcpOutMSS   = fromMaybe (tcpInMSS childSock) (getMSS hdr)
           }
     withChild childSock synAck
+
+getMSS :: TcpHeader -> Maybe Int64
+getMSS hdr = do
+  OptMaxSegmentSize n <- findTcpOption OptTagMaxSegmentSize hdr
+  return (fromIntegral n)
 
 
 -- Buffer Delivery -------------------------------------------------------------

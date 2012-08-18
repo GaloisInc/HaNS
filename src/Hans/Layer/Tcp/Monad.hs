@@ -128,6 +128,20 @@ addInitialSeqNum :: TcpSeqNum -> Tcp ()
 addInitialSeqNum sn =
   modifyHost (\host -> host { hostInitialSeqNum = hostInitialSeqNum host + sn })
 
+-- | Allocate a new port for use.
+allocatePort :: Tcp TcpPort
+allocatePort  = do
+  host <- getHost
+  case takePort host of
+    Just (p,host') -> do
+      setHost host'
+      return p
+    Nothing -> mzero
+
+-- | Release a used port.
+closePort :: TcpPort -> Tcp ()
+closePort port = modifyHost (releasePort port)
+
 
 -- Socket Monad ----------------------------------------------------------------
 
@@ -138,10 +152,10 @@ newtype Sock a = Sock
 inTcp :: Tcp a -> Sock a
 inTcp  = Sock . inBase
 
-runSock :: SocketId -> TcpSocket -> Sock a -> Tcp a
-runSock sid tcp (Sock m) = do
+runSock :: TcpSocket -> Sock a -> Tcp a
+runSock tcp (Sock m) = do
   (a,tcp') <- runStateT tcp m
-  addConnection sid tcp'
+  addConnection (tcpSocketId tcp') tcp'
   return a
 
 -- | Iterate for each connection, rolling back to its previous state if the
@@ -156,14 +170,17 @@ listeningConnection :: SocketId -> Sock a -> Tcp a
 listeningConnection sid m = do
   tcp <- getConnection sid
   guard (tcpState tcp == Listen && isAccepting tcp)
-  runSock sid tcp m
+  runSock tcp m
 
 -- | Run a socket operation in the context of the socket identified by the
 -- socket id.
+--
+-- XXX this should really be renamed, as it's not guarding on the state of the
+-- socket
 establishedConnection :: SocketId -> Sock a -> Tcp a
 establishedConnection sid m = do
   tcp <- getConnection sid
-  runSock sid tcp m
+  runSock tcp m
 
 -- | Get the parent id of the current socket, and fail if it doesn't exist.
 getParent :: Sock SocketId
@@ -180,10 +197,10 @@ inParent m = do
   pid <- getParent
   inTcp $ do
     p <- getConnection pid
-    runSock pid p m
+    runSock p m
 
 withChild :: TcpSocket -> Sock a -> Sock a
-withChild tcp m = inTcp (runSock (tcpSocketId tcp) tcp m)
+withChild tcp m = inTcp (runSock tcp m)
 
 getTcpSocket :: Sock TcpSocket
 getTcpSocket  = Sock get

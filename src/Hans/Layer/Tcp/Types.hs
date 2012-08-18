@@ -5,10 +5,12 @@ module Hans.Layer.Tcp.Types where
 import Hans.Address.IP4
 import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
+import Hans.Ports
 
 import Control.Exception (Exception,SomeException,toException)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word16)
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
@@ -19,6 +21,7 @@ import qualified Data.Sequence as Seq
 data Host = Host
   { hostConnections   :: Connections
   , hostInitialSeqNum :: !TcpSeqNum
+  , hostPorts         :: !(PortManager TcpPort)
   }
 
 emptyHost :: Host
@@ -26,7 +29,18 @@ emptyHost  = Host
   { hostConnections   = Map.empty
     -- XXX what should we seed this with?
   , hostInitialSeqNum = 0
+  , hostPorts         = emptyPortManager [32768 .. 61000]
   }
+
+takePort :: Host -> Maybe (TcpPort,Host)
+takePort host = do
+  (p,ps) <- nextPort (hostPorts host)
+  return (p, host { hostPorts = ps })
+
+releasePort :: TcpPort -> Host -> Host
+releasePort p host = fromMaybe host $ do
+  ps <- unreserve p (hostPorts host)
+  return host { hostPorts = ps }
 
 
 -- Connections -----------------------------------------------------------------
@@ -116,9 +130,9 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpUserClosed  = False
   , tcpOut         = emptyWindow sendWindow
   , tcpOutBuffer   = emptyBuffer 16384
-  , tcpOutMSS      = 1400
+  , tcpOutMSS      = 1460
   , tcpInBuffer    = emptyBuffer 16384
-  , tcpInMSS       = 1400
+  , tcpInMSS       = 1460
 
   , tcpNeedsDelAck = False
   , tcpMaxIdle     = 10 * 60 * 2

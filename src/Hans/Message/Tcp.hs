@@ -30,7 +30,7 @@ tcpProtocol  = IP4Protocol 0x6
 
 newtype TcpPort = TcpPort
   { getPort :: Word16
-  } deriving (Eq,Ord,Read,Show,Num)
+  } deriving (Eq,Ord,Read,Show,Num,Enum,Bounded)
 
 putTcpPort :: Putter TcpPort
 putTcpPort (TcpPort w16) = putWord16be w16

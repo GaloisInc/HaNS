@@ -232,6 +232,10 @@ startTcpLayer stack =
 listen :: HasTcp stack => stack -> IP4 -> TcpPort -> IO Tcp.Socket
 listen stack = Tcp.listen (tcpHandle stack)
 
+-- | Make a remote connection.
+connect :: HasTcp stack => stack -> IP4 -> TcpPort -> Maybe TcpPort -> IO Tcp.Socket
+connect stack = Tcp.connect (tcpHandle stack)
+
 
 -- Timer Layer Interface -------------------------------------------------------
 

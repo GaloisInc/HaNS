@@ -48,14 +48,18 @@ mkRstAck hdr = emptyTcpHeader
 
 -- Connection Establishment ----------------------------------------------------
 
+mkSyn :: TcpSocket -> TcpHeader
+mkSyn tcp = (mkSegment tcp)
+  { tcpSyn    = True
+  , tcpAckNum = 0
+  }
+
 -- | Construct a SYN ACK packet, in response to a SYN.
 mkSynAck :: TcpSocket -> TcpHeader
-mkSynAck tcp = hdr
-  { tcpAck    = True
-  , tcpSyn    = True
+mkSynAck tcp = (mkSegment tcp)
+  { tcpSyn = True
+  , tcpAck = True
   }
-  where
-  hdr = mkSegment tcp
 
 
 -- Connection Closing ----------------------------------------------------------
@@ -78,6 +82,12 @@ mkData tcp = (mkSegment tcp)
 
 
 -- Socket Actions --------------------------------------------------------------
+
+syn :: Sock ()
+syn  = do
+  tcp <- getTcpSocket
+  tcpOutput (mkSyn tcp) L.empty
+  advanceSndNxt 1
 
 -- | Respond to a SYN message with a SYN ACK message.
 synAck :: Sock ()
@@ -123,6 +133,12 @@ isSyn hdr = foldr step (tcpSyn hdr) fields
   where
   step p r = r && not (p hdr)
   fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpFin ]
+
+isSynAck :: TcpHeader -> Bool
+isSynAck hdr = foldr step (tcpSyn hdr && tcpAck hdr) fields
+  where
+  step p r = r && not (p hdr)
+  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpFin ]
 
 isAck :: TcpHeader -> Bool
 isAck hdr = foldr step (tcpAck hdr) fields

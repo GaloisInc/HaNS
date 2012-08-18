@@ -5,6 +5,7 @@ module Hans.Layer.Tcp.Socket (
   , sockRemoteHost
   , sockRemotePort
   , sockLocalPort
+  , connect
   , listen
   , accept
   , close
@@ -28,6 +29,7 @@ import Control.Monad (mplus)
 import Data.Int (Int64)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Sequence as Seq
 
 
 -- Socket Interface ------------------------------------------------------------
@@ -70,6 +72,35 @@ blockResult tcp action = do
     SocketError e  -> throwIO e
 
 
+-- Connect ---------------------------------------------------------------------
+
+-- | Connect to a remote host.
+connect :: TcpHandle -> IP4 -> TcpPort -> Maybe TcpPort -> IO Socket
+connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
+  localPort <- maybe allocatePort return mbLocal
+  isn       <- initialSeqNum
+  let unblock sid = putMVar res $ SocketResult $ Socket
+        { sockHandle = tcp
+        , sockId     = sid
+        }
+      sock = (emptyTcpSocket 0)
+        { tcpSocketId  = SocketId
+          { sidLocalPort  = localPort
+          , sidRemoteHost = remote
+          , sidRemotePort = remotePort
+          }
+        , tcpAcceptors = Seq.singleton unblock
+        , tcpState     = Listen
+        , tcpSndNxt    = isn
+        , tcpSndUna    = isn
+        , tcpRcvNxt    = 0
+        }
+  -- XXX how should this connect with the retransmit queue?
+  runSock sock $ do
+    syn
+    setState SynSent
+
+
 -- Listen ----------------------------------------------------------------------
 
 data ListenError = ListenError
@@ -85,7 +116,10 @@ listen tcp _src port = blockResult tcp $ \ res -> do
   case mb of
 
     Nothing -> do
-      let con = (emptyTcpSocket 0) { tcpState = Listen }
+      let con = (emptyTcpSocket 0)
+            { tcpSocketId = sid
+            , tcpState    = Listen
+            }
       addConnection sid con
       output $ putMVar res $ SocketResult Socket
         { sockHandle = tcp

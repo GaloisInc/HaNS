@@ -34,6 +34,16 @@ emptyWindow size = Window
   , winSize      = size
   }
 
+resizeWindow :: Word16 -> Window -> Window
+resizeWindow size win = win
+  { winSize      = size
+  , winAvailable = avail
+  }
+  where
+  used                = winSize win - winAvailable win
+  avail | used > size = 0
+        | otherwise   = size - used
+
 -- | Add a segment to the window.
 addSegment :: Segment -> Window -> Window
 addSegment seg win = win
