@@ -99,8 +99,10 @@ established remote _local hdr body = do
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment hdr body = do
 
+  -- handle data segment acknowledgments
   when (isAck hdr) (handleAck hdr)
 
+  -- process a message, if there was data attached
   when (S.length body > 0) $ do
     mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
       (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
@@ -115,6 +117,7 @@ deliverSegment hdr body = do
       Just wakeup -> outputS (tryAgain wakeup)
       Nothing     -> return ()
 
+  -- handle graceful teardown, initiated remotely
   when (tcpFin hdr) remoteGracefulTeardown
 
 -- | Handle an ACK to a sent data segment.
@@ -135,6 +138,8 @@ handleAck hdr = do
 
     Nothing -> tcp
 
+-- | The other end has sent a FIN packet, acknowledge it, and respond with a
+-- FIN,ACK packet.
 remoteGracefulTeardown :: Sock ()
 remoteGracefulTeardown  = do
   advanceRcvNxt 1
