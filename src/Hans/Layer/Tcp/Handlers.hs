@@ -10,7 +10,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 import Hans.Utils
 
-import Control.Monad (mzero,mplus,guard)
+import Control.Monad (mzero,mplus,guard,when)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Serialize (runGet)
@@ -100,7 +100,7 @@ established remote _local hdr body = do
 
 
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
-deliverSegment _hdr body = do
+deliverSegment hdr body = do
   mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
     (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
     let tcp' = tcp
@@ -113,6 +113,11 @@ deliverSegment _hdr body = do
   case mb of
     Just wakeup -> outputS (tryAgain wakeup)
     Nothing     -> return ()
+
+  -- start closing the connection if it's necessary to do so
+  when (tcpFin hdr) $ do
+    finAck
+    setState LastAck
 
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()

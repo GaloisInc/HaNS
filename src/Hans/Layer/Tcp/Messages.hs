@@ -118,6 +118,7 @@ finAck  = do
   tcp <- getTcpSocket
   tcpOutput (mkFinAck tcp) L.empty
   advanceSndNxt 1
+  clearDelayedAck
 
 -- | Send a segment.
 outputSegment :: Segment -> Sock ()
