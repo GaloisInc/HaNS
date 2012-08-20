@@ -101,18 +101,19 @@ deliverSegment hdr body = do
 
   when (isAck hdr) (handleAck hdr)
 
-  mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
-    (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
-    let tcp' = tcp
-          { tcpRcvNxt      = tcpRcvNxt tcp + fromIntegral (S.length body)
-          , tcpInBuffer    = bufIn
-          , tcpNeedsDelAck = True
-          }
-    return (wakeup, tcp')
+  when (S.length body > 0) $ do
+    mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
+      (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
+      let tcp' = tcp
+            { tcpRcvNxt      = tcpRcvNxt tcp + fromIntegral (S.length body)
+            , tcpInBuffer    = bufIn
+            , tcpNeedsDelAck = True
+            }
+      return (wakeup, tcp')
 
-  case mb of
-    Just wakeup -> outputS (tryAgain wakeup)
-    Nothing     -> return ()
+    case mb of
+      Just wakeup -> outputS (tryAgain wakeup)
+      Nothing     -> return ()
 
   when (tcpFin hdr) remoteGracefulTeardown
 
