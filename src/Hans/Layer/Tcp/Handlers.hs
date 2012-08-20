@@ -102,7 +102,9 @@ deliverSegment hdr body = do
   -- handle data segment acknowledgments
   when (isAck hdr) (handleAck hdr)
 
-  -- process a message, if there was data attached
+  -- process a message, if there was data attached.  in the case that there is
+  -- no room in the buffer, the original socket state will be returned,
+  -- preventing any ACK from being sent.
   when (S.length body > 0) $ do
     mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
       (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
