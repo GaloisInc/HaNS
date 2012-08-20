@@ -1,5 +1,5 @@
 name:           hans
-version:        2.2.0.0
+version:        2.3.0.0
 cabal-version:  >= 1.8
 license:        BSD3
 license-file:   LICENSE
