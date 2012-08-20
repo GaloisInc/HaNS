@@ -27,6 +27,7 @@ import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
 import Control.Monad (mplus)
 import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Sequence as Seq
@@ -197,14 +198,21 @@ sendBytes sock bytes = blockResult (sockHandle sock) $ \ res ->
         let wakeup continue
               | continue  = send (sockHandle sock) performSend
               | otherwise = result 0
-        mbWritten <- modifyTcpSocket $ \ tcp ->
-          let (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
-           in (mbWritten,tcp { tcpOutBuffer = bufOut })
+        mbWritten <- modifyTcpSocket (outputBytes bytes wakeup)
         case mbWritten of
           Just len -> outputS (result len)
           Nothing  -> return ()
         outputSegments
    in performSend
+
+outputBytes :: L.ByteString -> Wakeup -> TcpSocket -> (Maybe Int64, TcpSocket)
+outputBytes bytes wakeup tcp
+  | tcpState tcp == Established = (mbWritten,    tcp { tcpOutBuffer = bufOut })
+  | otherwise                   = (Just written, tcp { tcpOutBuffer = flushed })
+  where
+  (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
+  flushed            = flushWaiting bufOut
+  written            = fromMaybe 0 mbWritten
 
 
 -- Reading ---------------------------------------------------------------------
@@ -218,10 +226,17 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
         let wakeup continue
               | continue  = send (sockHandle sock) performRecv
               | otherwise = result L.empty
-        mbRead <- modifyTcpSocket $ \ tcp ->
-          let (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
-           in (mbRead,tcp { tcpInBuffer = bufIn })
+        mbRead <- modifyTcpSocket (inputBytes len wakeup)
         case mbRead of
           Just bytes -> outputS (result bytes)
           Nothing    -> return ()
    in performRecv
+
+inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
+inputBytes len wakeup tcp
+  | tcpState tcp == Established = (mbRead,     tcp { tcpInBuffer = bufIn   })
+  | otherwise                   = (Just bytes, tcp { tcpInBuffer = flushed })
+  where
+  (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
+  flushed        = flushWaiting bufIn
+  bytes          = fromMaybe L.empty mbRead

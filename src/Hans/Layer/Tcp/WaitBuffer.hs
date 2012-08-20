@@ -14,6 +14,7 @@ module Hans.Layer.Tcp.WaitBuffer (
   , emptyBuffer
   , shutdownWaiting
   , availableBytes
+  , flushWaiting
 
     -- ** Application Side
   , writeBytes
@@ -73,6 +74,10 @@ emptyBuffer size = Buffer
 -- | External interface.
 availableBytes :: Buffer d -> Int64
 availableBytes  = bufAvailable
+
+-- | Flush the queue of blocked processes.
+flushWaiting :: Buffer d -> Buffer d
+flushWaiting buf = buf { bufWaiting = Seq.empty }
 
 -- | Queue a wakeup action into a buffer.
 queueWaiting :: Wakeup -> Buffer d -> Buffer d
