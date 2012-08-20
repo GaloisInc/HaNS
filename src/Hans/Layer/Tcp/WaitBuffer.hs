@@ -148,6 +148,6 @@ putBytes bytes buf = do
   let needed = L.length bytes + L.length (bufBytes buf)
   guard (needed < bufSize buf)
   let buf' = buf { bufBytes = bufBytes buf `L.append` bytes }
-  case Seq.viewl (bufWaiting buf) of
+  case Seq.viewl (bufWaiting buf') of
     Seq.EmptyL  -> return (Nothing, buf')
     w Seq.:< ws -> return (Just w, buf' { bufWaiting = ws })
