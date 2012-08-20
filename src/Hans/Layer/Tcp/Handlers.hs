@@ -38,7 +38,6 @@ established remote _local hdr body = do
   let sid = incomingSocketId remote hdr
   establishedConnection sid $ do
     state <- getState
-    outputS (print state)
     case state of
 
       Established
@@ -123,6 +122,7 @@ deliverSegment hdr body = do
 
   -- start closing the connection if it's necessary to do so
   when (tcpFin hdr) $ do
+    -- in theory, we switch through CloseWait here
     finAck
     setState LastAck
 
