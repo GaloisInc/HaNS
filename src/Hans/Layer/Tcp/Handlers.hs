@@ -41,14 +41,8 @@ established remote _local hdr body = do
     case state of
 
       Established
-        | isFinAck hdr -> do
-          advanceRcvNxt 1
-          ack
-          -- technically, we go to CloseWait now, but we'll transition out as
-          -- soon as we go to LastAck
-          finAck
-          setState LastAck
-        | otherwise -> deliverSegment hdr body
+        | isFinAck hdr -> remoteGracefulTeardown
+        | otherwise    -> deliverSegment hdr body
 
       SynReceived
         | isAck hdr -> do
@@ -120,11 +114,7 @@ deliverSegment hdr body = do
     Just wakeup -> outputS (tryAgain wakeup)
     Nothing     -> return ()
 
-  -- start closing the connection if it's necessary to do so
-  when (tcpFin hdr) $ do
-    -- in theory, we switch through CloseWait here
-    finAck
-    setState LastAck
+  when (tcpFin hdr) remoteGracefulTeardown
 
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()
@@ -143,6 +133,15 @@ handleAck hdr = do
              else tcp'
 
     Nothing -> tcp
+
+remoteGracefulTeardown :: Sock ()
+remoteGracefulTeardown  = do
+  advanceRcvNxt 1
+  ack
+  -- technically, we go to CloseWait now, but we'll transition out as
+  -- soon as we go to LastAck
+  finAck
+  setState LastAck
 
 enterTimeWait :: Sock ()
 enterTimeWait  = do
