@@ -5,9 +5,11 @@ import Hans.Address.Mac
 import Hans.Address.IP4
 import Hans.Device.Tap
 import Hans.NetworkStack
+import Hans.Message.Tcp (TcpPort(..))
 
 import Control.Concurrent (threadDelay,forkIO,killThread,myThreadId)
-import Control.Monad (forever,when)
+import Control.Monad (forever,when,unless)
+import System.Environment (getArgs)
 import qualified Data.ByteString.Lazy as L
 
 
@@ -22,7 +24,36 @@ main  = do
   setAddress mac ns
   putStrLn "Network stack running..."
 
+  client ns
+  --server ns
+
+client :: NetworkStack -> IO ()
+client ns = do
+
+  args <- getArgs
+
+  let local = case args of
+        [p] -> Just (TcpPort (read p))
+        _   -> Nothing
+
+  sock <- connect ns (IP4 192 168 90 1) 8000 local
+  putStrLn "Connected!"
+  sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
+  putStrLn "request in..."
+
+  let loop = do
+        bytes <- recvBytes sock 1024
+        L.putStrLn bytes
+        unless (L.null bytes) loop
+  loop
+
+  putStrLn "Done!"
+  close sock
+
+server :: NetworkStack -> IO ()
+server ns = do
   sock <- listen ns localAddr 9001
+  print (sockLocalPort sock)
 
   forever $ do
     putStrLn "accepting"
@@ -39,7 +70,11 @@ main  = do
         return ()
     return ()
 
-message = L.pack (map (toEnum . fromEnum) "Hello, world\n")
+fromString :: String -> L.ByteString
+fromString  = L.pack . map (toEnum . fromEnum)
+
+message :: L.ByteString
+message  = fromString "Hello, world\n"
 
 sleep :: Int -> IO ()
 sleep s = threadDelay (s * 1000 * 1000)
