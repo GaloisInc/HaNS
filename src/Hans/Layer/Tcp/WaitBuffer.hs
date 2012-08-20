@@ -1,6 +1,28 @@
 {-# LANGUAGE EmptyDataDecls #-}
 
-module Hans.Layer.Tcp.WaitBuffer where
+module Hans.Layer.Tcp.WaitBuffer (
+    -- * Delayed work
+    Wakeup
+  , tryAgain
+  , abort
+
+    -- * Directions
+  , Incoming, Outgoing
+
+    -- * Directed Buffers
+  , Buffer
+  , emptyBuffer
+  , shutdownWaiting
+  , availableBytes
+
+    -- ** Application Side
+  , writeBytes
+  , readBytes
+
+    -- ** Kernel Side
+  , takeBytes
+  , putBytes
+  ) where
 
 import Control.Monad (guard)
 import Data.Int (Int64)
@@ -48,15 +70,13 @@ emptyBuffer size = Buffer
   , bufAvailable = size
   }
 
+-- | External interface.
+availableBytes :: Buffer d -> Int64
+availableBytes  = bufAvailable
+
 -- | Queue a wakeup action into a buffer.
 queueWaiting :: Wakeup -> Buffer d -> Buffer d
 queueWaiting wakeup buf = buf { bufWaiting = bufWaiting buf Seq.|> wakeup }
-
--- | Take a single Wakeup action off of a buffer.
-takeWaiting :: Buffer d -> Maybe (Wakeup,Buffer d)
-takeWaiting buf = case Seq.viewl (bufWaiting buf) of
-  w Seq.:< ws -> Just (w,buf { bufWaiting = ws })
-  Seq.EmptyL  -> Nothing
 
 -- | Queue bytes into a buffer that has some available size.
 queueBytes :: L.ByteString -> Buffer d -> (Maybe Int64, Buffer d)
@@ -97,10 +117,6 @@ writeBytes :: L.ByteString -> Wakeup -> Buffer Outgoing
 writeBytes bytes wakeup buf = case queueBytes bytes buf of
   (Nothing,buf') -> (Nothing,queueWaiting wakeup buf')
   res            -> res
-
--- | Test the size of the output buffer.
-bytesAvailable :: Buffer Outgoing -> Bool
-bytesAvailable  = not . L.null . bufBytes
 
 -- | Take bytes off of a sending queue, making room new data.
 takeBytes :: Int64 -> Buffer Outgoing

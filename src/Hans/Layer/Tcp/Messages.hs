@@ -17,7 +17,7 @@ mkSegment tcp = setTcpOptions opts emptyTcpHeader
   , tcpSeqNum     = tcpSndNxt tcp
   , tcpAckNum     = tcpRcvNxt tcp
     -- XXX this doesn't really reflect the right number
-  , tcpWindow     = fromIntegral (bufAvailable (tcpInBuffer tcp))
+  , tcpWindow     = fromIntegral (availableBytes (tcpInBuffer tcp))
   }
   where
   opts =
