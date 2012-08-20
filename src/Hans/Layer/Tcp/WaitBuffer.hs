@@ -91,6 +91,7 @@ queueBytes bytes buf
     , bufAvailable = bufAvailable buf - qlen
     }
 
+-- | Take bytes off of a buffer, if there are any available.
 removeBytes :: Int64 -> Buffer d -> Maybe (L.ByteString, Buffer d)
 removeBytes len buf = do
   guard (not (L.null (bufBytes buf)))
