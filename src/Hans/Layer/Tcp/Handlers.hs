@@ -38,6 +38,7 @@ established remote _local hdr body = do
   let sid = incomingSocketId remote hdr
   establishedConnection sid $ do
     state <- getState
+    outputS (print state)
     case state of
 
       Established
@@ -48,7 +49,6 @@ established remote _local hdr body = do
           -- soon as we go to LastAck
           finAck
           setState LastAck
-        | isAck hdr -> handleAck hdr
         | otherwise -> deliverSegment hdr body
 
       SynReceived
@@ -99,8 +99,15 @@ established remote _local hdr body = do
       _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
 
+-- | Deliver incoming bytes to the buffer in a user socket.  If there's no free
+-- space in the buffer, the bytes will be dropped.
+--
+-- XXX should this not ack if it's going to drop packets?
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment hdr body = do
+
+  when (isAck hdr) (handleAck hdr)
+
   mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
     (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
     let tcp' = tcp
