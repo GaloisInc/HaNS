@@ -11,7 +11,7 @@ import qualified Data.ByteString.Lazy as L
 -- Generic Packets -------------------------------------------------------------
 
 mkSegment :: TcpSocket -> TcpHeader
-mkSegment tcp = setTcpOptions opts emptyTcpHeader
+mkSegment tcp = emptyTcpHeader
   { tcpDestPort   = sidRemotePort (tcpSocketId tcp)
   , tcpSourcePort = sidLocalPort (tcpSocketId tcp)
   , tcpSeqNum     = tcpSndNxt tcp
@@ -19,10 +19,6 @@ mkSegment tcp = setTcpOptions opts emptyTcpHeader
     -- XXX this doesn't really reflect the right number
   , tcpWindow     = fromIntegral (availableBytes (tcpInBuffer tcp))
   }
-  where
-  opts =
-    [ OptMaxSegmentSize (fromIntegral (tcpInMSS tcp))
-    ]
 
 mkAck :: TcpSocket -> TcpHeader
 mkAck tcp = (mkSegment tcp)
@@ -49,17 +45,21 @@ mkRstAck hdr = emptyTcpHeader
 -- Connection Establishment ----------------------------------------------------
 
 mkSyn :: TcpSocket -> TcpHeader
-mkSyn tcp = (mkSegment tcp)
-  { tcpSyn    = True
-  , tcpAckNum = 0
-  }
+mkSyn tcp
+  = setTcpOption (OptMaxSegmentSize (fromIntegral (tcpInMSS tcp)))
+  $ (mkSegment tcp)
+    { tcpSyn    = True
+    , tcpAckNum = 0
+    }
 
 -- | Construct a SYN ACK packet, in response to a SYN.
 mkSynAck :: TcpSocket -> TcpHeader
-mkSynAck tcp = (mkSegment tcp)
-  { tcpSyn = True
-  , tcpAck = True
-  }
+mkSynAck tcp
+  = setTcpOption (OptMaxSegmentSize (fromIntegral (tcpInMSS tcp)))
+  $ (mkSegment tcp)
+    { tcpSyn = True
+    , tcpAck = True
+    }
 
 
 -- Connection Closing ----------------------------------------------------------
