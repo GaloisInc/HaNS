@@ -43,6 +43,7 @@ initTimers  = do
   every 500 slowTimer
   every 200 fastTimer
 
+-- | Fires every 500ms.
 slowTimer :: Tcp ()
 slowTimer  = do
   eachConnection $ do
@@ -61,7 +62,7 @@ tcpKeepIntVal  = 75 * 2
 incIdle :: Sock ()
 incIdle  = modifyTcpSocket_ (\tcp -> tcp { tcpIdle = tcpIdle tcp + 1 })
 
--- | Handle only the delayed ack timer.
+-- | Handle only the delayed ack timer, fires ever 200ms.
 fastTimer :: Tcp ()
 fastTimer  = eachConnection $ do
   tcp <- getTcpSocket
