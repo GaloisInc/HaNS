@@ -241,6 +241,22 @@ popAcceptor  = do
       return a
     Seq.EmptyL -> mzero
 
+-- | Send a notification back to a waiting process that the socket has been
+-- established, or that it has failed.  It's assumed that this will only be
+-- called from the context of a user socket, so when the parameter is @False@,
+-- the user close field will be set to true.
+notify :: Bool -> Sock ()
+notify success = do
+  mbNotify <- modifyTcpSocket $ \ tcp ->
+    let tcp' = tcp { tcpNotify = Nothing }
+     in if success
+           then (tcpNotify tcp, tcp')
+           else (tcpNotify tcp, tcp' { tcpUserClosed = True })
+
+  case mbNotify of
+    Just f  -> outputS (f success)
+    Nothing -> mzero
+
 -- | Output some IO to the Tcp layer.
 outputS :: IO () -> Sock ()
 outputS  = inTcp . output

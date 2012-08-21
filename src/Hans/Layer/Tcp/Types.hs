@@ -84,6 +84,8 @@ socketError  = SocketError . toException
 
 type Acceptor = SocketId -> IO ()
 
+type Notify = Bool -> IO ()
+
 type Close = IO ()
 
 type SlowTicks = Int
@@ -93,6 +95,7 @@ data TcpSocket = TcpSocket
   , tcpSocketId    :: !SocketId
   , tcpState       :: !ConnState
   , tcpAcceptors   :: Seq.Seq Acceptor
+  , tcpNotify      :: Maybe Notify
   , tcpSndNxt      :: !TcpSeqNum
   , tcpSndUna      :: !TcpSeqNum
   , tcpRcvNxt      :: !TcpSeqNum
@@ -123,6 +126,7 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpSocketId    = emptySocketId
   , tcpState       = Closed
   , tcpAcceptors   = Seq.empty
+  , tcpNotify      = Nothing
   , tcpSndNxt      = 0
   , tcpSndUna      = 0
   , tcpRcvNxt      = 0

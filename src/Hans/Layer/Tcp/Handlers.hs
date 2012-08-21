@@ -51,6 +51,12 @@ established remote _local hdr body = do
           outputS (k sid)
 
       SynSent
+          -- connection rejected
+        | isRstAck hdr -> do
+          setState Closed
+          notify False
+          closeSocket
+          -- connection ack'd
         | isSynAck hdr -> do
           modifyTcpSocket_ $ \ tcp -> tcp
             { tcpState  = Established
@@ -60,8 +66,8 @@ established remote _local hdr body = do
             }
           advanceRcvNxt 1
           ack
-          k <- popAcceptor
-          outputS (k sid)
+
+          notify True
 
           tcp <- getTcpSocket
           outputS (print (tcpOutMSS tcp, tcpOut tcp))

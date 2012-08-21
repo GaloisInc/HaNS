@@ -30,7 +30,6 @@ import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Sequence as Seq
 
 
 -- Socket Interface ------------------------------------------------------------
@@ -75,22 +74,29 @@ blockResult tcp action = do
 
 -- Connect ---------------------------------------------------------------------
 
+-- | A connect call failed.
+data ConnectError = ConnectionRefused
+    deriving (Show,Typeable)
+
+instance Exception ConnectError
+
 -- | Connect to a remote host.
 connect :: TcpHandle -> IP4 -> TcpPort -> Maybe TcpPort -> IO Socket
 connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
   localPort <- maybe allocatePort return mbLocal
   isn       <- initialSeqNum
-  let unblock sid = putMVar res $ SocketResult $ Socket
-        { sockHandle = tcp
-        , sockId     = sid
-        }
-      sock = (emptyTcpSocket 0)
+  let sock = (emptyTcpSocket 0)
         { tcpSocketId  = SocketId
           { sidLocalPort  = localPort
           , sidRemoteHost = remote
           , sidRemotePort = remotePort
           }
-        , tcpAcceptors = Seq.singleton unblock
+        , tcpNotify    = Just $ \ success -> putMVar res $! if success
+            then SocketResult Socket
+              { sockHandle = tcp
+              , sockId     = tcpSocketId sock
+              }
+            else socketError ConnectionRefused
         , tcpState     = Listen
         , tcpSndNxt    = isn
         , tcpSndUna    = isn
