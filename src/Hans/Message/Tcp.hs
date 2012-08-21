@@ -41,7 +41,7 @@ getTcpPort  = TcpPort `fmap` getWord16be
 
 newtype TcpSeqNum = TcpSeqNum
   { getSeqNum :: Word32
-  } deriving (Eq,Ord,Show,Num)
+  } deriving (Eq,Ord,Show,Num,Bounded)
 
 instance Monoid TcpSeqNum where
   mempty  = 0

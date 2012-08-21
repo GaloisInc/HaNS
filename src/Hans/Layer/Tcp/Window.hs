@@ -9,10 +9,9 @@ import Hans.Layer.Tcp.WaitBuffer
 import Hans.Message.Tcp
 
 import Control.Monad (mzero)
-import Data.Function (on)
 import Data.Time.Clock.POSIX (POSIXTime)
-import Data.Monoid (Sum(..))
 import Data.Word (Word16)
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
@@ -64,7 +63,7 @@ receiveAck hdr win = do
   -- require that there was something to ack.
   case Seq.viewr acks of
     _ Seq.:> seg -> do
-      let len  = getSum (F.foldMap (Sum . segSize) acks)
+      let len  = F.sum (segSize `fmap` acks)
           win' = win
             { winSegments  = rest
             , winSize      = tcpWindow hdr
@@ -85,8 +84,6 @@ genRetransmitSegments win = (outSegs, win { winSegments = segs' })
     rts' | segRTO seg' <= 0 = rts Seq.|> seg'
          | otherwise        = rts
 
-
--- Segments --------------------------------------------------------------------
 
 type Segments = Seq.Seq Segment
 
@@ -131,60 +128,70 @@ emptyLocalWindow sn = LocalWindow
   }
 
 setRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
-setRcvNxt sn lw = lw { lwRcvNxt = sn }
+setRcvNxt sn win = win { lwRcvNxt = sn }
 
-inOrder :: InSegment -> LocalWindow -> Bool
-inOrder seg lw = isSeqNum seg == lwRcvNxt lw
+addRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
+addRcvNxt sn win = win { lwRcvNxt = lwRcvNxt win + sn }
 
--- | Handle an incoming segment.
-incomingPacket :: InSegment -> LocalWindow -> (Seq.Seq InSegment, LocalWindow)
-incomingPacket is lw
-  | inOrder is lw = (is Seq.<| segs, lw')
-  | otherwise     = (Seq.empty, bufferSegment is lw)
+-- | Process an incoming packet that needs to pass through the incoming queue.
+incomingPacket :: TcpHeader -> S.ByteString -> LocalWindow
+               -> (Seq.Seq InSegment, LocalWindow)
+incomingPacket hdr body win = stepWindow (addInSegment hdr body win)
+
+-- | Queue an incoming packet in the incoming window.
+addInSegment :: TcpHeader -> S.ByteString -> LocalWindow -> LocalWindow
+addInSegment hdr body win = win { lwBuffer = insert (lwBuffer win) }
   where
-  (segs,lw') = dequeueSegments (setRcvNxt (isRcvNxt is) lw)
-
--- | Dequeue segments from the buffer while they're contiguous.
-dequeueSegments :: LocalWindow -> (Seq.Seq InSegment, LocalWindow)
-dequeueSegments  = loop Seq.empty
-  where
-  loop segs lw = case dequeueSegment lw of
-    Just (is,lw') -> loop (segs Seq.|> is) lw'
-    Nothing       -> (segs,lw)
-
--- | Try to dequeue a contiguous segment from the local window.
-dequeueSegment :: LocalWindow -> Maybe (InSegment,LocalWindow)
-dequeueSegment lw = case Seq.viewl (lwBuffer lw) of
-  a Seq.:< rest
-    | inOrder a lw -> Just (a, lw { lwBuffer = rest, lwRcvNxt = isRcvNxt a })
-  _                -> Nothing
-
-bufferSegment :: InSegment -> LocalWindow -> LocalWindow
-bufferSegment is lw = lw { lwBuffer = insert (lwBuffer lw) }
-  where
-  sn         = isSeqNum is
+  seg        = mkInSegment (lwRcvNxt win) hdr body
   insert buf = case Seq.viewl buf of
+    a Seq.:< rest -> case compare (isRelSeqNum a) (isRelSeqNum seg) of
+      LT -> a   Seq.<| insert rest
+      EQ -> seg Seq.<| rest
+      GT -> seg Seq.<| buf
+    Seq.EmptyL    -> Seq.singleton seg
 
-    a Seq.:< rest | sn > isSeqNum a -> a  Seq.<| insert rest
-                  | otherwise       -> is Seq.<| buf
-    Seq.EmptyL                      -> Seq.singleton is
+-- | Advance the window, if there are packets available to be returned.
+stepWindow :: LocalWindow -> (Seq.Seq InSegment, LocalWindow)
+stepWindow  = loop 0 Seq.empty
+  where
+  loop expect segs win = case Seq.viewl (lwBuffer win) of
+    a Seq.:< rest | isRelSeqNum a == expect -> keep a segs rest win
+                  | otherwise               -> finalize segs win
+    Seq.EmptyL                              -> finalize segs win
+
+  keep seg segs rest win = loop (isRelSeqNum seg + len) (segs Seq.|> seg) win
+    { lwBuffer = rest
+    , lwRcvNxt = lwRcvNxt win + len
+    }
+    where
+    len = fromIntegral (S.length (isBody seg))
+
+  finalize segs win = (segs,win { lwBuffer = update `fmap` lwBuffer win })
+    where
+    len       = F.sum (isLength `fmap` segs)
+    update is = is { isRelSeqNum = isRelSeqNum is - len }
 
 data InSegment = InSegment
-  { isRcvNxt :: !TcpSeqNum -- ^ @TcpSeqNum@ to follow
-  , isWrap   :: Bool
-  , isHeader :: !TcpHeader
-  , isBody   :: !L.ByteString
+  { isRelSeqNum :: !TcpSeqNum
+  , isHeader    :: !TcpHeader
+  , isBody      :: !S.ByteString
   } deriving (Show)
 
 isSeqNum :: InSegment -> TcpSeqNum
 isSeqNum  = tcpSeqNum . isHeader
 
-mkInSegment :: TcpHeader -> L.ByteString -> InSegment
-mkInSegment hdr body = InSegment
-  { isRcvNxt = rcvNxt
-  , isWrap   = tcpSeqNum hdr > rcvNxt -- should be rare
-  , isHeader = hdr
-  , isBody   = body
+isLength :: Num a => InSegment -> a
+isLength  = fromIntegral . S.length . isBody
+
+-- | Generate an incoming segment, relative to the value of RCV.NXT
+mkInSegment :: TcpSeqNum -> TcpHeader -> S.ByteString -> InSegment
+mkInSegment rcvNxt hdr body = InSegment
+  { isRelSeqNum = rel
+  , isHeader    = hdr
+  , isBody      = body
   }
   where
-  rcvNxt = tcpSeqNum hdr + fromIntegral (L.length body)
+  -- calculate the index, relative to RCV.NXT, taking sequence number wrap into
+  -- account
+  rel | tcpSeqNum hdr < rcvNxt = maxBound      - rcvNxt + tcpSeqNum hdr
+      | otherwise              = tcpSeqNum hdr - rcvNxt

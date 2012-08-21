@@ -98,12 +98,12 @@ data TcpSocket = TcpSocket
   , tcpNotify      :: Maybe Notify
   , tcpSndNxt      :: !TcpSeqNum
   , tcpSndUna      :: !TcpSeqNum
-  , tcpRcvNxt      :: !TcpSeqNum
 
   , tcpUserClosed  :: Bool
   , tcpOut         :: Window
   , tcpOutBuffer   :: Buffer Outgoing
   , tcpOutMSS      :: !Int64
+  , tcpIn          :: LocalWindow
   , tcpInBuffer    :: Buffer Incoming
   , tcpInMSS       :: !Int64
 
@@ -129,12 +129,12 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpNotify      = Nothing
   , tcpSndNxt      = 0
   , tcpSndUna      = 0
-  , tcpRcvNxt      = 0
 
   , tcpUserClosed  = False
   , tcpOut         = emptyWindow sendWindow
   , tcpOutBuffer   = emptyBuffer 16384
   , tcpOutMSS      = 1460
+  , tcpIn          = emptyLocalWindow 0
   , tcpInBuffer    = emptyBuffer 16384
   , tcpInMSS       = 1460
 
@@ -149,6 +149,9 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpTimer2MSL   = 0
   , tcpTimerRTO    = 0
   }
+
+tcpRcvNxt :: TcpSocket -> TcpSeqNum
+tcpRcvNxt = lwRcvNxt . tcpIn
 
 nextSegSize :: TcpSocket -> Int64
 nextSegSize tcp =

@@ -100,7 +100,6 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
         , tcpState     = Listen
         , tcpSndNxt    = isn
         , tcpSndUna    = isn
-        , tcpRcvNxt    = 0
         }
   -- XXX how should this connect with the retransmit queue?
   runSock sock $ do

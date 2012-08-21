@@ -262,10 +262,12 @@ outputS :: IO () -> Sock ()
 outputS  = inTcp . output
 
 advanceRcvNxt :: TcpSeqNum -> Sock ()
-advanceRcvNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpRcvNxt = tcpRcvNxt tcp + n })
+advanceRcvNxt n =
+  modifyTcpSocket_ (\tcp -> tcp { tcpIn = addRcvNxt n (tcpIn tcp) })
 
 advanceSndNxt :: TcpSeqNum -> Sock ()
-advanceSndNxt n = modifyTcpSocket_ (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
+advanceSndNxt n =
+  modifyTcpSocket_ (\tcp -> tcp { tcpSndNxt = tcpSndNxt tcp + n })
 
 remoteHost :: Sock IP4
 remoteHost  = (sidRemoteHost . tcpSocketId) `fmap` getTcpSocket

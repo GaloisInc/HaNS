@@ -8,7 +8,6 @@ import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
-import Hans.Utils
 
 import Control.Monad (mzero,mplus,guard,when)
 import Data.Int (Int64)
@@ -60,9 +59,9 @@ established remote _local hdr body = do
         | isSynAck hdr -> do
           modifyTcpSocket_ $ \ tcp -> tcp
             { tcpState  = Established
-            , tcpRcvNxt = tcpSeqNum hdr
             , tcpOutMSS = fromMaybe (tcpInMSS tcp) (getMSS hdr)
             , tcpOut    = resizeWindow (tcpWindow hdr) (tcpOut tcp)
+            , tcpIn     = emptyLocalWindow (tcpSeqNum hdr)
             }
           advanceRcvNxt 1
           ack
@@ -112,21 +111,32 @@ deliverSegment hdr body = do
   -- no room in the buffer, the original socket state will be returned,
   -- preventing any ACK from being sent.
   when (S.length body > 0) $ do
-    mb <- modifyTcpSocket $ \ tcp -> fromMaybe (Nothing,tcp) $ do
-      (wakeup,bufIn) <- putBytes (chunk body) (tcpInBuffer tcp)
-      let tcp' = tcp
-            { tcpRcvNxt      = tcpRcvNxt tcp + fromIntegral (S.length body)
-            , tcpInBuffer    = bufIn
-            , tcpNeedsDelAck = True
-            }
-      return (wakeup, tcp')
-
+    mb <- modifyTcpSocket (handleData hdr body)
     case mb of
       Just wakeup -> outputS (tryAgain wakeup)
       Nothing     -> return ()
 
   -- handle graceful teardown, initiated remotely
   when (tcpFin hdr) remoteGracefulTeardown
+
+-- | Enqueue a new packet in the local window, attempting to place the bytes
+-- received in the user buffer as they complete a part of the stream.  Bytes are
+-- ack'd as they complete the stream, and bytes that would cause the local
+-- buffer to overflow are dropped.
+handleData :: TcpHeader -> S.ByteString -> TcpSocket
+           -> (Maybe Wakeup, TcpSocket)
+handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
+  (wakeup,buf') <- putBytes bytes (tcpInBuffer tcp)
+  let tcp' = tcp
+        { tcpInBuffer    = buf'
+        , tcpNeedsDelAck = not (L.null bytes)
+        }
+  return (wakeup, tcp')
+  where
+  (segs,win') = incomingPacket hdr body (tcpIn tcp0)
+  tcp         = tcp0 { tcpIn = win' }
+  bytes       = L.fromChunks (map isBody (F.toList segs))
+
 
 -- | Handle an ACK to a sent data segment.
 handleAck :: TcpHeader -> Sock ()
@@ -180,7 +190,7 @@ listening remote _local hdr = do
           , tcpState    = SynReceived
           , tcpSndNxt   = isn
           , tcpSndUna   = isn
-          , tcpRcvNxt   = tcpSeqNum hdr
+          , tcpIn       = emptyLocalWindow (tcpSeqNum hdr)
           , tcpOutMSS   = fromMaybe (tcpInMSS childSock) (getMSS hdr)
           }
     withChild childSock synAck
