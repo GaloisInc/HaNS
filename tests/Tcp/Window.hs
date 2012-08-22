@@ -25,7 +25,7 @@ tcpWindowTests  = testGroup "tcp window"
 -- Local Window ----------------------------------------------------------------
 
 fromInSegment :: InSegment -> (TcpHeader,S.ByteString)
-fromInSegment  = isHeader &&& isBody
+fromInSegment  = inHeader &&& inBody
 
 -- | Check that if a stream of packets goes into the @LocalWindow@ in order,
 -- that they will come out in the same order.
