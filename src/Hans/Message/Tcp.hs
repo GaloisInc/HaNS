@@ -102,7 +102,7 @@ data TcpHeader = TcpHeader
   , tcpChecksum      :: !Word16
   , tcpUrgentPointer :: !Word16
   , tcpOptions       :: [TcpOption]
-  } deriving Show
+  } deriving (Eq,Show)
 
 instance HasTcpOptions TcpHeader where
   findTcpOption tag hdr = findTcpOption tag (tcpOptions hdr)
@@ -267,7 +267,7 @@ data TcpOption
   | OptWindowScaling !Word8
   | OptTimestamp !Word32 !Word32
   | OptUnknown !Word8 !Word8 !S.ByteString
-    deriving Show
+    deriving (Show,Eq)
 
 tcpOptionTag :: TcpOption -> TcpOptionTag
 tcpOptionTag opt = case opt of

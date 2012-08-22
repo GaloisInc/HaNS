@@ -153,3 +153,23 @@ executable tcp-test
                                 time       >= 1.1.0.0 && < 1.5.0.0,
                                 old-locale >= 1.0.0.0 && < 1.1.0.0,
                                 hans
+
+flag build-tests
+        default:        False
+        description:    Build the test suite
+
+executable hans-tests
+        if flag(build-tests)
+                buildable:      True
+                build-depends:  base                       >= 4        && < 5,
+                                containers                 >= 0.3      && < 0.5,
+                                bytestring                 >= 0.9.1    && < 0.10,
+                                old-locale                 >= 1        && < 1.1,
+                                test-framework-quickcheck2 >= 0.2.12.2 && < 0.3,
+                                test-framework             >= 0.6      && < 0.7,
+                                QuickCheck                 >= 2.4.2    && < 2.5,
+                                hans
+                hs-source-dirs: tests
+                main-is:        Main.hs
+        else
+                buildable:      False
