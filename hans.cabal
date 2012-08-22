@@ -159,6 +159,8 @@ flag build-tests
         description:    Build the test suite
 
 executable hans-tests
+        hs-source-dirs: tests
+        main-is:        Main.hs
         if flag(build-tests)
                 buildable:      True
                 build-depends:  base                       >= 4        && < 5,
@@ -169,7 +171,5 @@ executable hans-tests
                                 test-framework             >= 0.6      && < 0.7,
                                 QuickCheck                 >= 2.4.2    && < 2.5,
                                 hans
-                hs-source-dirs: tests
-                main-is:        Main.hs
         else
                 buildable:      False
