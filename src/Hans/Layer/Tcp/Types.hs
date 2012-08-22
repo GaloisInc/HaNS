@@ -100,7 +100,7 @@ data TcpSocket = TcpSocket
   , tcpSndUna      :: !TcpSeqNum
 
   , tcpUserClosed  :: Bool
-  , tcpOut         :: Window
+  , tcpOut         :: RemoteWindow
   , tcpOutBuffer   :: Buffer Outgoing
   , tcpOutMSS      :: !Int64
   , tcpIn          :: LocalWindow
@@ -131,7 +131,7 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpSndUna      = 0
 
   , tcpUserClosed  = False
-  , tcpOut         = emptyWindow sendWindow
+  , tcpOut         = emptyRemoteWindow sendWindow
   , tcpOutBuffer   = emptyBuffer 16384
   , tcpOutMSS      = 1460
   , tcpIn          = emptyLocalWindow 0
@@ -155,7 +155,7 @@ tcpRcvNxt = lwRcvNxt . tcpIn
 
 nextSegSize :: TcpSocket -> Int64
 nextSegSize tcp =
-  min (fromIntegral (winAvailable (tcpOut tcp))) (tcpOutMSS tcp)
+  min (fromIntegral (rwAvailable (tcpOut tcp))) (tcpOutMSS tcp)
 
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors

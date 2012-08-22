@@ -20,95 +20,94 @@ import qualified Data.Traversable as T
 
 -- Remote Window ---------------------------------------------------------------
 
--- | TCP windows, with a phantom type that determines the direction of packet
--- flow.
-data Window = Window
-  { winSegments  :: Segments
-  , winAvailable :: !Word16
-  , winSize      :: !Word16
+-- | Remote window management.
+data RemoteWindow = RemoteWindow
+  { rwSegments  :: OutSegments
+  , rwAvailable :: !Word16
+  , rwSize      :: !Word16
   } deriving (Show)
 
 -- | The empty window, seeded with an initial size.
-emptyWindow :: Word16 -> Window
-emptyWindow size = Window
-  { winSegments  = Seq.empty
-  , winAvailable = size
-  , winSize      = size
+emptyRemoteWindow :: Word16 -> RemoteWindow
+emptyRemoteWindow size = RemoteWindow
+  { rwSegments  = Seq.empty
+  , rwAvailable = size
+  , rwSize      = size
   }
 
-resizeWindow :: Word16 -> Window -> Window
+resizeWindow :: Word16 -> RemoteWindow -> RemoteWindow
 resizeWindow size win = win
-  { winSize      = size
-  , winAvailable = avail
+  { rwSize      = size
+  , rwAvailable = avail
   }
   where
-  used                = winSize win - winAvailable win
+  used                = rwSize win - rwAvailable win
   avail | used > size = 0
         | otherwise   = size - used
 
 -- | Add a segment to the window.
-addSegment :: Segment -> Window -> Window
+addSegment :: OutSegment -> RemoteWindow -> RemoteWindow
 addSegment seg win = win
-  { winSegments  = winSegments win Seq.|> seg
-  , winAvailable = winAvailable win - segSize seg
+  { rwSegments  = rwSegments win Seq.|> seg
+  , rwAvailable = rwAvailable win - outSize seg
   }
 
 -- | Process an incoming ack, returning a finalizer, and a new window if there
 -- was a matching set of packets waiting for an ack.
-receiveAck :: TcpHeader -> Window -> Maybe (Segment,Window)
+receiveAck :: TcpHeader -> RemoteWindow -> Maybe (OutSegment,RemoteWindow)
 receiveAck hdr win = do
-  let match seg = segAckNum seg == tcpAckNum hdr
-      (acks,rest) = Seq.spanl match (winSegments win)
+  let match seg   = outAckNum seg == tcpAckNum hdr
+      (acks,rest) = Seq.spanl match (rwSegments win)
 
   -- require that there was something to ack.
   case Seq.viewr acks of
     _ Seq.:> seg -> do
-      let len  = F.sum (segSize `fmap` acks)
+      let len  = F.sum (outSize `fmap` acks)
           win' = win
-            { winSegments  = rest
-            , winSize      = tcpWindow hdr
-            , winAvailable = min (tcpWindow hdr) (winAvailable win + len)
+            { rwSegments  = rest
+            , rwSize      = tcpWindow hdr
+            , rwAvailable = min (tcpWindow hdr) (rwAvailable win + len)
             }
       return (seg, win')
     Seq.EmptyR -> mzero
 
 -- | Update the RTO timer on all segments waiting for an ack.  When the timer
 -- runs out, output the segment for retransmission.
-genRetransmitSegments :: Window -> (Segments,Window)
-genRetransmitSegments win = (outSegs, win { winSegments = segs' })
+genRetransmitSegments :: RemoteWindow -> (OutSegments,RemoteWindow)
+genRetransmitSegments win = (outSegs, win { rwSegments = segs' })
   where
-  (outSegs,segs') = T.mapAccumL step Seq.empty (winSegments win)
+  (outSegs,segs') = T.mapAccumL step Seq.empty (rwSegments win)
   step rts seg = (rts',seg')
     where
     seg'                    = decrementRTO seg
-    rts' | segRTO seg' <= 0 = rts Seq.|> seg'
+    rts' | outRTO seg' <= 0 = rts Seq.|> seg'
          | otherwise        = rts
 
 
-type Segments = Seq.Seq Segment
+type OutSegments = Seq.Seq OutSegment
 
 -- | A delivered segment.
-data Segment = Segment
-  { segAckNum :: !TcpSeqNum
-  , segTime   :: !POSIXTime
-  , segFresh  :: Bool       -- ^ Whether or not this is a retransmission
-  , segRTO    :: !Int       -- ^ Retransmit timer for this segment
-  , segHeader :: !TcpHeader
-  , segBody   :: !L.ByteString
+data OutSegment = OutSegment
+  { outAckNum :: !TcpSeqNum
+  , outTime   :: !POSIXTime
+  , outFresh  :: Bool       -- ^ Whether or not this is a retransmission
+  , outRTO    :: !Int       -- ^ Retransmit timer for this segment
+  , outHeader :: !TcpHeader
+  , outBody   :: !L.ByteString
   } deriving (Show)
 
 -- | The size of a segment body.
-segSize :: Num a => Segment -> a
-segSize  = fromIntegral . L.length . segBody
+outSize :: Num a => OutSegment -> a
+outSize  = fromIntegral . L.length . outBody
 
 -- | Decrement the RTO value on a segment by the timer granularity (500ms).
 -- Once the RTO value dips below 1, mark the segment as no longer fresh.
-decrementRTO :: Segment -> Segment
+decrementRTO :: OutSegment -> OutSegment
 decrementRTO seg
-  | segRTO seg' <= 0 = seg' { segFresh = False }
+  | outRTO seg' <= 0 = seg' { outFresh = False }
   | otherwise        = seg'
   where
-  seg' = seg { segRTO = segRTO seg - 1 }
+  seg' = seg { outRTO = outRTO seg - 1 }
 
 
 -- Local Window ----------------------------------------------------------------
@@ -144,7 +143,7 @@ addInSegment hdr body win = win { lwBuffer = insert (lwBuffer win) }
   where
   seg        = mkInSegment (lwRcvNxt win) hdr body
   insert buf = case Seq.viewl buf of
-    a Seq.:< rest -> case compare (isRelSeqNum a) (isRelSeqNum seg) of
+    a Seq.:< rest -> case compare (inRelSeqNum a) (inRelSeqNum seg) of
       LT -> a   Seq.<| insert rest
       EQ -> seg Seq.<| rest
       GT -> seg Seq.<| buf
@@ -155,40 +154,40 @@ stepWindow :: LocalWindow -> (Seq.Seq InSegment, LocalWindow)
 stepWindow  = loop 0 Seq.empty
   where
   loop expect segs win = case Seq.viewl (lwBuffer win) of
-    a Seq.:< rest | isRelSeqNum a == expect -> keep a segs rest win
+    a Seq.:< rest | inRelSeqNum a == expect -> keep a segs rest win
                   | otherwise               -> finalize segs win
     Seq.EmptyL                              -> finalize segs win
 
-  keep seg segs rest win = loop (isRelSeqNum seg + len) (segs Seq.|> seg) win
+  keep seg segs rest win = loop (inRelSeqNum seg + len) (segs Seq.|> seg) win
     { lwBuffer = rest
     , lwRcvNxt = lwRcvNxt win + len
     }
     where
-    len = fromIntegral (S.length (isBody seg))
+    len = fromIntegral (S.length (inBody seg))
 
   finalize segs win = (segs,win { lwBuffer = update `fmap` lwBuffer win })
     where
-    len       = F.sum (isLength `fmap` segs)
-    update is = is { isRelSeqNum = isRelSeqNum is - len }
+    len       = F.sum (inLength `fmap` segs)
+    update is = is { inRelSeqNum = inRelSeqNum is - len }
 
 data InSegment = InSegment
-  { isRelSeqNum :: !TcpSeqNum
-  , isHeader    :: !TcpHeader
-  , isBody      :: !S.ByteString
+  { inRelSeqNum :: !TcpSeqNum
+  , inHeader    :: !TcpHeader
+  , inBody      :: !S.ByteString
   } deriving (Show)
 
-isSeqNum :: InSegment -> TcpSeqNum
-isSeqNum  = tcpSeqNum . isHeader
+inSeqNum :: InSegment -> TcpSeqNum
+inSeqNum  = tcpSeqNum . inHeader
 
-isLength :: Num a => InSegment -> a
-isLength  = fromIntegral . S.length . isBody
+inLength :: Num a => InSegment -> a
+inLength  = fromIntegral . S.length . inBody
 
 -- | Generate an incoming segment, relative to the value of RCV.NXT
 mkInSegment :: TcpSeqNum -> TcpHeader -> S.ByteString -> InSegment
 mkInSegment rcvNxt hdr body = InSegment
-  { isRelSeqNum = rel
-  , isHeader    = hdr
-  , isBody      = body
+  { inRelSeqNum = rel
+  , inHeader    = hdr
+  , inBody      = body
   }
   where
   -- calculate the index, relative to RCV.NXT, taking sequence number wrap into

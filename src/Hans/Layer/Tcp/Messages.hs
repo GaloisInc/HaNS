@@ -121,10 +121,10 @@ finAck  = do
   clearDelayedAck
 
 -- | Send a segment.
-outputSegment :: Segment -> Sock ()
+outputSegment :: OutSegment -> Sock ()
 outputSegment seg = do
   clearDelayedAck
-  tcpOutput (segHeader seg) (segBody seg)
+  tcpOutput (outHeader seg) (outBody seg)
 
 
 -- Flag Tests ------------------------------------------------------------------

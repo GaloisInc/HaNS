@@ -135,7 +135,7 @@ handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
   where
   (segs,win') = incomingPacket hdr body (tcpIn tcp0)
   tcp         = tcp0 { tcpIn = win' }
-  bytes       = L.fromChunks (map isBody (F.toList segs))
+  bytes       = L.fromChunks (map inBody (F.toList segs))
 
 
 -- | Handle an ACK to a sent data segment.
@@ -150,8 +150,8 @@ handleAck hdr = do
   updateAck now tcp = case receiveAck hdr (tcpOut tcp) of
     Just (seg,out') ->
       let tcp' = tcp { tcpOut = out', tcpSndUna = tcpAckNum hdr }
-       in if segFresh seg
-             then calibrateRTO now (segTime seg) tcp'
+       in if outFresh seg
+             then calibrateRTO now (outTime seg) tcp'
              else tcp'
 
     Nothing -> tcp
@@ -214,24 +214,24 @@ outputSegments  = do
     Just wakeup -> outputS (tryAgain wakeup)
 
 -- | Take data from the output buffer, and turn it into segments.
-genSegments :: POSIXTime -> TcpSocket -> ((Maybe Wakeup,Seq.Seq Segment),TcpSocket)
+genSegments :: POSIXTime -> TcpSocket -> ((Maybe Wakeup,OutSegments),TcpSocket)
 genSegments now tcp0 = loop Nothing Seq.empty tcp0
   where
   loop mb segs tcp
-    | winAvailable (tcpOut tcp) <= 0 = done
-    | otherwise                      = fromMaybe done $ do
+    | rwAvailable (tcpOut tcp) <= 0 = done
+    | otherwise                     = fromMaybe done $ do
       let len = nextSegSize tcp
       (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
-      let seg  = Segment
-            { segAckNum = tcpSndNxt tcp + fromIntegral (L.length body)
-            , segTime   = now
-            , segFresh  = True
-            , segHeader = mkData tcp
-            , segRTO    = tcpRTO tcp
-            , segBody   = body
+      let seg  = OutSegment
+            { outAckNum = tcpSndNxt tcp + fromIntegral (L.length body)
+            , outTime   = now
+            , outFresh  = True
+            , outHeader = mkData tcp
+            , outRTO    = tcpRTO tcp
+            , outBody   = body
             }
           tcp' = tcp
-            { tcpSndNxt    = segAckNum seg
+            { tcpSndNxt    = outAckNum seg
             , tcpOut       = addSegment seg (tcpOut tcp)
             , tcpOutBuffer = bufOut
             }
