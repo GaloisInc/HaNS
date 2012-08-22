@@ -3,4 +3,4 @@
 set -e
 
 cabal-dev install -fbuild-tests
-cabal-dev/bin/hans-tests --junit=results.xml
+cabal-dev/bin/hans-tests --jxml=results.xml
