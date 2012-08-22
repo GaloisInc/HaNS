@@ -8,7 +8,7 @@ import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
 import Hans.Utils (chunk)
 import Hans.Utils.Checksum
 
-import Control.Monad (unless,ap)
+import Control.Monad (unless,ap,replicateM_)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
 import Data.List (find)
 import Data.Monoid (Monoid(..))
@@ -147,7 +147,7 @@ putTcpHeader hdr = do
   putWord16be 0
   putWord16be (tcpUrgentPointer hdr)
   mapM_ putTcpOption (tcpOptions hdr)
-  putByteString (S.replicate padding 0)
+  replicateM_ padding (putTcpOptionTag OptTagEndOfOptions)
 
 -- | Parse out a TcpHeader, and its length.  The resulting length is in bytes,
 -- and is derived from the data offset.
