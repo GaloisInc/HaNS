@@ -161,15 +161,20 @@ flag build-tests
 executable hans-tests
         hs-source-dirs: tests
         main-is:        Main.hs
+        other-modules:  Tcp,
+                        Tcp.Packet
+                        Tcp.Window
         if flag(build-tests)
                 buildable:      True
-                build-depends:  base                       >= 4        && < 5,
-                                containers                 >= 0.3      && < 0.5,
-                                bytestring                 >= 0.9.1    && < 0.10,
-                                old-locale                 >= 1        && < 1.1,
-                                test-framework-quickcheck2 >= 0.2.12.2 && < 0.3,
-                                test-framework             >= 0.6      && < 0.7,
-                                QuickCheck                 >= 2.4.2    && < 2.5,
+                build-depends:  base                       >= 4,
+                                containers                 >= 0.3,
+                                bytestring                 >= 0.9.1,
+                                old-locale                 >= 1,
+                                test-framework-quickcheck2 >= 0.2.12.2,
+                                test-framework             >= 0.6,
+                                QuickCheck                 >= 2.4.2,
+                                random                     >= 1.0.1.1,
+                                cereal                     >= 0.3.5.2,
                                 hans
         else
                 buildable:      False
