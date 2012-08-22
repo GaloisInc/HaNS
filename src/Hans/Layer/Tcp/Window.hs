@@ -193,5 +193,5 @@ mkInSegment rcvNxt hdr body = InSegment
   where
   -- calculate the index, relative to RCV.NXT, taking sequence number wrap into
   -- account
-  rel | tcpSeqNum hdr < rcvNxt = maxBound      - rcvNxt + tcpSeqNum hdr
+  rel | tcpSeqNum hdr < rcvNxt = maxBound      - rcvNxt + tcpSeqNum hdr + 1
       | otherwise              = tcpSeqNum hdr - rcvNxt
