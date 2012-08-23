@@ -32,6 +32,9 @@ handleIncomingTcp src dst bytes = do
     `mplus` initializing src dst hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
 
+
+-- Established Connections -----------------------------------------------------
+
 -- | Handle a message for an already established connection.
 established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 established remote _local hdr body = do
@@ -206,6 +209,9 @@ enterTimeWait  = do
   set2MSL mslTimeout
   setState TimeWait
 
+
+-- Listening Connections -------------------------------------------------------
+
 -- | Different states for connections that are being established.
 initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
 initializing remote local hdr
@@ -232,11 +238,6 @@ listening remote _local hdr = do
               return emptyTimestamp { tsLastTimestamp = ts }
           }
     withChild childSock synAck
-
-getMSS :: TcpHeader -> Maybe Int64
-getMSS hdr = do
-  OptMaxSegmentSize n <- findTcpOption OptTagMaxSegmentSize hdr
-  return (fromIntegral n)
 
 
 -- Buffer Delivery -------------------------------------------------------------
@@ -278,3 +279,13 @@ genSegments now tcp0 = loop Nothing Seq.empty tcp0
     where
     done | not (Seq.null segs) = ((mb,segs),tcp)
          | otherwise           = ((mb,segs),tcp)
+
+
+-- Utilities -------------------------------------------------------------------
+
+-- | Extract the maximum segment size from a header, if the option is present.
+getMSS :: TcpHeader -> Maybe Int64
+getMSS hdr = do
+  OptMaxSegmentSize n <- findTcpOption OptTagMaxSegmentSize hdr
+  return (fromIntegral n)
+
