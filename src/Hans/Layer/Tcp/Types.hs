@@ -92,6 +92,8 @@ type SlowTicks = Int
 
 data TcpTimers = TcpTimers
   { ttDelayedAck :: !Bool
+
+    -- 2MSL
   , tt2MSL       :: !SlowTicks
 
     -- retransmit timer
