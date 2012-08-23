@@ -10,8 +10,9 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
 
 import Control.Monad (mzero,mplus,guard,when)
+import Data.Bits (bit)
 import Data.Int (Int64)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe,isJust,isNothing)
 import Data.Serialize (runGet)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString as S
@@ -38,6 +39,11 @@ established remote _local hdr body = do
   establishedConnection sid $ do
     state <- getState
     resetIdle
+
+    -- keep their timestamp up to date
+    shouldDrop <- modifyTcpSocket (updateTimestamp hdr)
+    guard (not shouldDrop)
+
     case state of
 
       Established
@@ -97,6 +103,29 @@ established remote _local hdr body = do
 
       _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
 
+
+-- | Update the currently held timestamp for both sides, and return a boolean
+-- that indicates whether or not the packet should be dropped.
+--
+-- RFC 1323
+updateTimestamp :: TcpHeader -> TcpSocket -> (Bool,TcpSocket)
+updateTimestamp hdr tcp = (shouldDrop,tcp { tcpTimestamp = ts' })
+  where
+  -- when the timestamp check fails from an ack, that's not a syn,ack, mark this
+  -- packet as one to be dropped.
+  shouldDrop = not (tcpSyn hdr)
+      && isJust (tcpTimestamp tcp)
+      && isNothing ts'
+  ts' = do
+    ts                     <- tcpTimestamp tcp
+    OptTimestamp them echo <- findTcpOption OptTagTimestamp hdr
+    -- when this is an ack, the echo value should not be greater than the
+    -- current timestamp.  this doesn't currently account for overflow, so
+    -- connections lasting >27 days will probably fail.
+    let rel       = tsTimestamp ts - echo
+        isGreater = 0 < rel && rel < bit 31
+    when (tcpAck hdr) (guard (tsTimestamp ts == echo || isGreater))
+    return ts { tsLastTimestamp = them }
 
 -- | Deliver incoming bytes to the buffer in a user socket.  If there's no free
 -- space in the buffer, the bytes will be dropped.
@@ -171,6 +200,7 @@ remoteGracefulTeardown  = do
   finAck
   setState LastAck
 
+-- | Setup the 2MSL timer, and enter the TIME_WAIT state.
 enterTimeWait :: Sock ()
 enterTimeWait  = do
   set2MSL mslTimeout
@@ -189,13 +219,17 @@ listening remote _local hdr = do
   isn <- initialSeqNum
   listeningConnection parent $ do
     let childSock = (emptyTcpSocket (tcpWindow hdr))
-          { tcpParent   = Just parent
-          , tcpSocketId = incomingSocketId remote hdr
-          , tcpState    = SynReceived
-          , tcpSndNxt   = isn
-          , tcpSndUna   = isn
-          , tcpIn       = emptyLocalWindow (tcpSeqNum hdr)
-          , tcpOutMSS   = fromMaybe (tcpInMSS childSock) (getMSS hdr)
+          { tcpParent    = Just parent
+          , tcpSocketId  = incomingSocketId remote hdr
+          , tcpState     = SynReceived
+          , tcpSndNxt    = isn
+          , tcpSndUna    = isn
+          , tcpIn        = emptyLocalWindow (tcpSeqNum hdr)
+          , tcpOutMSS    = fromMaybe (tcpInMSS childSock) (getMSS hdr)
+          , tcpTimestamp = do
+              -- require that they have sent us a timestamp, before using them
+              OptTimestamp ts _ <- findTcpOption OptTagTimestamp hdr
+              return emptyTimestamp { tsLastTimestamp = ts }
           }
     withChild childSock synAck
 

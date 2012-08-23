@@ -11,7 +11,7 @@ import Control.Exception (Exception,SomeException,toException)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
-import Data.Word (Word16)
+import Data.Word (Word16,Word32)
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
@@ -82,11 +82,8 @@ data SocketResult a
 socketError :: Exception e => e -> SocketResult a
 socketError  = SocketError . toException
 
-type Acceptor = SocketId -> IO ()
 
-type Notify = Bool -> IO ()
-
-type Close = IO ()
+-- Timers ----------------------------------------------------------------------
 
 type SlowTicks = Int
 
@@ -117,45 +114,75 @@ emptyTcpTimers  = TcpTimers
   , ttIdle       = 0
   }
 
+
+-- Timestamp Management --------------------------------------------------------
+
+-- | Manage the timestamp values that are in flight between two hosts.
+data Timestamp = Timestamp
+  { tsTimestamp     :: !Word32
+  , tsLastTimestamp :: !Word32
+  } deriving (Show)
+
+emptyTimestamp :: Timestamp
+emptyTimestamp  = Timestamp
+  { tsTimestamp     = 0
+  , tsLastTimestamp = 0
+  }
+
+-- | Generate timestamp option for an outgoing packet.
+mkTimestamp :: Timestamp -> TcpOption
+mkTimestamp ts = OptTimestamp (tsTimestamp ts) (tsLastTimestamp ts)
+
+
+-- Internal Sockets ------------------------------------------------------------
+
+type Acceptor = SocketId -> IO ()
+
+type Notify = Bool -> IO ()
+
+type Close = IO ()
+
 data TcpSocket = TcpSocket
-  { tcpParent      :: Maybe SocketId
-  , tcpSocketId    :: !SocketId
-  , tcpState       :: !ConnState
-  , tcpAcceptors   :: Seq.Seq Acceptor
-  , tcpNotify      :: Maybe Notify
-  , tcpSndNxt      :: !TcpSeqNum
-  , tcpSndUna      :: !TcpSeqNum
+  { tcpParent     :: Maybe SocketId
+  , tcpSocketId   :: !SocketId
+  , tcpState      :: !ConnState
+  , tcpAcceptors  :: Seq.Seq Acceptor
+  , tcpNotify     :: Maybe Notify
+  , tcpSndNxt     :: !TcpSeqNum
+  , tcpSndUna     :: !TcpSeqNum
 
-  , tcpUserClosed  :: Bool
-  , tcpOut         :: RemoteWindow
-  , tcpOutBuffer   :: Buffer Outgoing
-  , tcpOutMSS      :: !Int64
-  , tcpIn          :: LocalWindow
-  , tcpInBuffer    :: Buffer Incoming
-  , tcpInMSS       :: !Int64
+  , tcpUserClosed :: Bool
+  , tcpOut        :: RemoteWindow
+  , tcpOutBuffer  :: Buffer Outgoing
+  , tcpOutMSS     :: !Int64
+  , tcpIn         :: LocalWindow
+  , tcpInBuffer   :: Buffer Incoming
+  , tcpInMSS      :: !Int64
 
-  , tcpTimers      :: !TcpTimers
+  , tcpTimers     :: !TcpTimers
+  , tcpTimestamp  :: Maybe Timestamp
   }
 
 emptyTcpSocket :: Word16 -> TcpSocket
 emptyTcpSocket sendWindow = TcpSocket
-  { tcpParent      = Nothing
-  , tcpSocketId    = emptySocketId
-  , tcpState       = Closed
-  , tcpAcceptors   = Seq.empty
-  , tcpNotify      = Nothing
-  , tcpSndNxt      = 0
-  , tcpSndUna      = 0
+  { tcpParent     = Nothing
+  , tcpSocketId   = emptySocketId
+  , tcpState      = Closed
+  , tcpAcceptors  = Seq.empty
+  , tcpNotify     = Nothing
+  , tcpSndNxt     = 0
+  , tcpSndUna     = 0
 
-  , tcpUserClosed  = False
-  , tcpOut         = emptyRemoteWindow sendWindow
-  , tcpOutBuffer   = emptyBuffer 16384
-  , tcpOutMSS      = 1460
-  , tcpIn          = emptyLocalWindow 0
-  , tcpInBuffer    = emptyBuffer 16384
-  , tcpInMSS       = 1460
+  , tcpUserClosed = False
+  , tcpOut        = emptyRemoteWindow sendWindow
+  , tcpOutBuffer  = emptyBuffer 16384
+  , tcpOutMSS     = 1460
+  , tcpIn         = emptyLocalWindow 0
+  , tcpInBuffer   = emptyBuffer 16384
+  , tcpInMSS      = 1460
 
-  , tcpTimers      = emptyTcpTimers
+  , tcpTimers     = emptyTcpTimers
+  , tcpTimestamp  = Just emptyTimestamp
   }
 
 tcpRcvNxt :: TcpSocket -> TcpSeqNum
@@ -170,6 +197,9 @@ isAccepting  = not . Seq.null . tcpAcceptors
 
 needsDelayedAck :: TcpSocket -> Bool
 needsDelayedAck  = ttDelayedAck . tcpTimers
+
+mkMSS :: TcpSocket -> TcpOption
+mkMSS tcp = OptMaxSegmentSize (fromIntegral (tcpInMSS tcp))
 
 data ConnState
   = Closed

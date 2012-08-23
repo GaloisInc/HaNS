@@ -53,14 +53,10 @@ slowTimer  = do
     handle2MSL
     handleRTO
     handleFinWait2
-    decrementTimers
-    incIdle
+    updateTimers
 
   -- approximate rate of increase for the slow timer
   addInitialSeqNum 64000
-
-incIdle :: Sock ()
-incIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = ttIdle tt + 1 })
 
 resetIdle :: Sock ()
 resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
@@ -75,14 +71,24 @@ fastTimer  = eachConnection $ do
 
 -- Timer Interaction -----------------------------------------------------------
 
--- | Decrement all non-zero timers by one tick.
-decrementTimers :: Sock ()
-decrementTimers  = modifyTcpTimers_ $ \ tt -> tt
-  { tt2MSL = decrement (tt2MSL tt)
-  }
+-- | Update timers, decrementing to 0 ones that expire, and incrementing the
+-- others.
+updateTimers :: Sock ()
+updateTimers  =
+  modifyTcpSocket_ $ \ tcp ->
+    let tt                 = tcpTimers tcp
+        updateTimestamp ts = ts { tsTimestamp = tsTimestamp ts + 1 }
+     in tcp { tcpTimers = tt
+              { tt2MSL = decrement (tt2MSL tt)
+              , ttIdle = increment (ttIdle tt)
+              }
+            , tcpTimestamp = updateTimestamp `fmap` tcpTimestamp tcp
+            }
   where
   decrement 0   = 0
-  decrement val = val - 1
+  decrement val = pred val
+  increment     = succ
+
 
 -- | Conditionally run a timer, when this slow-timer tick will decrement it to
 -- zero.
