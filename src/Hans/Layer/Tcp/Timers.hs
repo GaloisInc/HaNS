@@ -3,6 +3,7 @@ module Hans.Layer.Tcp.Timers (
   , slowTimer
   , fastTimer
 
+  , resetIdle
   , mslTimeout
   , set2MSL
 
@@ -61,6 +62,9 @@ tcpKeepIntVal  = 75 * 2
 
 incIdle :: Sock ()
 incIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = ttIdle tt + 1 })
+
+resetIdle :: Sock ()
+resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
 
 -- | Handle only the delayed ack timer, fires ever 200ms.
 fastTimer :: Tcp ()

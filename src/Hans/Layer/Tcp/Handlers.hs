@@ -37,6 +37,7 @@ established remote _local hdr body = do
   let sid = incomingSocketId remote hdr
   establishedConnection sid $ do
     state <- getState
+    resetIdle
     case state of
 
       Established
