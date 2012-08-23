@@ -150,7 +150,7 @@ calibrateRTO sent ackd tt
     , ttSRTT   = srtt
     }
 
-  -- update the RTO timer length
+  -- update the RTO timer length, bounding it at 64 seconds (128 ticks)
   updateRTO tt' = tt'
-    { ttRTO = ceiling (ttSRTT tt' + max 0.5 (2 * ttRTTVar tt'))
+    { ttRTO = min 128 (ceiling (ttSRTT tt' + max 0.5 (2 * ttRTTVar tt')))
     }
