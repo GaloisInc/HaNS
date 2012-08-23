@@ -52,15 +52,12 @@ slowTimer  = do
   eachConnection $ do
     handle2MSL
     handleRTO
+    handleFinWait2
     decrementTimers
     incIdle
 
   -- approximate rate of increase for the slow timer
   addInitialSeqNum 64000
-
--- | 75 second delay.
-tcpKeepIntVal :: SlowTicks
-tcpKeepIntVal  = 75 * 2
 
 incIdle :: Sock ()
 incIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = ttIdle tt + 1 })
@@ -112,6 +109,10 @@ mslTimeout  = 2 * 60 * 2
 set2MSL :: SlowTicks -> Sock ()
 set2MSL val = modifyTcpTimers_ (\tt -> tt { tt2MSL = val })
 
+-- | 75 second delay.
+tcpKeepIntVal :: SlowTicks
+tcpKeepIntVal  = 150
+
 -- | The timer that handles the TIME_WAIT, as well as the idle timeout.
 handle2MSL :: Sock ()
 handle2MSL  = whenTimer tt2MSL $ do
@@ -120,6 +121,23 @@ handle2MSL  = whenTimer tt2MSL $ do
   if tcpState tcp /= TimeWait && ttIdle tt <= ttMaxIdle tt
      then set2MSL tcpKeepIntVal
      else closeSocket
+
+
+-- FIN_WAIT_2 ------------------------------------------------------------------
+
+-- | The FinWait2 10m timeout.
+finWait2Idle :: SlowTicks
+finWait2Idle  = 1200
+
+-- | GC the connection if it's been open for a long time, in FIN_WAIT_2.
+--
+-- XXX not sure if this is the correct way to do this.  should this set a flag
+-- to indicate that if the 2MSL timer goes off, the connection should be cleaned
+-- up?
+handleFinWait2 :: Sock ()
+handleFinWait2  = whenState FinWait2
+                $ whenIdleFor finWait2Idle
+                $ set2MSL tcpKeepIntVal
 
 
 -- RTO -------------------------------------------------------------------------

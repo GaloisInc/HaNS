@@ -11,7 +11,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Layer.Timer
 import Hans.Message.Tcp
 
-import Control.Monad (MonadPlus(..),guard)
+import Control.Monad (MonadPlus(..),guard,when)
 import MonadLib (get,set,StateT,runStateT,inBase)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
@@ -236,6 +236,11 @@ setState state = modifyTcpSocket_ (\tcp -> tcp { tcpState = state })
 -- | Get the state of the current connection.
 getState :: Sock ConnState
 getState  = tcpState `fmap` getTcpSocket
+
+whenState :: ConnState -> Sock () -> Sock ()
+whenState state body = do
+  curState <- getState
+  when (state == curState) body
 
 pushAcceptor :: Acceptor -> Sock ()
 pushAcceptor k = modifyTcpSocket_ $ \ tcp -> tcp
