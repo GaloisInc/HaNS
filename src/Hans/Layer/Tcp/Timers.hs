@@ -60,13 +60,13 @@ tcpKeepIntVal :: SlowTicks
 tcpKeepIntVal  = 75 * 2
 
 incIdle :: Sock ()
-incIdle  = modifyTcpSocket_ (\tcp -> tcp { tcpIdle = tcpIdle tcp + 1 })
+incIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = ttIdle tt + 1 })
 
 -- | Handle only the delayed ack timer, fires ever 200ms.
 fastTimer :: Tcp ()
 fastTimer  = eachConnection $ do
   tcp <- getTcpSocket
-  guard (tcpNeedsDelAck tcp)
+  guard (needsDelayedAck tcp)
   ack
 
 
@@ -74,24 +74,19 @@ fastTimer  = eachConnection $ do
 
 -- | Decrement all non-zero timers by one tick.
 decrementTimers :: Sock ()
-decrementTimers  = modifyTcpSocket_ update
+decrementTimers  = modifyTcpTimers_ $ \ tt -> tt
+  { tt2MSL = decrement (tt2MSL tt)
+  }
   where
-  update tcp = tcp
-    { tcpTimer2MSL = decrement tcpTimer2MSL
-    }
-    where
-    decrement prj
-      | val == 0  = 0
-      | otherwise = val - 1
-      where
-      val = prj tcp
+  decrement 0   = 0
+  decrement val = val - 1
 
 -- | Conditionally run a timer, when this slow-timer tick will decrement it to
 -- zero.
-whenTimer :: (TcpSocket -> SlowTicks) -> Sock () -> Sock ()
+whenTimer :: (TcpTimers -> SlowTicks) -> Sock () -> Sock ()
 whenTimer prj body = do
-  tcp <- getTcpSocket
-  when (prj tcp == 1) body
+  tt <- getTcpTimers
+  when (prj tt == 1) body
 
 
 -- 2MSL ------------------------------------------------------------------------
@@ -102,13 +97,14 @@ mslTimeout  = 2 * 60 * 2
 
 -- | Set the value of the 2MSL timer.
 set2MSL :: SlowTicks -> Sock ()
-set2MSL val = modifyTcpSocket_ (\tcp -> tcp { tcpTimer2MSL = val })
+set2MSL val = modifyTcpTimers_ (\tt -> tt { tt2MSL = val })
 
 -- | The timer that handles the TIME_WAIT, as well as the idle timeout.
 handle2MSL :: Sock ()
-handle2MSL  = whenTimer tcpTimer2MSL $ do
+handle2MSL  = whenTimer tt2MSL $ do
   tcp <- getTcpSocket
-  if tcpState tcp /= TimeWait && tcpIdle tcp <= tcpMaxIdle tcp
+  let tt = tcpTimers tcp
+  if tcpState tcp /= TimeWait && ttIdle tt <= ttMaxIdle tt
      then set2MSL tcpKeepIntVal
      else closeSocket
 
@@ -125,32 +121,32 @@ handleRTO  = F.mapM_ outputSegment =<< modifyTcpSocket update
     (segs,win') = genRetransmitSegments (tcpOut tcp)
 
 -- | Calibrate the RTO timer, as specified by RFC-6298.
-calibrateRTO :: POSIXTime -> POSIXTime -> TcpSocket -> TcpSocket
-calibrateRTO sent ackd tcp
-  | tcpSRTT tcp == 0 = initial
-  | otherwise        = rolling
+calibrateRTO :: POSIXTime -> POSIXTime -> TcpTimers -> TcpTimers
+calibrateRTO sent ackd tt
+  | ttSRTT tt == 0 = initial
+  | otherwise      = rolling
   where
 
   -- round trip measurement
   r = ackd - sent
 
   -- no data has been sent before, seed the RTO values.
-  initial = updateRTO tcp
-    { tcpSRTT   = r
-    , tcpRTTVar = r / 2
+  initial = updateRTO tt
+    { ttSRTT   = r
+    , ttRTTVar = r / 2
     }
 
   -- data has been sent, update based on previous values
   alpha   = 0.125
   beta    = 0.25
-  rttvar  = (1 - beta)  * tcpRTTVar tcp + beta  * abs (tcpSRTT tcp * r)
-  srtt    = (1 - alpha) * tcpSRTT   tcp + alpha * r
-  rolling = updateRTO tcp
-    { tcpRTTVar = rttvar
-    , tcpSRTT   = srtt
+  rttvar  = (1 - beta)  * ttRTTVar tt + beta  * abs (ttSRTT tt * r)
+  srtt    = (1 - alpha) * ttSRTT   tt + alpha * r
+  rolling = updateRTO tt
+    { ttRTTVar = rttvar
+    , ttSRTT   = srtt
     }
 
   -- update the RTO timer length
-  updateRTO tcp' = tcp'
-    { tcpRTO = ceiling (tcpSRTT tcp' + max 0.5 (2 * tcpRTTVar tcp'))
+  updateRTO tt' = tt'
+    { ttRTO = ceiling (ttSRTT tt' + max 0.5 (2 * ttRTTVar tt'))
     }

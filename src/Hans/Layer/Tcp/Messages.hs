@@ -106,11 +106,11 @@ ack  = do
 
 -- | Schedule a delayed ACK packet.
 delayedAck :: Sock ()
-delayedAck  = modifyTcpSocket_ (\tcp -> tcp { tcpNeedsDelAck = True })
+delayedAck  = modifyTcpTimers_ (\tt -> tt { ttDelayedAck = True })
 
 -- | Unschedule a delayed ACK packet.
 clearDelayedAck :: Sock ()
-clearDelayedAck  = modifyTcpSocket_ (\tcp -> tcp { tcpNeedsDelAck = False })
+clearDelayedAck  = modifyTcpTimers_ (\tt -> tt { ttDelayedAck = False })
 
 -- | Send a FIN packet to begin closing a connection.
 finAck :: Sock ()

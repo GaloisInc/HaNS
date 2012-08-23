@@ -128,8 +128,10 @@ handleData :: TcpHeader -> S.ByteString -> TcpSocket
 handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
   (wakeup,buf') <- putBytes bytes (tcpInBuffer tcp)
   let tcp' = tcp
-        { tcpInBuffer    = buf'
-        , tcpNeedsDelAck = not (L.null bytes)
+        { tcpInBuffer = buf'
+        , tcpTimers   = (tcpTimers tcp)
+          { ttDelayedAck = not (L.null bytes)
+          }
         }
   return (wakeup, tcp')
   where
@@ -149,11 +151,12 @@ handleAck hdr = do
   -- is fresh.
   updateAck now tcp = case receiveAck hdr (tcpOut tcp) of
     Just (seg,out') ->
-      let tcp' = tcp { tcpOut = out', tcpSndUna = tcpAckNum hdr }
-       in if outFresh seg
-             then calibrateRTO now (outTime seg) tcp'
-             else tcp'
-
+      let calibrate | outFresh seg = calibrateRTO now (outTime seg)
+                    | otherwise    = id
+       in tcp { tcpOut    = out'
+              , tcpSndUna = tcpAckNum hdr
+              , tcpTimers = calibrate (tcpTimers tcp)
+              }
     Nothing -> tcp
 
 -- | The other end has sent a FIN packet, acknowledge it, and respond with a
@@ -227,7 +230,7 @@ genSegments now tcp0 = loop Nothing Seq.empty tcp0
             , outTime   = now
             , outFresh  = True
             , outHeader = mkData tcp
-            , outRTO    = tcpRTO tcp
+            , outRTO    = ttRTO (tcpTimers tcp)
             , outBody   = body
             }
           tcp' = tcp

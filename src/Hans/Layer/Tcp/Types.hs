@@ -90,6 +90,31 @@ type Close = IO ()
 
 type SlowTicks = Int
 
+data TcpTimers = TcpTimers
+  { ttDelayedAck :: !Bool
+  , tt2MSL       :: !SlowTicks
+
+    -- retransmit timer
+  , ttRTO        :: !SlowTicks
+  , ttSRTT       :: !POSIXTime
+  , ttRTTVar     :: !POSIXTime
+
+    -- idle timer
+  , ttMaxIdle    :: !SlowTicks
+  , ttIdle       :: !SlowTicks
+  }
+
+emptyTcpTimers :: TcpTimers
+emptyTcpTimers  = TcpTimers
+  { ttDelayedAck = False
+  , tt2MSL       = 0
+  , ttRTO        = 2 -- one second
+  , ttSRTT       = 0
+  , ttRTTVar     = 0
+  , ttMaxIdle    = 10 * 60 * 2
+  , ttIdle       = 0
+  }
+
 data TcpSocket = TcpSocket
   { tcpParent      :: Maybe SocketId
   , tcpSocketId    :: !SocketId
@@ -107,17 +132,7 @@ data TcpSocket = TcpSocket
   , tcpInBuffer    :: Buffer Incoming
   , tcpInMSS       :: !Int64
 
-  , tcpNeedsDelAck :: Bool
-  , tcpMaxIdle     :: !SlowTicks
-  , tcpIdle        :: !SlowTicks
-
-    -- retransmit timer
-  , tcpRTO         :: !SlowTicks
-  , tcpSRTT        :: !POSIXTime
-  , tcpRTTVar      :: !POSIXTime
-
-  , tcpTimer2MSL   :: !SlowTicks
-  , tcpTimerRTO    :: !SlowTicks
+  , tcpTimers      :: !TcpTimers
   }
 
 emptyTcpSocket :: Word16 -> TcpSocket
@@ -138,16 +153,7 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpInBuffer    = emptyBuffer 16384
   , tcpInMSS       = 1460
 
-  , tcpNeedsDelAck = False
-  , tcpMaxIdle     = 10 * 60 * 2
-  , tcpIdle        = 0
-
-  , tcpRTO         = 2
-  , tcpSRTT        = 0
-  , tcpRTTVar      = 0
-
-  , tcpTimer2MSL   = 0
-  , tcpTimerRTO    = 0
+  , tcpTimers      = emptyTcpTimers
   }
 
 tcpRcvNxt :: TcpSocket -> TcpSeqNum
@@ -159,6 +165,9 @@ nextSegSize tcp =
 
 isAccepting :: TcpSocket -> Bool
 isAccepting  = not . Seq.null . tcpAcceptors
+
+needsDelayedAck :: TcpSocket -> Bool
+needsDelayedAck  = ttDelayedAck . tcpTimers
 
 data ConnState
   = Closed

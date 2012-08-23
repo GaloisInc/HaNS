@@ -26,18 +26,18 @@ type TcpHandle = Channel (Tcp ())
 type Tcp = Layer TcpState
 
 data TcpState = TcpState
-  { tcpSelf      :: TcpHandle
-  , tcpIP4       :: IP4Handle
-  , tcpTimers    :: TimerHandle
-  , tcpHost      :: Host
+  { tcpSelf  :: TcpHandle
+  , tcpIP4   :: IP4Handle
+  , tcpTimer :: TimerHandle
+  , tcpHost  :: Host
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
 emptyTcpState tcp ip4 timer = TcpState
-  { tcpSelf   = tcp
-  , tcpIP4    = ip4
-  , tcpTimers = timer
-  , tcpHost   = emptyHost
+  { tcpSelf  = tcp
+  , tcpIP4   = ip4
+  , tcpTimer = timer
+  , tcpHost  = emptyHost
   }
 
 -- | The handle to this layer.
@@ -50,7 +50,7 @@ ip4Handle  = tcpIP4 `fmap` get
 
 -- | Get the handle to the Timer layer.
 timerHandle :: Tcp TimerHandle
-timerHandle  = tcpTimers `fmap` get
+timerHandle  = tcpTimer `fmap` get
 
 
 -- Host Operations -------------------------------------------------------------
@@ -208,6 +208,9 @@ getTcpSocket  = Sock get
 setTcpSocket :: TcpSocket -> Sock ()
 setTcpSocket tcp = Sock (set tcp)
 
+getTcpTimers :: Sock TcpTimers
+getTcpTimers  = tcpTimers `fmap` getTcpSocket
+
 modifyTcpSocket :: (TcpSocket -> (a,TcpSocket)) -> Sock a
 modifyTcpSocket k = Sock $ do
   tcp <- get
@@ -217,6 +220,14 @@ modifyTcpSocket k = Sock $ do
 
 modifyTcpSocket_ :: (TcpSocket -> TcpSocket) -> Sock ()
 modifyTcpSocket_ k = modifyTcpSocket (\tcp -> ((), k tcp))
+
+modifyTcpTimers :: (TcpTimers -> (a,TcpTimers)) -> Sock a
+modifyTcpTimers k = modifyTcpSocket $ \ tcp ->
+  let (a,t') = k (tcpTimers tcp)
+   in (a,tcp { tcpTimers = t' })
+
+modifyTcpTimers_ :: (TcpTimers -> TcpTimers) -> Sock ()
+modifyTcpTimers_ k = modifyTcpTimers (\t -> ((), k t))
 
 -- | Set the state of the current connection.
 setState :: ConnState -> Sock ()
