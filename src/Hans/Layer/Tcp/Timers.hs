@@ -4,6 +4,8 @@ module Hans.Layer.Tcp.Timers (
   , fastTimer
 
   , resetIdle
+  , whenIdleFor
+
   , mslTimeout
   , set2MSL
 
@@ -91,6 +93,13 @@ whenTimer :: (TcpTimers -> SlowTicks) -> Sock () -> Sock ()
 whenTimer prj body = do
   tt <- getTcpTimers
   when (prj tt == 1) body
+
+-- | Conditionally run an action when the connection has been idle for at least
+-- timeout @SlowTick@s.
+whenIdleFor :: Int -> Sock () -> Sock ()
+whenIdleFor timeout body = do
+  tt <- getTcpTimers
+  when (ttIdle tt >= timeout) body
 
 
 -- 2MSL ------------------------------------------------------------------------
