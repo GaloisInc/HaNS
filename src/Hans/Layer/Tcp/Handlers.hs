@@ -234,7 +234,7 @@ listening remote _local hdr = do
           , tcpSndNxt    = isn
           , tcpSndUna    = isn
           , tcpIn        = emptyLocalWindow (tcpSeqNum hdr)
-          , tcpOutMSS    = fromMaybe (tcpInMSS childSock) (getMSS hdr)
+          , tcpOutMSS    = fromMaybe defaultMSS (getMSS hdr)
           , tcpTimestamp = do
               -- require that they have sent us a timestamp, before using them
               OptTimestamp ts _ <- findTcpOption OptTagTimestamp hdr

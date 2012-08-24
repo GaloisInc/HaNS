@@ -176,14 +176,17 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpUserClosed = False
   , tcpOut        = emptyRemoteWindow sendWindow
   , tcpOutBuffer  = emptyBuffer 16384
-  , tcpOutMSS     = 1460
+  , tcpOutMSS     = defaultMSS
   , tcpIn         = emptyLocalWindow 0
   , tcpInBuffer   = emptyBuffer 16384
-  , tcpInMSS      = 1460
+  , tcpInMSS      = defaultMSS
 
   , tcpTimers     = emptyTcpTimers
   , tcpTimestamp  = Just emptyTimestamp
   }
+
+defaultMSS :: Int64
+defaultMSS  = 1460
 
 tcpRcvNxt :: TcpSocket -> TcpSeqNum
 tcpRcvNxt = lwRcvNxt . tcpIn
