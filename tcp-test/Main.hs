@@ -25,31 +25,33 @@ main  = do
   setAddress mac ns
   putStrLn "Network stack running..."
 
-  --client ns
+  client ns
   server ns
 
 client :: NetworkStack -> IO ()
-client ns = do
+client ns = body `X.catch` \ ConnectionRefused ->
+  putStrLn "192.168.90.1:8000 -> Connection refused"
+  where
+  body = do
+    args <- getArgs
 
-  args <- getArgs
+    let local = case args of
+          [p] -> Just (TcpPort (read p))
+          _   -> Nothing
 
-  let local = case args of
-        [p] -> Just (TcpPort (read p))
-        _   -> Nothing
+    sock <- connect ns (IP4 192 168 90 1) 8000 local
+    putStrLn "Connected!"
+    sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
+    putStrLn "request in..."
 
-  sock <- connect ns (IP4 192 168 90 1) 8000 local
-  putStrLn "Connected!"
-  sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
-  putStrLn "request in..."
+    let loop = do
+          bytes <- recvBytes sock 1024
+          L.putStrLn bytes
+          unless (L.null bytes) loop
+    loop
 
-  let loop = do
-        bytes <- recvBytes sock 1024
-        L.putStrLn bytes
-        unless (L.null bytes) loop
-  loop
-
-  putStrLn "Done!"
-  close sock
+    putStrLn "Done!"
+    close sock
 
 server :: NetworkStack -> IO ()
 server ns = do
