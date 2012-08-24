@@ -162,8 +162,10 @@ executable hans-tests
         hs-source-dirs: tests
         main-is:        Main.hs
         other-modules:  Tcp,
-                        Tcp.Packet
-                        Tcp.Window
+                        Tcp.Packet,
+                        Tcp.Window,
+                        Udp,
+                        Udp.Packet
         if flag(build-tests)
                 buildable:      True
                 build-depends:  base                       >= 4,

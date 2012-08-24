@@ -1,10 +1,12 @@
 module Main where
 
-import Tcp
+import Tcp (tcpTests)
+import Udp (udpTests)
 
 import Test.Framework (defaultMain)
 
 
 main = defaultMain
   [ tcpTests
+  , udpTests
   ]
