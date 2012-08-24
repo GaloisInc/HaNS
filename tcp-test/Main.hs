@@ -10,6 +10,7 @@ import Hans.Message.Tcp (TcpPort(..))
 import Control.Concurrent (threadDelay,forkIO,killThread,myThreadId)
 import Control.Monad (forever,when,unless)
 import System.Environment (getArgs)
+import qualified Control.Exception as X
 import qualified Data.ByteString.Lazy as L
 
 
@@ -24,8 +25,8 @@ main  = do
   setAddress mac ns
   putStrLn "Network stack running..."
 
-  client ns
-  --server ns
+  --client ns
+  server ns
 
 client :: NetworkStack -> IO ()
 client ns = do

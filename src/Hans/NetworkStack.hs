@@ -6,10 +6,12 @@ module Hans.NetworkStack (
 
     -- * Re-exported Types
   , UdpPort
-  , Tcp.Socket()
   , TcpPort
 
-    -- * Socket Functions
+    -- * Sockets
+  , Tcp.Socket()
+
+    -- ** Socket Functions
   , Tcp.sockRemoteHost
   , Tcp.sockRemotePort
   , Tcp.sockLocalPort
@@ -17,6 +19,11 @@ module Hans.NetworkStack (
   , Tcp.close
   , Tcp.sendBytes
   , Tcp.recvBytes
+
+    -- ** Socket Exceptions
+  , Tcp.AcceptError(..)
+  , Tcp.CloseError(..)
+  , Tcp.ConnectError(..)
   ) where
 
 import Hans.Address (getMaskComponents)

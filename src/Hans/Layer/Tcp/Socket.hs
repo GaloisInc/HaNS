@@ -5,10 +5,10 @@ module Hans.Layer.Tcp.Socket (
   , sockRemoteHost
   , sockRemotePort
   , sockLocalPort
-  , connect
-  , listen
-  , accept
-  , close
+  , connect, ConnectError(..)
+  , listen, ListenError(..)
+  , accept, AcceptError(..)
+  , close, CloseError(..)
   , sendBytes
   , recvBytes
   ) where
