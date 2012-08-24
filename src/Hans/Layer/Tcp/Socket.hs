@@ -85,16 +85,17 @@ connect :: TcpHandle -> IP4 -> TcpPort -> Maybe TcpPort -> IO Socket
 connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
   localPort <- maybe allocatePort return mbLocal
   isn       <- initialSeqNum
-  let sock = (emptyTcpSocket 0)
-        { tcpSocketId  = SocketId
-          { sidLocalPort  = localPort
-          , sidRemoteHost = remote
-          , sidRemotePort = remotePort
-          }
+  let sid  = SocketId
+        { sidLocalPort  = localPort
+        , sidRemoteHost = remote
+        , sidRemotePort = remotePort
+        }
+      sock = (emptyTcpSocket 0)
+        { tcpSocketId  = sid
         , tcpNotify    = Just $ \ success -> putMVar res $! if success
             then SocketResult Socket
               { sockHandle = tcp
-              , sockId     = tcpSocketId sock
+              , sockId     = sid
               }
             else socketError ConnectionRefused
         , tcpState     = Listen
