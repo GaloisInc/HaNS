@@ -53,8 +53,9 @@ runLayer :: LayerState i -> Layer i a -> Result i a
 runLayer i0 m = getLayer m i0 mempty Error success
   where success a i o = Result i a o
 
-loopLayer :: i -> IO msg -> (msg -> Layer i ()) -> IO ()
-loopLayer i0 msg k = loop (LayerState 0 i0)
+loopLayer :: String -> i -> IO msg -> (msg -> Layer i ()) -> IO ()
+loopLayer name i0 msg k =
+  loop (LayerState 0 i0) `X.finally` putStrLn (name ++ " died")
   where
   loop i = do
     a   <- msg

@@ -34,7 +34,7 @@ runIcmp4Layer h ip4 = do
   let handles = Icmp4Handles ip4 []
   IP4.addIP4Handler ip4 icmpProtocol
     $ \ hdr bs -> send h (handleIncoming hdr bs)
-  void (forkIO (loopLayer handles (receive h) id))
+  void (forkIO (loopLayer "icmp4" handles (receive h) id))
 
 data Icmp4Handles = Icmp4Handles
   { icmpIp4      :: IP4.IP4Handle

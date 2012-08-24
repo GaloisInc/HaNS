@@ -49,7 +49,7 @@ type EthernetHandle = Channel (Eth ())
 -- | Run the ethernet layer.
 runEthernetLayer :: EthernetHandle -> IO ()
 runEthernetLayer h =
-  void (forkIO (loopLayer (emptyEthernetState h) (receive h) id))
+  void (forkIO (loopLayer "ethernet" (emptyEthernetState h) (receive h) id))
 
 
 -- External Interface ----------------------------------------------------------

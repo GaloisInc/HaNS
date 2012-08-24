@@ -24,7 +24,7 @@ import qualified Data.ByteString as S
 runTcpLayer :: TcpHandle -> IP4Handle -> TimerHandle -> IO ()
 runTcpLayer tcp ip4 t = do
   let s0 = emptyTcpState tcp ip4 t
-  void (forkIO (loopLayer s0 (receive tcp) id))
+  void (forkIO (loopLayer "tcp" s0 (receive tcp) id))
   addIP4Handler ip4 tcpProtocol (queueTcp tcp)
 
   -- initialize the timers

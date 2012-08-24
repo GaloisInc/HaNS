@@ -46,7 +46,7 @@ type IP4Handle = Channel (IP ())
 
 runIP4Layer :: IP4Handle -> ArpHandle -> EthernetHandle -> IO ()
 runIP4Layer h arp eth = do
-  void (forkIO (loopLayer (emptyIP4State arp) (receive h) id))
+  void (forkIO (loopLayer "ip4" (emptyIP4State arp) (receive h) id))
   connectEthernet h eth
 
 connectEthernet :: IP4Handle -> EthernetHandle -> IO ()

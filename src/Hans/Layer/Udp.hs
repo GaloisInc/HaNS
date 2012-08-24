@@ -40,7 +40,7 @@ type UdpHandle = Channel (Udp ())
 runUdpLayer :: UdpHandle -> IP4.IP4Handle -> Icmp4.Icmp4Handle -> IO ()
 runUdpLayer h ip4 icmp4 = do
   IP4.addIP4Handler ip4 udpProtocol (queueUdp h)
-  void (forkIO (loopLayer (emptyUdp4State ip4 icmp4) (receive h) id))
+  void (forkIO (loopLayer "udp" (emptyUdp4State ip4 icmp4) (receive h) id))
 
 sendUdp :: UdpHandle -> IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> IO ()
 sendUdp h !dst mb !dp !bs = send h (handleOutgoing dst mb dp bs)
