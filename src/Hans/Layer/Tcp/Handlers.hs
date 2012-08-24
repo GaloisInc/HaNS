@@ -119,9 +119,9 @@ updateTimestamp hdr tcp = (shouldDrop,tcp { tcpTimestamp = ts' })
   where
   -- when the timestamp check fails from an ack, that's not a syn,ack, mark this
   -- packet as one to be dropped.
-  shouldDrop = not (tcpSyn hdr)
-      && isJust (tcpTimestamp tcp)
-      && isNothing ts'
+  shouldDrop = not (tcpSyn hdr || tcpRst hdr)
+            && isJust (tcpTimestamp tcp)
+            && isNothing ts'
   ts' = do
     ts                     <- tcpTimestamp tcp
     OptTimestamp them echo <- findTcpOption OptTagTimestamp hdr
