@@ -6,20 +6,19 @@ module Hans.Layer.Icmp4 (
     Icmp4Handle
   , runIcmp4Layer
   , addIcmp4Handler
+  , destUnreachable
   ) where
 
 import Hans.Address.IP4 (IP4)
 import Hans.Channel
 import Hans.Layer
 import Hans.Message.Icmp4
-    (Icmp4Packet(Echo,EchoReply),parseIcmp4Packet,renderIcmp4Packet
-    ,Identifier,SequenceNumber)
 import Hans.Message.Ip4
 import Hans.Utils
 import qualified Hans.Layer.IP4 as IP4
 
 import Control.Concurrent (forkIO)
-import Data.Serialize (runGet,runPutLazy)
+import Data.Serialize (runGet,runPutLazy,runPut,putByteString)
 import MonadLib (get,set)
 import qualified Data.ByteString as S
 
@@ -34,7 +33,7 @@ runIcmp4Layer :: Icmp4Handle -> IP4.IP4Handle -> IO ()
 runIcmp4Layer h ip4 = do
   let handles = Icmp4Handles ip4 []
   IP4.addIP4Handler ip4 icmpProtocol
-    $ \src dst bs -> send h (handleIncoming src dst bs)
+    $ \ hdr bs -> send h (handleIncoming hdr bs)
   void (forkIO (loopLayer handles (receive h) id))
 
 data Icmp4Handles = Icmp4Handles
@@ -47,6 +46,24 @@ type Icmp4 = Layer Icmp4Handles
 ip4Handle :: Icmp4 IP4.IP4Handle
 ip4Handle  = icmpIp4 `fmap` get
 
+-- | Add a handler for Icmp4 messages that match the provided predicate.
+addIcmp4Handler :: Icmp4Handle -> Handler -> IO ()
+addIcmp4Handler h k = send h (handleAdd k)
+
+-- | Send a destination unreachable message to a host, with the given bytes as
+-- its body.
+destUnreachable :: Icmp4Handle -> DestinationUnreachableCode
+                -> IP4Header -> S.ByteString -> IO ()
+destUnreachable h code hdr body =
+  send h (sendPacket (ip4SourceAddr hdr) (DestinationUnreachable code bytes))
+  where
+  bytes = runPut $ do
+    renderIP4Header hdr (S.length body)
+    putByteString (S.take 8 body)
+
+-- Message Handling ------------------------------------------------------------
+
+-- | Deliver an ICMP message via the IP4 layer.
 sendPacket :: IP4 -> Icmp4Packet -> Icmp4 ()
 sendPacket dst pkt = do
   ip4 <- ip4Handle
@@ -54,15 +71,10 @@ sendPacket dst pkt = do
          $ runPutLazy
          $ renderIcmp4Packet pkt
 
--- | Add a handler for Icmp4 messages that match the provided predicate.
-addIcmp4Handler :: Icmp4Handle -> Handler -> IO ()
-addIcmp4Handler h k = send h (handleAdd k)
-
--- Message Handling ------------------------------------------------------------
-
 -- | Handle incoming ICMP packets
-handleIncoming :: IP4 -> IP4 -> S.ByteString -> Icmp4 ()
-handleIncoming src _dst bs = do
+handleIncoming :: IP4Header -> S.ByteString -> Icmp4 ()
+handleIncoming hdr bs = do
+  let src = ip4SourceAddr hdr
   pkt <- liftRight (runGet parseIcmp4Packet bs)
   matchHandlers pkt
   case pkt of

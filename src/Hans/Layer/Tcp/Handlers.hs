@@ -7,6 +7,7 @@ import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
+import Hans.Message.Ip4
 import Hans.Message.Tcp
 
 import Control.Monad (mzero,mplus,guard,when)
@@ -24,8 +25,10 @@ import qualified Data.Sequence as Seq
 -- Incoming Packets ------------------------------------------------------------
 
 -- | Process a single incoming tcp packet.
-handleIncomingTcp :: IP4 -> IP4 -> S.ByteString -> Tcp ()
-handleIncomingTcp src dst bytes = do
+handleIncomingTcp :: IP4Header -> S.ByteString -> Tcp ()
+handleIncomingTcp ip4 bytes = do
+  let src = ip4SourceAddr ip4
+      dst = ip4DestAddr ip4
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
   established src dst hdr body

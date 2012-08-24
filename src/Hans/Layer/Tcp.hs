@@ -6,7 +6,6 @@ module Hans.Layer.Tcp (
   , queueTcp
   ) where
 
-import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.IP4
@@ -14,6 +13,7 @@ import Hans.Layer.Tcp.Handlers
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Timers
 import Hans.Layer.Timer
+import Hans.Message.Ip4
 import Hans.Message.Tcp
 import Hans.Utils
 
@@ -31,5 +31,5 @@ runTcpLayer tcp ip4 t = do
   send tcp initTimers
 
 -- | Queue a tcp packet.
-queueTcp :: TcpHandle -> IP4 -> IP4 -> S.ByteString -> IO ()
-queueTcp tcp !src !dst !bs = send tcp (handleIncomingTcp src dst bs)
+queueTcp :: TcpHandle -> IP4Header -> S.ByteString -> IO ()
+queueTcp tcp !hdr !bs = send tcp (handleIncomingTcp hdr bs)

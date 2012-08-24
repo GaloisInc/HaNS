@@ -23,7 +23,7 @@ import Hans.Address (getMaskComponents)
 import Hans.Address.IP4 (IP4Mask,IP4)
 import Hans.Address.Mac (Mac)
 import Hans.Channel (newChannel)
-import Hans.Message.Ip4 (IP4Protocol)
+import Hans.Message.Ip4 (IP4Protocol,IP4Header)
 import Hans.Message.Tcp (TcpPort)
 import Hans.Message.Udp (UdpPort)
 import qualified Hans.Layer.Arp as Arp
@@ -207,7 +207,7 @@ removeUdpHandler :: HasUdp stack => stack -> UdpPort -> IO ()
 removeUdpHandler stack = Udp.removeUdpHandler (udpHandle stack)
 
 -- | Inject a packet into the UDP layer.
-queueUdp :: HasUdp stack => stack -> IP4 -> IP4 -> S.ByteString -> IO ()
+queueUdp :: HasUdp stack => stack -> IP4Header -> S.ByteString -> IO ()
 queueUdp stack = Udp.queueUdp (udpHandle stack)
 
 -- | Send a UDP packet.

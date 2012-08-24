@@ -77,7 +77,7 @@ dhcpIP4Handler ns bytes =
       | ip4Protocol hdr == udpProtocol -> queue
       | otherwise                      -> return ()
       where
-      queue = queueUdp (udpHandle ns) (ip4SourceAddr hdr) (ip4DestAddr hdr)
+      queue = queueUdp (udpHandle ns) hdr
             $ S.take (len - ihl)
             $ S.drop ihl bytes
 

@@ -40,7 +40,7 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
 
 
-type Handler = IP4 -> IP4 -> S.ByteString -> IO ()
+type Handler = IP4Header -> S.ByteString -> IO ()
 
 type IP4Handle = Channel (IP ())
 
@@ -167,7 +167,7 @@ routeLocal hdr body = do
   h  <- getHandler (ip4Protocol hdr)
   mb <- handleFragments hdr body
   case mb of
-    Just bs -> output (h (ip4SourceAddr hdr) (ip4DestAddr hdr) (strict bs))
+    Just bs -> output (h hdr (strict bs))
     Nothing -> return ()
 
 
