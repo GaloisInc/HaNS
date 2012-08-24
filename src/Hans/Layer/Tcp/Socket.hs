@@ -102,7 +102,7 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
         , tcpSndNxt    = isn
         , tcpSndUna    = isn
         }
-  -- XXX how should this connect with the retransmit queue?
+  -- XXX how should the retry/backoff be implemented
   runSock sock $ do
     syn
     setState SynSent
