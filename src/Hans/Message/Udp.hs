@@ -39,12 +39,12 @@ data UdpHeader = UdpHeader
   { udpSourcePort :: !UdpPort
   , udpDestPort   :: !UdpPort
   , udpChecksum   :: !Word16
-  } deriving Show
+  } deriving (Eq,Show)
 
 udpHeaderSize :: Int
 udpHeaderSize  = 8
 
--- | Parse out a @UdpHeader@.
+-- | Parse out a @UdpHeader@, and the size of the payload.
 parseUdpHeader :: Get (UdpHeader,Int)
 parseUdpHeader  = do
   src <- parseUdpPort
@@ -52,7 +52,7 @@ parseUdpHeader  = do
   len <- getWord16be
   cs  <- getWord16be
   let hdr = UdpHeader src dst cs
-  return (hdr,fromIntegral len)
+  return (hdr,fromIntegral len - udpHeaderSize)
 
 -- | Render a @UdpHeader@.
 renderUdpHeader :: UdpHeader -> Int -> Put
@@ -68,7 +68,7 @@ renderUdpHeader hdr bodyLen = do
 parseUdpPacket :: Get (UdpHeader,S.ByteString)
 parseUdpPacket  = do
   (hdr,len) <- parseUdpHeader
-  label "UDPPacket" $ isolate (len - udpHeaderSize) $ do
+  label "UDPPacket" $ isolate len $ do
     bs <- getBytes =<< remaining
     return (hdr,bs)
 
