@@ -136,4 +136,4 @@ handleOutgoing dst mb dp bs = do
   let hdr = UdpHeader sp dp 0
   output $ IP4.withIP4Source ip4 dst $ \ src -> do
     pkt <- renderUdpPacket hdr bs (mkIP4PseudoHeader src dst udpProtocol)
-    IP4.sendIP4Packet ip4 udpProtocol dst pkt
+    IP4.sendIP4Packet ip4 False udpProtocol dst pkt

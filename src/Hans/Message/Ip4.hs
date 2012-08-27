@@ -48,7 +48,7 @@ data IP4Header = IP4Header
   { ip4Version        :: !Word8
   , ip4TypeOfService  :: !Word8
   , ip4Ident          :: !Ident
-  , ip4MayFragment    :: Bool
+  , ip4DontFragment   :: Bool
   , ip4MoreFragments  :: Bool
   , ip4FragmentOffset :: !Word16
   , ip4TimeToLive     :: !Word8
@@ -64,7 +64,7 @@ emptyIP4Header prot src dst = IP4Header
   { ip4Version        = 4
   , ip4TypeOfService  = 0
   , ip4Ident          = 0
-  , ip4MayFragment    = False
+  , ip4DontFragment   = False
   , ip4MoreFragments  = False
   , ip4FragmentOffset = 0
   , ip4TimeToLive     = 127
@@ -162,7 +162,7 @@ parseIP4Packet = do
           { ip4Version        = ver
           , ip4TypeOfService  = tos
           , ip4Ident          = ident
-          , ip4MayFragment    = flags `testBit` 1
+          , ip4DontFragment   = flags `testBit` 1
           , ip4MoreFragments  = flags `testBit` 0
           , ip4FragmentOffset = off * 8
           , ip4TimeToLive     = ttl
@@ -183,8 +183,8 @@ renderIP4Header hdr pktlen = do
   putWord16be (fromIntegral pktlen + fromIntegral ihl)
 
   putWord16le (getIdent (ip4Ident hdr))
-  let frag | ip4MayFragment hdr = (`setBit` 1)
-           | otherwise          = id
+  let frag | ip4DontFragment hdr = (`setBit` 1)
+           | otherwise           = id
   let morefrags | ip4MoreFragments hdr = (`setBit` 0)
                 | otherwise            = id
   let flags = frag (morefrags 0)

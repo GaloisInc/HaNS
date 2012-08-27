@@ -55,7 +55,8 @@ addIcmp4Handler h k = send h (handleAdd k)
 destUnreachable :: Icmp4Handle -> DestinationUnreachableCode
                 -> IP4Header -> S.ByteString -> IO ()
 destUnreachable h code hdr body =
-  send h (sendPacket (ip4SourceAddr hdr) (DestinationUnreachable code bytes))
+  send h $ sendPacket True (ip4SourceAddr hdr)
+         $ DestinationUnreachable code bytes
   where
   bytes = runPut $ do
     renderIP4Header hdr (S.length body)
@@ -64,25 +65,22 @@ destUnreachable h code hdr body =
 -- Message Handling ------------------------------------------------------------
 
 -- | Deliver an ICMP message via the IP4 layer.
-sendPacket :: IP4 -> Icmp4Packet -> Icmp4 ()
-sendPacket dst pkt = do
+sendPacket :: Bool -> IP4 -> Icmp4Packet -> Icmp4 ()
+sendPacket df dst pkt = do
   ip4 <- ip4Handle
-  output $ IP4.sendIP4Packet ip4 icmpProtocol dst
+  output $ IP4.sendIP4Packet ip4 df icmpProtocol dst
          $ runPutLazy
          $ renderIcmp4Packet pkt
 
 -- | Handle incoming ICMP packets
 handleIncoming :: IP4Header -> S.ByteString -> Icmp4 ()
 handleIncoming hdr bs = do
-  let src = ip4SourceAddr hdr
   pkt <- liftRight (runGet parseIcmp4Packet bs)
   matchHandlers pkt
   case pkt of
     -- XXX: Only echo-request is handled at the moment
-    Echo ident seqNum dat -> handleEchoRequest src ident seqNum dat
-    _ty         -> do
-      --output (putStrLn ("Unhandled ICMP message type: " ++ show ty))
-      dropPacket
+    Echo ident seqNum dat -> handleEchoRequest hdr ident seqNum dat
+    _ty                   -> dropPacket
 
 
 -- | Add an icmp packet handler.
@@ -93,10 +91,11 @@ handleAdd k = do
 
 
 -- | Respond to an echo request
-handleEchoRequest :: IP4 -> Identifier -> SequenceNumber -> S.ByteString
+handleEchoRequest :: IP4Header -> Identifier -> SequenceNumber -> S.ByteString
                   -> Icmp4 ()
-handleEchoRequest src ident seqNum dat = do
-  sendPacket src (EchoReply ident seqNum dat)
+handleEchoRequest hdr ident seqNum dat =
+  sendPacket (ip4DontFragment hdr) (ip4SourceAddr hdr)
+      (EchoReply ident seqNum dat)
 
 
 -- | Output the IO actions for each handler that's registered.

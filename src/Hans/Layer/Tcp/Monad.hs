@@ -117,7 +117,7 @@ sendSegment dst hdr body = do
   ip4 <- ip4Handle
   output $ withIP4Source ip4 dst $ \ src -> do
     let pkt = renderWithTcpChecksumIP4 src dst hdr body
-    sendIP4Packet ip4 tcpProtocol dst pkt
+    sendIP4Packet ip4 False tcpProtocol dst pkt
 
 -- | Get the initial sequence number.
 initialSeqNum :: Tcp TcpSeqNum
