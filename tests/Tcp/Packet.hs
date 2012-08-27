@@ -2,6 +2,8 @@
 
 module Tcp.Packet where
 
+import Utils
+
 import Hans.Message.Tcp
     (TcpHeader(..),emptyTcpHeader,TcpPort(..),TcpOption(..),getTcpHeader
     ,putTcpHeader,getTcpOption,putTcpOption,tcpOptionsLength)
@@ -123,16 +125,8 @@ tcpPacketTests  = testGroup "packet parsing"
   , testProperty "prop_optionRoundTrip" prop_optionRoundTrip
   ]
 
-prop_headerRoundTrip = forAll arbitraryTcpHeader $ \ hdr ->
-  let bytes = runPut (putTcpHeader hdr)
-      len   = S.length bytes
-   in case runGet getTcpHeader bytes of
-        Left err                        -> failed { reason = err }
-        Right (hdr',len') | hdr == hdr' -> succeeded
-                          | otherwise   -> failed
+prop_headerRoundTrip =
+  roundTrip arbitraryTcpHeader (fst <$> getTcpHeader) putTcpHeader
 
-prop_optionRoundTrip = forAll arbitraryTcpOption $ \ opt ->
-  case runGet getTcpOption (runPut (putTcpOption opt)) of
-    Right opt' | opt == opt' -> succeeded
-               | otherwise   -> failed
-    Left err                 -> failed { reason = err }
+prop_optionRoundTrip =
+  roundTrip arbitraryTcpOption getTcpOption putTcpOption
