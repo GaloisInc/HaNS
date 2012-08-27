@@ -269,7 +269,7 @@ renderIcmp4Packet  =
          put (0 :: Word32) -- address mask
 
   put' (AddressMaskReply ident seqNum mask)
-    = do firstPut 17 NoCode
+    = do firstPut 18 NoCode
          put ident
          put seqNum
          put mask
