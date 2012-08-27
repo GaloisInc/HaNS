@@ -41,7 +41,7 @@ data Icmp4Packet
   -- rfc 950 - Internet Standard Subnetting Procedure
   | AddressMask Identifier SequenceNumber
   | AddressMaskReply Identifier SequenceNumber Word32
-  deriving Show
+  deriving (Eq,Show)
 
 noCode :: String -> Get ()
 noCode str = do
@@ -309,7 +309,7 @@ data DestinationUnreachableCode
   | CommunicationAdministrativelyProhibited
   | HostPrecedenceViolation
   | PrecedenceCutoffInEffect
-  deriving Show
+  deriving (Eq,Show)
 
 instance Serialize DestinationUnreachableCode where
   get = do b <- getWord8
@@ -353,7 +353,7 @@ instance Serialize DestinationUnreachableCode where
 data TimeExceededCode
   = TimeToLiveExceededInTransit
   | FragmentReassemblyTimeExceeded
-  deriving Show
+  deriving (Eq,Show)
 
 instance Serialize TimeExceededCode where
   get = do b <- getWord8
@@ -370,7 +370,7 @@ data RedirectCode
   | RedirectForHost
   | RedirectForTypeOfServiceAndNetwork
   | RedirectForTypeOfServiceAndHost
-  deriving Show
+  deriving (Eq,Show)
 
 instance Serialize RedirectCode where
   get = do b <- getWord8
@@ -389,7 +389,7 @@ instance Serialize RedirectCode where
 data TraceRouteCode
   = TraceRouteForwarded
   | TraceRouteDiscarded
-  deriving Show
+  deriving (Eq,Show)
 
 instance Serialize TraceRouteCode where
   get = do b <- getWord8
@@ -409,7 +409,7 @@ newtype PreferenceLevel = PreferenceLevel Int32
 data RouterAddress = RouterAddress
   { raAddr            :: IP4
   , raPreferenceLevel :: PreferenceLevel
-  } deriving Show
+  } deriving (Eq,Show)
 
 instance Serialize RouterAddress where
   get = liftM2 RouterAddress get get

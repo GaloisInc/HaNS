@@ -161,11 +161,15 @@ flag build-tests
 executable hans-tests
         hs-source-dirs: tests
         main-is:        Main.hs
-        other-modules:  Tcp,
+        other-modules:  Icmp4,
+                        Icmp4.Packet,
+                        IP4.Addr,
+                        Tcp,
                         Tcp.Packet,
                         Tcp.Window,
                         Udp,
-                        Udp.Packet
+                        Udp.Packet,
+                        Utils
         if flag(build-tests)
                 buildable:      True
                 build-depends:  base                       >= 4,
