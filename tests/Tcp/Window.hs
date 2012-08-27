@@ -17,8 +17,8 @@ import qualified Data.Sequence as Seq
 
 tcpWindowTests :: Test
 tcpWindowTests  = testGroup "tcp window"
-  [ testProperty "localOrdered" prop_localOrdered
-  , testProperty "localRandom"  prop_localRandom
+  [ testProperty "prop_localOrdered" prop_localOrdered
+  , testProperty "prop_localRandom"  prop_localRandom
   ]
 
 
