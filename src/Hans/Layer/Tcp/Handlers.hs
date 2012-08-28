@@ -61,6 +61,10 @@ established remote _local hdr body = do
           setState Established
           k <- inParent popAcceptor
           outputS (k sid)
+          -- close this child socket
+        | tcpRst hdr -> closeSocket
+          -- retransmitted syn
+        | isSyn hdr -> synAck
 
       SynSent
           -- connection rejected
