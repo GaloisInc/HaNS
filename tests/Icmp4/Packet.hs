@@ -131,7 +131,7 @@ arbitraryTraceRouteCode  = elements
 -- Packet Tests ----------------------------------------------------------------
 
 icmp4PacketTests :: Test
-icmp4PacketTests  = testGroup "packet"
+icmp4PacketTests  = testGroup "packet parsing"
   [ testProperty "roundTrip" prop_roundTrip
   ]
 
