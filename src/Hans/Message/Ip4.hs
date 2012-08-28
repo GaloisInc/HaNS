@@ -8,11 +8,9 @@ import Hans.Utils.Checksum
 
 import Control.Monad (unless)
 import Data.Int (Int64)
-import Data.Serialize (Serialize(..))
-import Data.Serialize.Get
-    (Get,getWord8,getWord16be,isolate,label,getByteString)
-import Data.Serialize.Put
-    (Put,runPut,putWord8,putWord16be,putWord16le,putByteString)
+import Data.Serialize
+    (Serialize(..),Get,getWord8,getWord16be,isolate,label,getByteString
+    ,Put,runPut,putWord8,putWord16be,putByteString)
 import Data.Bits (Bits((.&.),(.|.),testBit,setBit,shiftR,shiftL,bit))
 import Data.Word (Word8,Word16)
 import qualified Data.ByteString as S
@@ -181,8 +179,7 @@ renderIP4Header hdr pktlen = do
   putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
   putWord8    (ip4TypeOfService hdr)
   putWord16be (fromIntegral pktlen + fromIntegral ihl)
-
-  putWord16le (getIdent (ip4Ident hdr))
+  put         (getIdent (ip4Ident hdr))
   let frag | ip4DontFragment hdr = (`setBit` 1)
            | otherwise           = id
   let morefrags | ip4MoreFragments hdr = (`setBit` 0)
