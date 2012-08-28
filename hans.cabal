@@ -163,7 +163,9 @@ executable hans-tests
         main-is:        Main.hs
         other-modules:  Icmp4,
                         Icmp4.Packet,
+                        IP4,
                         IP4.Addr,
+                        IP4.Packet,
                         Tcp,
                         Tcp.Packet,
                         Tcp.Window,

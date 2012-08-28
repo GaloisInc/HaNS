@@ -55,7 +55,7 @@ data IP4Header = IP4Header
   , ip4SourceAddr     :: !IP4
   , ip4DestAddr       :: !IP4
   , ip4Options        :: [IP4Option]
-  } deriving Show
+  } deriving (Eq,Show)
 
 emptyIP4Header :: IP4Protocol -> IP4 -> IP4 -> IP4Header
 emptyIP4Header prot src dst = IP4Header
@@ -238,7 +238,7 @@ data IP4Option = IP4Option
   , ip4OptionClass  :: !Word8
   , ip4OptionNum    :: !Word8
   , ip4OptionData   :: S.ByteString
-  } deriving Show
+  } deriving (Eq,Show)
 
 
 ip4OptionSize :: IP4Option -> Int
