@@ -230,6 +230,7 @@ listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
 listening remote _local hdr = do
   let parent = listenSocketId (tcpDestPort hdr)
   isn <- initialSeqNum
+  now <- time
   listeningConnection parent $ do
     let childSock = (emptyTcpSocket (tcpWindow hdr))
           { tcpParent    = Just parent
@@ -242,7 +243,7 @@ listening remote _local hdr = do
           , tcpTimestamp = do
               -- require that they have sent us a timestamp, before using them
               OptTimestamp ts _ <- findTcpOption OptTagTimestamp hdr
-              return emptyTimestamp { tsLastTimestamp = ts }
+              return (emptyTimestamp now) { tsLastTimestamp = ts }
           }
     withChild childSock synAck
 

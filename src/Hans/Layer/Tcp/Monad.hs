@@ -152,9 +152,12 @@ newtype Sock a = Sock
 inTcp :: Tcp a -> Sock a
 inTcp  = Sock . inBase
 
+-- | Run the socket action, and increment its internal timestamp value.
 runSock :: TcpSocket -> Sock a -> Tcp a
 runSock tcp (Sock m) = do
-  (a,tcp') <- runStateT tcp m
+  now      <- time
+  let steppedTcp = tcp { tcpTimestamp = stepTimestamp now `fmap` tcpTimestamp tcp }
+  (a,tcp') <- runStateT steppedTcp m
   addConnection (tcpSocketId tcp') tcp'
   return a
 

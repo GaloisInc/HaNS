@@ -85,6 +85,7 @@ connect :: TcpHandle -> IP4 -> TcpPort -> Maybe TcpPort -> IO Socket
 connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
   localPort <- maybe allocatePort return mbLocal
   isn       <- initialSeqNum
+  now       <- time
   let sid  = SocketId
         { sidLocalPort  = localPort
         , sidRemoteHost = remote
@@ -101,6 +102,7 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
         , tcpState     = Listen
         , tcpSndNxt    = isn
         , tcpSndUna    = isn
+        , tcpTimestamp = Just (emptyTimestamp now)
         }
   -- XXX how should the retry/backoff be implemented
   runSock sock $ do

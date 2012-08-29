@@ -121,13 +121,29 @@ emptyTcpTimers  = TcpTimers
 data Timestamp = Timestamp
   { tsTimestamp     :: !Word32
   , tsLastTimestamp :: !Word32
+  , tsGranularity   :: !POSIXTime -- ^ Hz
+  , tsLastUpdate    :: !POSIXTime
   } deriving (Show)
 
-emptyTimestamp :: Timestamp
-emptyTimestamp  = Timestamp
+emptyTimestamp :: POSIXTime -> Timestamp
+emptyTimestamp start = Timestamp
   { tsTimestamp     = 0
   , tsLastTimestamp = 0
+  , tsGranularity   = 1000
+  , tsLastUpdate    = start
   }
+
+-- | Update the timestamp value, advancing based on the timestamp granularity.
+-- If the number of ticks to advance is 0, don't advance the timestamp.
+stepTimestamp :: POSIXTime -> Timestamp -> Timestamp
+stepTimestamp now ts
+  | diff == 0 = ts
+  | otherwise = ts
+    { tsLastUpdate = now
+    , tsTimestamp  = tsTimestamp ts + diff
+    }
+  where
+  diff = ceiling (tsGranularity ts * (now - tsLastUpdate ts))
 
 -- | Generate timestamp option for an outgoing packet.
 mkTimestamp :: Timestamp -> TcpOption
@@ -182,7 +198,7 @@ emptyTcpSocket sendWindow = TcpSocket
   , tcpInMSS      = defaultMSS
 
   , tcpTimers     = emptyTcpTimers
-  , tcpTimestamp  = Just emptyTimestamp
+  , tcpTimestamp  = Nothing
   }
 
 defaultMSS :: Int64

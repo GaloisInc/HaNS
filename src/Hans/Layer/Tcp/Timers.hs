@@ -76,13 +76,11 @@ fastTimer  = eachConnection $ do
 updateTimers :: Sock ()
 updateTimers  =
   modifyTcpSocket_ $ \ tcp ->
-    let tt                 = tcpTimers tcp
-        updateTimestamp ts = ts { tsTimestamp = tsTimestamp ts + 1 }
+    let tt = tcpTimers tcp
      in tcp { tcpTimers = tt
               { tt2MSL = decrement (tt2MSL tt)
               , ttIdle = increment (ttIdle tt)
               }
-            , tcpTimestamp = updateTimestamp `fmap` tcpTimestamp tcp
             }
   where
   decrement 0   = 0
