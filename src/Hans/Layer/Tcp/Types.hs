@@ -129,7 +129,7 @@ emptyTimestamp :: POSIXTime -> Timestamp
 emptyTimestamp start = Timestamp
   { tsTimestamp     = 0
   , tsLastTimestamp = 0
-  , tsGranularity   = 1000
+  , tsGranularity   = 200
   , tsLastUpdate    = start
   }
 

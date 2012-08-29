@@ -125,9 +125,11 @@ listen tcp _src port = blockResult tcp $ \ res -> do
   case mb of
 
     Nothing -> do
+      now <- time
       let con = (emptyTcpSocket 0)
-            { tcpSocketId = sid
-            , tcpState    = Listen
+            { tcpSocketId  = sid
+            , tcpState     = Listen
+            , tcpTimestamp = Just (emptyTimestamp now)
             }
       addConnection sid con
       output $ putMVar res $ SocketResult Socket
