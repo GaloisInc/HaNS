@@ -9,6 +9,7 @@ import Hans.Layer.IP4
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
 import Hans.Layer.Timer
+import Hans.Message.Ip4
 import Hans.Message.Tcp
 
 import Control.Monad (MonadPlus(..),guard,when)
@@ -116,8 +117,13 @@ sendSegment :: IP4 -> TcpHeader -> L.ByteString -> Tcp ()
 sendSegment dst hdr body = do
   ip4 <- ip4Handle
   output $ withIP4Source ip4 dst $ \ src -> do
-    let pkt = renderWithTcpChecksumIP4 src dst hdr body
-    sendIP4Packet ip4 False tcpProtocol dst pkt
+    let ip4Hdr = emptyIP4Header
+          { ip4DestAddr     = dst
+          , ip4Protocol     = tcpProtocol
+          , ip4DontFragment = False
+          }
+        pkt    = renderWithTcpChecksumIP4 src dst hdr body
+    sendIP4Packet ip4 ip4Hdr pkt
 
 -- | Get the initial sequence number.
 initialSeqNum :: Tcp TcpSeqNum

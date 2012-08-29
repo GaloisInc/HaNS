@@ -68,7 +68,12 @@ destUnreachable h code hdr body =
 sendPacket :: Bool -> IP4 -> Icmp4Packet -> Icmp4 ()
 sendPacket df dst pkt = do
   ip4 <- ip4Handle
-  output $ IP4.sendIP4Packet ip4 df icmpProtocol dst
+  let hdr = emptyIP4Header
+        { ip4DestAddr     = dst
+        , ip4Protocol     = icmpProtocol
+        , ip4DontFragment = df
+        }
+  output $ IP4.sendIP4Packet ip4 hdr
          $ runPutLazy
          $ renderIcmp4Packet pkt
 

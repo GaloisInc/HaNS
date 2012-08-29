@@ -59,9 +59,8 @@ withIP4Source h !dst k = send h (handleSource dst k)
 addIP4RoutingRule :: IP4Handle -> Rule IP4Mask IP4 -> IO ()
 addIP4RoutingRule h !rule = send h (handleAddRule rule)
 
-sendIP4Packet :: IP4Handle -> Bool -> IP4Protocol -> IP4 -> L.ByteString
-              -> IO ()
-sendIP4Packet h !df !prot !dst !pkt = send h (handleOutgoing df prot dst pkt)
+sendIP4Packet :: IP4Handle -> IP4Header -> L.ByteString -> IO ()
+sendIP4Packet h !hdr !pkt = send h (sendBytes hdr pkt)
 
 addIP4Handler :: IP4Handle -> IP4Protocol -> Handler -> IO ()
 addIP4Handler h !prot k = send h (addHandler prot k)
@@ -101,21 +100,15 @@ emptyIP4State arp = IP4State
 arpHandle :: IP ArpHandle
 arpHandle  = ip4ArpHandle `fmap` get
 
-sendBytes :: Bool -> IP4Protocol -> IP4 -> L.ByteString -> IP ()
-sendBytes df prot dst bs = do
-  rule@(src,_,_) <- findRoute dst
+sendBytes :: IP4Header -> L.ByteString -> IP ()
+sendBytes hdr0 bs = do
+  rule@(src,_,_) <- findRoute (ip4DestAddr hdr0)
   ident          <- nextIdent
-  let hdr = (emptyIP4Header prot src dst)
-        { ip4Ident        = ident
-        , ip4DontFragment = df
+  let hdr = hdr0
+        { ip4SourceAddr = src
+        , ip4Ident      = ident
         }
   sendPacket' hdr bs rule
-
-sendPacket :: IP4Header -> L.ByteString -> IP ()
-sendPacket hdr body = do
-  rule@(src,_,_) <- findRoute (ip4DestAddr hdr)
-  guard (src /= ip4SourceAddr hdr)
-  sendPacket' hdr body rule
 
 -- | Send a packet using a given routing rule
 sendPacket' :: IP4Header -> L.ByteString -> (IP4,IP4,Mtu) -> IP ()
@@ -135,7 +128,10 @@ findRoute addr = do
 
 -- | Route a packet that is forwardable
 forward :: IP4Header -> L.ByteString -> IP ()
-forward  = sendPacket
+forward hdr body = do
+  rule@(src,_,_) <- findRoute (ip4DestAddr hdr)
+  guard (src /= ip4SourceAddr hdr)
+  sendPacket' hdr body rule
 
 -- | Require that an address is local.
 localAddress :: IP4 -> IP ()
@@ -200,11 +196,6 @@ handleIncoming bs = do
   -- forward?
   let payload = S.take plen rest
   routeLocal hdr payload `mplus` forward hdr (chunk payload)
-
-
--- | Outgoing packet
-handleOutgoing :: Bool -> IP4Protocol -> IP4 -> L.ByteString -> IP ()
-handleOutgoing  = sendBytes
 
 
 handleAddRule :: Rule IP4Mask IP4 -> IP ()

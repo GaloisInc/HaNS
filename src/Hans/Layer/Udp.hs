@@ -135,5 +135,10 @@ handleOutgoing dst mb dp bs = do
   ip4 <- ip4Handle
   let hdr = UdpHeader sp dp 0
   output $ IP4.withIP4Source ip4 dst $ \ src -> do
+    let ip4Hdr = emptyIP4Header
+          { ip4DestAddr     = dst
+          , ip4Protocol     = udpProtocol
+          , ip4DontFragment = False
+          }
     pkt <- renderUdpPacket hdr bs (mkIP4PseudoHeader src dst udpProtocol)
-    IP4.sendIP4Packet ip4 False udpProtocol dst pkt
+    IP4.sendIP4Packet ip4 ip4Hdr pkt

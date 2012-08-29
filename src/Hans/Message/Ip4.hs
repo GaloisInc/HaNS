@@ -2,7 +2,7 @@
 
 module Hans.Message.Ip4 where
 
-import Hans.Address.IP4 (IP4)
+import Hans.Address.IP4 (IP4(..))
 import Hans.Utils
 import Hans.Utils.Checksum
 
@@ -57,8 +57,8 @@ data IP4Header = IP4Header
   , ip4Options        :: [IP4Option]
   } deriving (Eq,Show)
 
-emptyIP4Header :: IP4Protocol -> IP4 -> IP4 -> IP4Header
-emptyIP4Header prot src dst = IP4Header
+emptyIP4Header :: IP4Header
+emptyIP4Header  = IP4Header
   { ip4Version        = 4
   , ip4TypeOfService  = 0
   , ip4Ident          = 0
@@ -66,10 +66,10 @@ emptyIP4Header prot src dst = IP4Header
   , ip4MoreFragments  = False
   , ip4FragmentOffset = 0
   , ip4TimeToLive     = 127
-  , ip4Protocol       = prot
+  , ip4Protocol       = IP4Protocol 0
   , ip4Checksum       = 0
-  , ip4SourceAddr     = src
-  , ip4DestAddr       = dst
+  , ip4SourceAddr     = IP4 0 0 0 0
+  , ip4DestAddr       = IP4 0 0 0 0
   , ip4Options        = []
   }
 

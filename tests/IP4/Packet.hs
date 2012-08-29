@@ -26,12 +26,15 @@ arbitraryIP4Header  = do
   prot  <- arbitraryIP4Protocol
   src   <- arbitraryIP4
   dst   <- arbitraryIP4
-  return (emptyIP4Header prot src dst)
+  return emptyIP4Header
     { ip4TypeOfService  = tos
     , ip4DontFragment   = df
     , ip4MoreFragments  = mf
     , ip4FragmentOffset = off
     , ip4TimeToLive     = ttl
+    , ip4Protocol       = prot
+    , ip4SourceAddr     = src
+    , ip4DestAddr       = dst
     }
 
 arbitraryIdent :: Gen Ident
