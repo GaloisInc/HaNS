@@ -44,7 +44,7 @@ stepTcp body = do
   modifyHost $ \ host ->
     let diff = now - hostLastUpdate host
         -- increment the ISN at 128KHz
-        inc  = round (128000 * diff)
+        inc  = truncate (128000 * diff)
      in if inc > 0
            then host
              { hostLastUpdate    = now
