@@ -19,8 +19,7 @@ import Hans.Message.Tcp
 import Hans.Utils
 
 import Control.Concurrent (forkIO)
-import Data.Time.Clock.POSIX (getPOSIXTime)
-import Data.Word (Word32)
+import Data.Time.Clock.POSIX (getPOSIXTime,POSIXTime)
 import qualified Data.ByteString as S
 
 
@@ -39,7 +38,7 @@ queueTcp :: TcpHandle -> IP4Header -> S.ByteString -> IO ()
 queueTcp tcp !hdr !bs = send tcp (handleIncomingTcp hdr bs)
 
 -- | Rate of ISN increase, in Hz.
-isnRate :: Word32
+isnRate :: POSIXTime
 isnRate  = 128000
 
 -- | Run the tcp action, after updating any internal state.
