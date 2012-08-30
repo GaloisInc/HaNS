@@ -22,14 +22,16 @@ data Host = Host
   { hostConnections   :: Connections
   , hostInitialSeqNum :: !TcpSeqNum
   , hostPorts         :: !(PortManager TcpPort)
+  , hostLastUpdate    :: POSIXTime
   }
 
-emptyHost :: Host
-emptyHost  = Host
+emptyHost :: POSIXTime -> Host
+emptyHost start = Host
   { hostConnections   = Map.empty
     -- XXX what should we seed this with?
   , hostInitialSeqNum = 0
   , hostPorts         = emptyPortManager [32768 .. 61000]
+  , hostLastUpdate    = start
   }
 
 takePort :: Host -> Maybe (TcpPort,Host)

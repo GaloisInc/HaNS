@@ -13,6 +13,7 @@ import Hans.Message.Ip4
 import Hans.Message.Tcp
 
 import Control.Monad (MonadPlus(..),guard,when)
+import Data.Time.Clock.POSIX (POSIXTime)
 import MonadLib (get,set,StateT,runStateT,inBase)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
@@ -33,12 +34,12 @@ data TcpState = TcpState
   , tcpHost  :: Host
   }
 
-emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> TcpState
-emptyTcpState tcp ip4 timer = TcpState
+emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> POSIXTime -> TcpState
+emptyTcpState tcp ip4 timer start = TcpState
   { tcpSelf  = tcp
   , tcpIP4   = ip4
   , tcpTimer = timer
-  , tcpHost  = emptyHost
+  , tcpHost  = emptyHost start
   }
 
 -- | The handle to this layer.

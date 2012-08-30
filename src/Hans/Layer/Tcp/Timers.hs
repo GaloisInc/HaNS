@@ -48,15 +48,11 @@ initTimers  = do
 
 -- | Fires every 500ms.
 slowTimer :: Tcp ()
-slowTimer  = do
-  eachConnection $ do
-    handle2MSL
-    handleRTO
-    handleFinWait2
-    updateTimers
-
-  -- approximate rate of increase for the slow timer
-  addInitialSeqNum 64000
+slowTimer  = eachConnection $ do
+  handle2MSL
+  handleRTO
+  handleFinWait2
+  updateTimers
 
 resetIdle :: Sock ()
 resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
