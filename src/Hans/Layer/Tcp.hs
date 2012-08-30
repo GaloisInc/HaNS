@@ -20,6 +20,7 @@ import Hans.Utils
 
 import Control.Concurrent (forkIO)
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Data.Word (Word32)
 import qualified Data.ByteString as S
 
 
@@ -37,6 +38,10 @@ runTcpLayer tcp ip4 t = do
 queueTcp :: TcpHandle -> IP4Header -> S.ByteString -> IO ()
 queueTcp tcp !hdr !bs = send tcp (handleIncomingTcp hdr bs)
 
+-- | Rate of ISN increase, in Hz.
+isnRate :: Word32
+isnRate  = 128000
+
 -- | Run the tcp action, after updating any internal state.
 stepTcp :: Tcp () -> Tcp ()
 stepTcp body = do
@@ -44,7 +49,7 @@ stepTcp body = do
   modifyHost $ \ host ->
     let diff = now - hostLastUpdate host
         -- increment the ISN at 128KHz
-        inc  = truncate (128000 * diff)
+        inc  = truncate (isnRate * diff)
      in if inc > 0
            then host
              { hostLastUpdate    = now
