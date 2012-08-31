@@ -15,7 +15,7 @@ import Test.QuickCheck.Property (Result(..),failed,succeeded)
 -- Utilities -------------------------------------------------------------------
 
 arbitraryUdpPacketSize :: (Random a, Num a) => Gen a
-arbitraryUdpPacketSize  = choose (0,65535)
+arbitraryUdpPacketSize  = choose (0,65535 - 8)
 
 arbitraryUdpPort :: Gen UdpPort
 arbitraryUdpPort  = UdpPort <$> arbitraryBoundedRandom
@@ -34,10 +34,10 @@ udpPacketTests  = testGroup "packet parsing"
   [ testProperty "prop_headerRoundTrip" prop_headerRoundTrip
   ]
 
-prop_headerRoundTrip =
-  forAll arbitraryUdpPacketSize $ \ len ->
-  forAll arbitraryUdpHeader     $ \ hdr ->
-    case runGet parseUdpHeader (runPut (renderUdpHeader hdr len)) of
-      Right (hdr',len') | hdr == hdr' && len == len' -> succeeded
-                        | otherwise                  -> failed
-      Left err                                       -> failed { reason = err }
+prop_headerRoundTrip = forAll packet $ \ (len,hdr) ->
+  case runGet parseUdpHeader (runPut (renderUdpHeader hdr len)) of
+    Right (hdr',len') | hdr == hdr' && len == len' -> succeeded
+                      | otherwise                  -> failed
+    Left err                                       -> failed { reason = err }
+  where
+  packet = (,) <$> arbitraryUdpPacketSize <*> arbitraryUdpHeader
