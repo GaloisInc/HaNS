@@ -9,7 +9,7 @@ module Hans.Layer.Icmp4 (
   , destUnreachable
   ) where
 
-import Hans.Address.IP4 (IP4)
+import Hans.Address.IP4 (IP4,broadcastIP4)
 import Hans.Channel
 import Hans.Layer
 import Hans.Message.Icmp4
@@ -51,16 +51,16 @@ addIcmp4Handler :: Icmp4Handle -> Handler -> IO ()
 addIcmp4Handler h k = send h (handleAdd k)
 
 -- | Send a destination unreachable message to a host, with the given bytes as
--- its body.
+-- its body.  Don't send the message, if the message was broadcast.
 destUnreachable :: Icmp4Handle -> DestinationUnreachableCode
                 -> IP4Header -> S.ByteString -> IO ()
-destUnreachable h code hdr body =
-  send h $ sendPacket True (ip4SourceAddr hdr)
-         $ DestinationUnreachable code bytes
-  where
-  bytes = runPut $ do
-    renderIP4Header hdr (S.length body)
-    putByteString (S.take 8 body)
+destUnreachable h code hdr body
+  | ip4DestAddr hdr == broadcastIP4 = return ()
+  | otherwise                       = send h $ do
+    let bytes = runPut $ do
+          renderIP4Header hdr (S.length body)
+          putByteString (S.take 8 body)
+    sendPacket True (ip4SourceAddr hdr) (DestinationUnreachable code bytes)
 
 -- Message Handling ------------------------------------------------------------
 
