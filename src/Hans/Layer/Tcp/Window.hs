@@ -112,7 +112,8 @@ decrementRTO seg
 
 -- Local Window ----------------------------------------------------------------
 
--- | Local window, containing a buffer of incoming packets, indexed by their 
+-- | Local window, containing a buffer of incoming packets, indexed by their
+-- sequence number, relative to RCV.NXT.
 data LocalWindow = LocalWindow
   { lwBuffer :: Seq.Seq InSegment
   , lwRcvNxt :: !TcpSeqNum
@@ -125,6 +126,15 @@ emptyLocalWindow sn = LocalWindow
   { lwBuffer = Seq.empty
   , lwRcvNxt = sn
   }
+
+localWindowSackBlocks :: LocalWindow -> Seq.Seq SackBlock
+localWindowSackBlocks lw = case Seq.viewl (fmap mkSackBlock (lwBuffer lw)) of
+  b Seq.:< rest -> uncurry (Seq.|>) (F.foldl step (Seq.empty,b) rest)
+  Seq.EmptyL    -> Seq.empty
+  where
+  step (bs,b) b'
+    | sbRight b == sbLeft b' = (bs,b { sbRight = sbRight b' })
+    | otherwise              = (bs Seq.|> b, b')
 
 setRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
 setRcvNxt sn win = win { lwRcvNxt = sn }
@@ -194,3 +204,11 @@ mkInSegment rcvNxt hdr body = InSegment
   -- account
   rel | tcpSeqNum hdr < rcvNxt = maxBound      - rcvNxt + tcpSeqNum hdr + 1
       | otherwise              = tcpSeqNum hdr - rcvNxt
+
+mkSackBlock :: InSegment -> SackBlock
+mkSackBlock is = SackBlock
+  { sbLeft  = sn
+  , sbRight = sn + fromIntegral (S.length (inBody is))
+  }
+  where
+  sn = tcpSeqNum (inHeader is)
