@@ -8,7 +8,7 @@ import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
 import Hans.Utils (chunk)
 import Hans.Utils.Checksum
 
-import Control.Monad (unless,ap,replicateM_)
+import Control.Monad (unless,ap,replicateM_,replicateM)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
 import Data.List (find)
 import Data.Monoid (Monoid(..))
@@ -221,6 +221,7 @@ data TcpOptionTag
   | OptTagNoOption
   | OptTagMaxSegmentSize
   | OptTagWindowScaling
+  | OptTagSackPermitted
   | OptTagSack
   | OptTagTimestamp
   | OptTagUnknown !Word8
@@ -234,7 +235,8 @@ getTcpOptionTag  = do
     1 -> OptTagNoOption
     2 -> OptTagMaxSegmentSize
     3 -> OptTagWindowScaling
-    4 -> OptTagSack
+    4 -> OptTagSackPermitted
+    5 -> OptTagSack
     8 -> OptTagTimestamp
     _ -> OptTagUnknown ty
 
@@ -245,7 +247,8 @@ putTcpOptionTag tag =
     OptTagNoOption       -> 1
     OptTagMaxSegmentSize -> 2
     OptTagWindowScaling  -> 3
-    OptTagSack           -> 4
+    OptTagSackPermitted  -> 4
+    OptTagSack           -> 5
     OptTagTimestamp      -> 8
     OptTagUnknown ty     -> ty
 
@@ -268,7 +271,8 @@ data TcpOption
   | OptNoOption
   | OptMaxSegmentSize !Word16
   | OptWindowScaling !Word8
-  | OptSack
+  | OptSackPermitted
+  | OptSack [TcpSeqNum]
   | OptTimestamp !Word32 !Word32
   | OptUnknown !Word8 !Word8 !S.ByteString
     deriving (Show,Eq)
@@ -278,6 +282,7 @@ tcpOptionTag opt = case opt of
   OptEndOfOptions{}   -> OptTagEndOfOptions
   OptNoOption{}       -> OptTagNoOption
   OptMaxSegmentSize{} -> OptTagMaxSegmentSize
+  OptSackPermitted{}  -> OptTagSackPermitted
   OptSack{}           -> OptTagSack
   OptWindowScaling{}  -> OptTagWindowScaling
   OptTimestamp{}      -> OptTagTimestamp
@@ -298,7 +303,8 @@ tcpOptionLength opt = case opt of
   OptNoOption{}       -> 1
   OptMaxSegmentSize{} -> 4
   OptWindowScaling{}  -> 3
-  OptSack{}           -> 2
+  OptSackPermitted{}  -> 2
+  OptSack es          -> sackLength es
   OptTimestamp{}      -> 10
   OptUnknown _ len _  -> fromIntegral len
 
@@ -311,7 +317,8 @@ putTcpOption opt = do
     OptNoOption           -> return ()
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
-    OptSack               -> putSack
+    OptSackPermitted      -> putSackPermitted
+    OptSack es            -> putSack es
     OptTimestamp v r      -> putTimestamp v r
     OptUnknown _ len bs   -> putUnknown len bs
 
@@ -343,6 +350,7 @@ getTcpOption  = do
     OptTagNoOption       -> return OptNoOption
     OptTagMaxSegmentSize -> getMaxSegmentSize
     OptTagWindowScaling  -> getWindowScaling
+    OptTagSackPermitted  -> getSackPermitted
     OptTagSack           -> getSack
     OptTagTimestamp      -> getTimestamp
     OptTagUnknown ty     -> getUnknown ty
@@ -358,15 +366,29 @@ putMaxSegmentSize w16 = do
   putWord8 4
   putWord16be w16
 
-getSack :: Get TcpOption
-getSack  = label "Sack Permitted" $ isolate 1 $ do
+getSackPermitted :: Get TcpOption
+getSackPermitted  = label "Sack Permitted" $ isolate 1 $ do
   len <- getWord8
   unless (len == 2) (fail ("Unexpected length: " ++ show len))
-  return OptSack
+  return OptSackPermitted
 
-putSack :: Put
-putSack  = do
+putSackPermitted :: Put
+putSackPermitted  = do
   putWord8 2
+
+getSack :: Get TcpOption
+getSack  = label "Sack" $ do
+  len <- getWord8
+  let edgeLen = fromIntegral len - 2
+  OptSack `fmap` isolate edgeLen (replicateM (edgeLen `shiftR` 2) getTcpSeqNum)
+
+putSack :: Putter [TcpSeqNum]
+putSack es = do
+  putWord8 (fromIntegral (sackLength es))
+  mapM_ putTcpSeqNum es
+
+sackLength :: [TcpSeqNum] -> Int
+sackLength es = length es * 4 + 2
 
 getWindowScaling :: Get TcpOption
 getWindowScaling  = label "Window Scaling" $ isolate 2 $ do

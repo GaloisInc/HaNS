@@ -100,6 +100,8 @@ arbitraryTcpOption  = oneof
   [ pure OptNoOption
   , OptMaxSegmentSize <$> arbitrarySizedIntegral
   , OptWindowScaling  <$> arbitrarySizedIntegral
+  , pure OptSackPermitted
+  , OptSack           <$> listOf arbitrarySizedIntegral
   , OptTimestamp      <$> arbitrarySizedIntegral
                       <*> arbitrarySizedIntegral
   , do code  <- unusedTcpOptionNumber
@@ -114,7 +116,7 @@ unusedTcpOptionNumber  =
   arbitrarySizedIntegral `suchThat` (not . (`elem` avoid))
   where
   -- it would be nice if this could could be generated from TcpOptionTag
-  avoid = [0, 1, 2, 3, 4, 8]
+  avoid = [0, 1, 2, 3, 4, 5, 8]
 
 
 -- Properties ------------------------------------------------------------------
