@@ -5,8 +5,8 @@ module Tcp.Packet where
 import Utils
 
 import Hans.Message.Tcp
-    (TcpHeader(..),emptyTcpHeader,TcpPort(..),TcpOption(..),getTcpHeader
-    ,putTcpHeader,getTcpOption,putTcpOption,tcpOptionsLength)
+    (TcpHeader(..),emptyTcpHeader,TcpPort(..),TcpOption(..),SackBlock(..)
+    ,getTcpHeader,putTcpHeader,getTcpOption,putTcpOption,tcpOptionsLength)
 
 import Control.Applicative (pure,(<*>),(<$>))
 import Control.Monad (replicateM)
@@ -101,7 +101,8 @@ arbitraryTcpOption  = oneof
   , OptMaxSegmentSize <$> arbitrarySizedIntegral
   , OptWindowScaling  <$> arbitrarySizedIntegral
   , pure OptSackPermitted
-  , OptSack           <$> listOf arbitrarySizedIntegral
+  , do len <- choose (0,10)
+       OptSack <$> replicateM len arbitrarySackBlock
   , OptTimestamp      <$> arbitrarySizedIntegral
                       <*> arbitrarySizedIntegral
   , do code  <- unusedTcpOptionNumber
@@ -117,6 +118,11 @@ unusedTcpOptionNumber  =
   where
   -- it would be nice if this could could be generated from TcpOptionTag
   avoid = [0, 1, 2, 3, 4, 5, 8]
+
+arbitrarySackBlock :: Gen SackBlock
+arbitrarySackBlock  = SackBlock
+                  <$> arbitrarySizedIntegral
+                  <*> arbitrarySizedIntegral
 
 
 -- Properties ------------------------------------------------------------------

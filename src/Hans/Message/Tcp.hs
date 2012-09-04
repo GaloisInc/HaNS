@@ -272,10 +272,15 @@ data TcpOption
   | OptMaxSegmentSize !Word16
   | OptWindowScaling !Word8
   | OptSackPermitted
-  | OptSack [TcpSeqNum]
+  | OptSack [SackBlock]
   | OptTimestamp !Word32 !Word32
   | OptUnknown !Word8 !Word8 !S.ByteString
     deriving (Show,Eq)
+
+data SackBlock = SackBlock
+  { sbLeft  :: !TcpSeqNum
+  , sbRight :: !TcpSeqNum
+  } deriving (Show,Eq)
 
 tcpOptionTag :: TcpOption -> TcpOptionTag
 tcpOptionTag opt = case opt of
@@ -304,7 +309,7 @@ tcpOptionLength opt = case opt of
   OptMaxSegmentSize{} -> 4
   OptWindowScaling{}  -> 3
   OptSackPermitted{}  -> 2
-  OptSack es          -> sackLength es
+  OptSack bs          -> sackLength bs
   OptTimestamp{}      -> 10
   OptUnknown _ len _  -> fromIntegral len
 
@@ -318,7 +323,7 @@ putTcpOption opt = do
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
     OptSackPermitted      -> putSackPermitted
-    OptSack es            -> putSack es
+    OptSack bs            -> putSack bs
     OptTimestamp v r      -> putTimestamp v r
     OptUnknown _ len bs   -> putUnknown len bs
 
@@ -380,15 +385,29 @@ getSack :: Get TcpOption
 getSack  = label "Sack" $ do
   len <- getWord8
   let edgeLen = fromIntegral len - 2
-  OptSack `fmap` isolate edgeLen (replicateM (edgeLen `shiftR` 2) getTcpSeqNum)
+  OptSack `fmap` isolate edgeLen (replicateM (edgeLen `shiftR` 3) getSackBlock)
 
-putSack :: Putter [TcpSeqNum]
-putSack es = do
-  putWord8 (fromIntegral (sackLength es))
-  mapM_ putTcpSeqNum es
+putSack :: Putter [SackBlock]
+putSack bs = do
+  putWord8 (fromIntegral (sackLength bs))
+  mapM_ putSackBlock bs
 
-sackLength :: [TcpSeqNum] -> Int
-sackLength es = length es * 4 + 2
+getSackBlock :: Get SackBlock
+getSackBlock  = do
+  l <- getTcpSeqNum
+  r <- getTcpSeqNum
+  return $! SackBlock
+    { sbLeft  = l
+    , sbRight = r
+    }
+
+putSackBlock :: Putter SackBlock
+putSackBlock sb = do
+  putTcpSeqNum (sbLeft sb)
+  putTcpSeqNum (sbRight sb)
+
+sackLength :: [SackBlock] -> Int
+sackLength bs = length bs * 8 + 2
 
 getWindowScaling :: Get TcpOption
 getWindowScaling  = label "Window Scaling" $ isolate 2 $ do
