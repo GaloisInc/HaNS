@@ -114,7 +114,7 @@ unusedTcpOptionNumber  =
   arbitrarySizedIntegral `suchThat` (not . (`elem` avoid))
   where
   -- it would be nice if this could could be generated from TcpOptionTag
-  avoid = [0, 1, 2, 3, 8]
+  avoid = [0, 1, 2, 3, 4, 8]
 
 
 -- Properties ------------------------------------------------------------------

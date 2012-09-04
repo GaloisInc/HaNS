@@ -221,6 +221,7 @@ data TcpOptionTag
   | OptTagNoOption
   | OptTagMaxSegmentSize
   | OptTagWindowScaling
+  | OptTagSack
   | OptTagTimestamp
   | OptTagUnknown !Word8
     deriving (Eq,Show)
@@ -233,6 +234,7 @@ getTcpOptionTag  = do
     1 -> OptTagNoOption
     2 -> OptTagMaxSegmentSize
     3 -> OptTagWindowScaling
+    4 -> OptTagSack
     8 -> OptTagTimestamp
     _ -> OptTagUnknown ty
 
@@ -243,6 +245,7 @@ putTcpOptionTag tag =
     OptTagNoOption       -> 1
     OptTagMaxSegmentSize -> 2
     OptTagWindowScaling  -> 3
+    OptTagSack           -> 4
     OptTagTimestamp      -> 8
     OptTagUnknown ty     -> ty
 
@@ -265,6 +268,7 @@ data TcpOption
   | OptNoOption
   | OptMaxSegmentSize !Word16
   | OptWindowScaling !Word8
+  | OptSack
   | OptTimestamp !Word32 !Word32
   | OptUnknown !Word8 !Word8 !S.ByteString
     deriving (Show,Eq)
@@ -274,6 +278,7 @@ tcpOptionTag opt = case opt of
   OptEndOfOptions{}   -> OptTagEndOfOptions
   OptNoOption{}       -> OptTagNoOption
   OptMaxSegmentSize{} -> OptTagMaxSegmentSize
+  OptSack{}           -> OptTagSack
   OptWindowScaling{}  -> OptTagWindowScaling
   OptTimestamp{}      -> OptTagTimestamp
   OptUnknown ty _ _   -> OptTagUnknown ty
@@ -293,6 +298,7 @@ tcpOptionLength opt = case opt of
   OptNoOption{}       -> 1
   OptMaxSegmentSize{} -> 4
   OptWindowScaling{}  -> 3
+  OptSack{}           -> 2
   OptTimestamp{}      -> 10
   OptUnknown _ len _  -> fromIntegral len
 
@@ -305,6 +311,7 @@ putTcpOption opt = do
     OptNoOption           -> return ()
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
+    OptSack               -> putSack
     OptTimestamp v r      -> putTimestamp v r
     OptUnknown _ len bs   -> putUnknown len bs
 
@@ -336,6 +343,7 @@ getTcpOption  = do
     OptTagNoOption       -> return OptNoOption
     OptTagMaxSegmentSize -> getMaxSegmentSize
     OptTagWindowScaling  -> getWindowScaling
+    OptTagSack           -> getSack
     OptTagTimestamp      -> getTimestamp
     OptTagUnknown ty     -> getUnknown ty
 
@@ -349,6 +357,16 @@ putMaxSegmentSize :: Putter Word16
 putMaxSegmentSize w16 = do
   putWord8 4
   putWord16be w16
+
+getSack :: Get TcpOption
+getSack  = label "Sack Permitted" $ isolate 1 $ do
+  len <- getWord8
+  unless (len == 2) (fail ("Unexpected length: " ++ show len))
+  return OptSack
+
+putSack :: Put
+putSack  = do
+  putWord8 2
 
 getWindowScaling :: Get TcpOption
 getWindowScaling  = label "Window Scaling" $ isolate 2 $ do
