@@ -53,8 +53,8 @@ addWindowScale sock
   | tcpWindowScale sock = setTcpOption
                         $ OptWindowScaling
                         $ fromIntegral
-                        $ rwSndWindScale
-                        $ tcpOut sock
+                        $ lwRcvWindScale
+                        $ tcpIn sock
   | otherwise           = id
 
 
