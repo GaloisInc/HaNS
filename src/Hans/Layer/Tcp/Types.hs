@@ -179,6 +179,8 @@ data TcpSocket = TcpSocket
 
   , tcpTimers     :: !TcpTimers
   , tcpTimestamp  :: Maybe Timestamp
+
+  , tcpSack       :: Bool
   }
 
 emptyTcpSocket :: Word16 -> TcpSocket
@@ -201,6 +203,8 @@ emptyTcpSocket sendWindow = TcpSocket
 
   , tcpTimers     = emptyTcpTimers
   , tcpTimestamp  = Nothing
+
+  , tcpSack       = True
   }
 
 defaultMSS :: Int64

@@ -4,8 +4,8 @@ import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
-
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Foldable as F
 
 
 -- Generic Packets -------------------------------------------------------------
@@ -25,9 +25,24 @@ mkSegment tcp = case tcpTimestamp tcp of
     }
 
 mkAck :: TcpSocket -> TcpHeader
-mkAck tcp = (mkSegment tcp)
-  { tcpAck = True
-  }
+mkAck tcp = addSackOption tcp
+          $ (mkSegment tcp)
+            { tcpAck = True
+            }
+
+-- | Add the Sack option to a tcp packet.
+addSackOption :: TcpSocket -> TcpHeader -> TcpHeader
+addSackOption sock
+  | tcpSack sock && not (null bs) = setTcpOption (OptSack bs)
+  | otherwise                     = id
+  where
+  bs = F.toList (localWindowSackBlocks (tcpIn sock))
+
+-- | Add the sack permitted tcp option.
+addSackPermitted :: TcpSocket -> TcpHeader -> TcpHeader
+addSackPermitted sock
+  | tcpSack sock = setTcpOption OptSackPermitted
+  | otherwise    = id
 
 
 -- Connection Refusal ----------------------------------------------------------
@@ -49,21 +64,28 @@ mkRstAck hdr = emptyTcpHeader
 -- Connection Establishment ----------------------------------------------------
 
 mkSyn :: TcpSocket -> TcpHeader
-mkSyn tcp = setTcpOption (mkMSS tcp) $ (mkSegment tcp)
-  { tcpSyn    = True
-  , tcpAckNum = 0
-  }
+mkSyn tcp = addSackPermitted tcp
+          $ setTcpOption (mkMSS tcp)
+          $ (mkSegment tcp)
+            { tcpSyn    = True
+            , tcpAckNum = 0
+            }
 
 -- | Construct a SYN ACK packet, in response to a SYN.
 mkSynAck :: TcpSocket -> TcpHeader
-mkSynAck tcp = setTcpOption (mkMSS tcp) $ (mkAck tcp)
-  { tcpSyn = True
-  }
+mkSynAck tcp = addSackPermitted tcp
+             $ setTcpOption (mkMSS tcp)
+             $ (mkSegment tcp)
+               { tcpSyn = True
+               , tcpAck = True
+               }
 
 
 -- Connection Closing ----------------------------------------------------------
 
 -- | Construct a FIN packet.
+--
+-- XXX should this include a sack option?
 mkFinAck :: TcpSocket -> TcpHeader
 mkFinAck tcp = (mkSegment tcp)
   { tcpFin = True
@@ -74,10 +96,11 @@ mkFinAck tcp = (mkSegment tcp)
 -- Data Packets ----------------------------------------------------------------
 
 mkData :: TcpSocket -> TcpHeader
-mkData tcp = (mkSegment tcp)
-  { tcpAck = True
-  , tcpPsh = True
-  }
+mkData tcp = addSackOption tcp
+           $ (mkSegment tcp)
+             { tcpAck = True
+             , tcpPsh = True
+             }
 
 
 -- Socket Actions --------------------------------------------------------------
