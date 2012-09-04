@@ -79,6 +79,7 @@ established remote _local hdr body = do
             , tcpOutMSS = fromMaybe (tcpInMSS tcp) (getMSS hdr)
             , tcpOut    = resizeWindow (tcpWindow hdr) (tcpOut tcp)
             , tcpIn     = emptyLocalWindow (tcpSeqNum hdr)
+            , tcpSack   = sackSupported hdr
             }
           advanceRcvNxt 1
           ack
@@ -246,6 +247,7 @@ listening remote _local hdr = do
               -- require that they have sent us a timestamp, before using them
               OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
               return ts { tsLastTimestamp = val }
+          , tcpSack      = sackSupported hdr
           }
     withChild childSock synAck
 
@@ -299,3 +301,5 @@ getMSS hdr = do
   OptMaxSegmentSize n <- findTcpOption OptTagMaxSegmentSize hdr
   return (fromIntegral n)
 
+sackSupported :: TcpHeader -> Bool
+sackSupported  = isJust . findTcpOption OptTagSackPermitted
