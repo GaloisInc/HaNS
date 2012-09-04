@@ -11,6 +11,7 @@ import Hans.Utils.Checksum
 import Control.Monad (unless,ap,replicateM_,replicateM)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
 import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Data.Monoid (Monoid(..))
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
@@ -127,6 +128,13 @@ emptyTcpHeader  = TcpHeader
   , tcpUrgentPointer = 0
   , tcpOptions       = []
   }
+
+tcpScaledWindow :: TcpHeader -> Word32
+tcpScaledWindow hdr = fromIntegral (tcpWindow hdr) `shiftL` scale
+  where
+  scale = fromMaybe 0 $ do
+    OptWindowScaling n <- findTcpOption OptTagWindowScaling hdr
+    return (fromIntegral n)
 
 -- | The length of the fixed part of the TcpHeader, in 4-byte octets.
 tcpFixedHeaderLength :: Int

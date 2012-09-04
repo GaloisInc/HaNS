@@ -183,7 +183,7 @@ data TcpSocket = TcpSocket
   , tcpSack       :: Bool
   }
 
-emptyTcpSocket :: Word16 -> TcpSocket
+emptyTcpSocket :: Word32 -> TcpSocket
 emptyTcpSocket sendWindow = TcpSocket
   { tcpParent     = Nothing
   , tcpSocketId   = emptySocketId

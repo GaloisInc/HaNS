@@ -77,7 +77,7 @@ established remote _local hdr body = do
           modifyTcpSocket_ $ \ tcp -> tcp
             { tcpState  = Established
             , tcpOutMSS = fromMaybe (tcpInMSS tcp) (getMSS hdr)
-            , tcpOut    = resizeWindow (tcpWindow hdr) (tcpOut tcp)
+            , tcpOut    = resizeWindow (tcpScaledWindow hdr) (tcpOut tcp)
             , tcpIn     = emptyLocalWindow (tcpSeqNum hdr)
             , tcpSack   = sackSupported hdr
             }
@@ -233,7 +233,7 @@ listening remote _local hdr = do
   isn <- initialSeqNum
   listeningConnection parent $ do
     tcp <- getTcpSocket
-    let childSock = (emptyTcpSocket (tcpWindow hdr))
+    let childSock = (emptyTcpSocket (tcpScaledWindow hdr))
           { tcpParent    = Just parent
           , tcpSocketId  = incomingSocketId remote hdr
           , tcpState     = SynReceived

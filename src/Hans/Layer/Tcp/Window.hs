@@ -10,7 +10,7 @@ import Hans.Message.Tcp
 
 import Control.Monad (mzero)
 import Data.Time.Clock.POSIX (POSIXTime)
-import Data.Word (Word16)
+import Data.Word (Word32)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -23,19 +23,19 @@ import qualified Data.Traversable as T
 -- | Remote window management.
 data RemoteWindow = RemoteWindow
   { rwSegments  :: OutSegments
-  , rwAvailable :: !Word16
-  , rwSize      :: !Word16
+  , rwAvailable :: !Word32
+  , rwSize      :: !Word32
   } deriving (Show)
 
 -- | The empty window, seeded with an initial size.
-emptyRemoteWindow :: Word16 -> RemoteWindow
+emptyRemoteWindow :: Word32 -> RemoteWindow
 emptyRemoteWindow size = RemoteWindow
   { rwSegments  = Seq.empty
   , rwAvailable = size
   , rwSize      = size
   }
 
-resizeWindow :: Word16 -> RemoteWindow -> RemoteWindow
+resizeWindow :: Word32 -> RemoteWindow -> RemoteWindow
 resizeWindow size win = win
   { rwSize      = size
   , rwAvailable = avail
@@ -63,10 +63,11 @@ receiveAck hdr win = do
   case Seq.viewr acks of
     _ Seq.:> seg -> do
       let len  = F.sum (outSize `fmap` acks)
+          size = tcpScaledWindow hdr
           win' = win
             { rwSegments  = rest
-            , rwSize      = tcpWindow hdr
-            , rwAvailable = min (tcpWindow hdr) (rwAvailable win + len)
+            , rwSize      = size
+            , rwAvailable = min size (rwAvailable win + len)
             }
       return (seg, win')
     Seq.EmptyR -> mzero
