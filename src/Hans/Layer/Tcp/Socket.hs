@@ -91,7 +91,7 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
         , sidRemoteHost = remote
         , sidRemotePort = remotePort
         }
-      sock = (emptyTcpSocket 0)
+      sock = (emptyTcpSocket 0 0)
         { tcpSocketId  = sid
         , tcpNotify    = Just $ \ success -> putMVar res $! if success
             then SocketResult Socket
@@ -126,7 +126,7 @@ listen tcp _src port = blockResult tcp $ \ res -> do
 
     Nothing -> do
       now <- time
-      let con = (emptyTcpSocket 0)
+      let con = (emptyTcpSocket 0 0)
             { tcpSocketId  = sid
             , tcpState     = Listen
             , tcpTimestamp = Just (emptyTimestamp now)

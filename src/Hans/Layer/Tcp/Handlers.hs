@@ -75,19 +75,19 @@ established remote _local hdr body = do
           -- connection ack'd
         | isSynAck hdr -> do
           modifyTcpSocket_ $ \ tcp -> tcp
-            { tcpState  = Established
-            , tcpOutMSS = fromMaybe (tcpInMSS tcp) (getMSS hdr)
-            , tcpOut    = resizeWindow (tcpScaledWindow hdr) (tcpOut tcp)
-            , tcpIn     = emptyLocalWindow (tcpSeqNum hdr)
-            , tcpSack   = sackSupported hdr
+            { tcpState       = Established
+            , tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
+            , tcpOut         = setSndWind (tcpWindow hdr)
+                             $ setSndWindScale (windowScale hdr)
+                             $ tcpOut tcp
+            , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+            , tcpSack        = sackSupported hdr
+            , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
             }
           advanceRcvNxt 1
           ack
 
           notify True
-
-          tcp <- getTcpSocket
-          outputS (print (tcpOutMSS tcp, tcpOut tcp))
 
       FinWait1
           -- 3-way close
@@ -233,21 +233,22 @@ listening remote _local hdr = do
   isn <- initialSeqNum
   listeningConnection parent $ do
     tcp <- getTcpSocket
-    let childSock = (emptyTcpSocket (tcpScaledWindow hdr))
-          { tcpParent    = Just parent
-          , tcpSocketId  = incomingSocketId remote hdr
-          , tcpState     = SynReceived
-          , tcpSndNxt    = isn
-          , tcpSndUna    = isn
-          , tcpIn        = emptyLocalWindow (tcpSeqNum hdr)
-          , tcpOutMSS    = fromMaybe defaultMSS (getMSS hdr)
-          , tcpTimestamp = do
+    let childSock = (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
+          { tcpParent      = Just parent
+          , tcpSocketId    = incomingSocketId remote hdr
+          , tcpState       = SynReceived
+          , tcpSndNxt      = isn
+          , tcpSndUna      = isn
+          , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+          , tcpOutMSS      = fromMaybe defaultMSS (getMSS hdr)
+          , tcpTimestamp   = do
               -- require that the parent had a timestamp
               ts <- tcpTimestamp tcp
               -- require that they have sent us a timestamp, before using them
               OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
               return ts { tsLastTimestamp = val }
-          , tcpSack      = sackSupported hdr
+          , tcpSack        = sackSupported hdr
+          , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
           }
     withChild childSock synAck
 
@@ -299,6 +300,11 @@ genSegments now tcp0 = loop Nothing Seq.empty tcp0
 getMSS :: TcpHeader -> Maybe Int64
 getMSS hdr = do
   OptMaxSegmentSize n <- findTcpOption OptTagMaxSegmentSize hdr
+  return (fromIntegral n)
+
+windowScale :: TcpHeader -> Int
+windowScale hdr = fromMaybe 0 $ do
+  OptWindowScaling n <- findTcpOption OptTagWindowScaling hdr
   return (fromIntegral n)
 
 sackSupported :: TcpHeader -> Bool

@@ -161,50 +161,52 @@ type Notify = Bool -> IO ()
 type Close = IO ()
 
 data TcpSocket = TcpSocket
-  { tcpParent     :: Maybe SocketId
-  , tcpSocketId   :: !SocketId
-  , tcpState      :: !ConnState
-  , tcpAcceptors  :: Seq.Seq Acceptor
-  , tcpNotify     :: Maybe Notify
-  , tcpSndNxt     :: !TcpSeqNum
-  , tcpSndUna     :: !TcpSeqNum
+  { tcpParent      :: Maybe SocketId
+  , tcpSocketId    :: !SocketId
+  , tcpState       :: !ConnState
+  , tcpAcceptors   :: Seq.Seq Acceptor
+  , tcpNotify      :: Maybe Notify
+  , tcpSndNxt      :: !TcpSeqNum
+  , tcpSndUna      :: !TcpSeqNum
 
-  , tcpUserClosed :: Bool
-  , tcpOut        :: RemoteWindow
-  , tcpOutBuffer  :: Buffer Outgoing
-  , tcpOutMSS     :: !Int64
-  , tcpIn         :: LocalWindow
-  , tcpInBuffer   :: Buffer Incoming
-  , tcpInMSS      :: !Int64
+  , tcpUserClosed  :: Bool
+  , tcpOut         :: RemoteWindow
+  , tcpOutBuffer   :: Buffer Outgoing
+  , tcpOutMSS      :: !Int64
+  , tcpIn          :: LocalWindow
+  , tcpInBuffer    :: Buffer Incoming
+  , tcpInMSS       :: !Int64
 
-  , tcpTimers     :: !TcpTimers
-  , tcpTimestamp  :: Maybe Timestamp
+  , tcpTimers      :: !TcpTimers
+  , tcpTimestamp   :: Maybe Timestamp
 
-  , tcpSack       :: Bool
+  , tcpSack        :: Bool
+  , tcpWindowScale :: Bool
   }
 
-emptyTcpSocket :: Word32 -> TcpSocket
-emptyTcpSocket sendWindow = TcpSocket
-  { tcpParent     = Nothing
-  , tcpSocketId   = emptySocketId
-  , tcpState      = Closed
-  , tcpAcceptors  = Seq.empty
-  , tcpNotify     = Nothing
-  , tcpSndNxt     = 0
-  , tcpSndUna     = 0
+emptyTcpSocket :: Word16 -> Int -> TcpSocket
+emptyTcpSocket sendWindow sendScale = TcpSocket
+  { tcpParent      = Nothing
+  , tcpSocketId    = emptySocketId
+  , tcpState       = Closed
+  , tcpAcceptors   = Seq.empty
+  , tcpNotify      = Nothing
+  , tcpSndNxt      = 0
+  , tcpSndUna      = 0
 
-  , tcpUserClosed = False
-  , tcpOut        = emptyRemoteWindow sendWindow
-  , tcpOutBuffer  = emptyBuffer 16384
-  , tcpOutMSS     = defaultMSS
-  , tcpIn         = emptyLocalWindow 0
-  , tcpInBuffer   = emptyBuffer 16384
-  , tcpInMSS      = defaultMSS
+  , tcpUserClosed  = False
+  , tcpOut         = emptyRemoteWindow sendWindow sendScale
+  , tcpOutBuffer   = emptyBuffer 16384
+  , tcpOutMSS      = defaultMSS
+  , tcpIn          = emptyLocalWindow 0 14600 0
+  , tcpInBuffer    = emptyBuffer 16384
+  , tcpInMSS       = defaultMSS
 
-  , tcpTimers     = emptyTcpTimers
-  , tcpTimestamp  = Nothing
+  , tcpTimers      = emptyTcpTimers
+  , tcpTimestamp   = Nothing
 
-  , tcpSack       = True
+  , tcpSack        = True
+  , tcpWindowScale = True
   }
 
 defaultMSS :: Int64

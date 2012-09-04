@@ -9,8 +9,9 @@ import Hans.Layer.Tcp.WaitBuffer
 import Hans.Message.Tcp
 
 import Control.Monad (mzero)
+import Data.Bits (shiftL)
 import Data.Time.Clock.POSIX (POSIXTime)
-import Data.Word (Word32)
+import Data.Word (Word16,Word32)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -22,28 +23,53 @@ import qualified Data.Traversable as T
 
 -- | Remote window management.
 data RemoteWindow = RemoteWindow
-  { rwSegments  :: OutSegments
-  , rwAvailable :: !Word32
-  , rwSize      :: !Word32
+  { rwSegments     :: OutSegments
+  , rwAvailable    :: !Word32
+  , rwSize         :: !Word32
+  , rwSndWind      :: !Word16
+  , rwSndWindScale :: !Int
   } deriving (Show)
 
 -- | The empty window, seeded with an initial size.
-emptyRemoteWindow :: Word32 -> RemoteWindow
-emptyRemoteWindow size = RemoteWindow
-  { rwSegments  = Seq.empty
-  , rwAvailable = size
-  , rwSize      = size
+emptyRemoteWindow :: Word16 -> Int -> RemoteWindow
+emptyRemoteWindow size scale = refreshRemoteWindow $! RemoteWindow
+  { rwSegments     = Seq.empty
+  , rwAvailable    = 0
+  , rwSize         = 0
+  , rwSndWind      = fromIntegral size
+  , rwSndWindScale = scale
   }
 
-resizeWindow :: Word32 -> RemoteWindow -> RemoteWindow
-resizeWindow size win = win
+-- | Recalculate internal constants of the remote window.
+refreshRemoteWindow :: RemoteWindow -> RemoteWindow
+refreshRemoteWindow rw = rw
   { rwSize      = size
   , rwAvailable = avail
   }
   where
-  used                = rwSize win - rwAvailable win
+  size                = fromIntegral (rwSndWind rw) `shiftL` rwSndWindScale rw
+  used                = rwSize rw - rwAvailable rw
   avail | used > size = 0
         | otherwise   = size - used
+
+
+-- | Set the Snd.Wind.Scale variable for the remote window.
+setSndWindScale :: Int -> RemoteWindow -> RemoteWindow
+setSndWindScale scale rw = refreshRemoteWindow $! rw
+  { rwSndWindScale = scale
+  }
+
+-- | Set the Snd.Wind variable for the remote window.
+setSndWind :: Word16 -> RemoteWindow -> RemoteWindow
+setSndWind size rw = refreshRemoteWindow $! rw
+  { rwSndWind = size
+  }
+
+-- | Adjust the internal available counter.
+releaseSpace :: Word32 -> RemoteWindow -> RemoteWindow
+releaseSpace len rw = rw
+  { rwAvailable = min (rwSize rw) (rwAvailable rw + len)
+  }
 
 -- | Add a segment to the window.
 addSegment :: OutSegment -> RemoteWindow -> RemoteWindow
@@ -63,12 +89,9 @@ receiveAck hdr win = do
   case Seq.viewr acks of
     _ Seq.:> seg -> do
       let len  = F.sum (outSize `fmap` acks)
-          size = tcpScaledWindow hdr
-          win' = win
-            { rwSegments  = rest
-            , rwSize      = size
-            , rwAvailable = min size (rwAvailable win + len)
-            }
+          win' = setSndWind (tcpWindow hdr)
+               $ releaseSpace len
+               $ win { rwSegments = rest }
       return (seg, win')
     Seq.EmptyR -> mzero
 
@@ -115,19 +138,30 @@ decrementRTO seg
 
 -- | Local window, containing a buffer of incoming packets, indexed by their
 -- sequence number, relative to RCV.NXT.
+--
+-- XXX make this respect the values of size and available
 data LocalWindow = LocalWindow
-  { lwBuffer :: Seq.Seq InSegment
-  , lwRcvNxt :: !TcpSeqNum
+  { lwBuffer       :: Seq.Seq InSegment
+  , lwRcvNxt       :: !TcpSeqNum
+  , lwAvailable    :: !Word32
+  , lwSize         :: !Word32
+  , lwRcvWind      :: !Word16
+  , lwRcvWindScale :: !Int
   } deriving (Show)
 
 -- | Empty local buffer, with an initial sequence number as the next expected
 -- sequence number.
-emptyLocalWindow :: TcpSeqNum -> LocalWindow
-emptyLocalWindow sn = LocalWindow
-  { lwBuffer = Seq.empty
-  , lwRcvNxt = sn
+emptyLocalWindow :: TcpSeqNum -> Word16 -> Int -> LocalWindow
+emptyLocalWindow sn size scale = refreshLocalWindow $! LocalWindow
+  { lwBuffer       = Seq.empty
+  , lwRcvNxt       = sn
+  , lwAvailable    = 0
+  , lwSize         = 0
+  , lwRcvWind      = size
+  , lwRcvWindScale = scale
   }
 
+-- | Produce a sequence of blocks for the sack option.
 localWindowSackBlocks :: LocalWindow -> Seq.Seq SackBlock
 localWindowSackBlocks lw = case Seq.viewl (fmap mkSackBlock (lwBuffer lw)) of
   b Seq.:< rest -> uncurry (Seq.|>) (F.foldl step (Seq.empty,b) rest)
@@ -137,11 +171,31 @@ localWindowSackBlocks lw = case Seq.viewl (fmap mkSackBlock (lwBuffer lw)) of
     | sbRight b == sbLeft b' = (bs,b { sbRight = sbRight b' })
     | otherwise              = (bs Seq.|> b, b')
 
-setRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
-setRcvNxt sn win = win { lwRcvNxt = sn }
+-- | Recalculate internal constants.
+refreshLocalWindow :: LocalWindow -> LocalWindow
+refreshLocalWindow lw = lw
+  { lwSize = fromIntegral (lwRcvWind lw) `shiftL` lwRcvWindScale lw
+  }
 
+-- | Updat the size of the remote window.
+setRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
+setRcvNxt sn lw = lw { lwRcvNxt = sn }
+
+-- | Add a sequence number to the value of Rcv.Nxt.
 addRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
 addRcvNxt sn win = win { lwRcvNxt = lwRcvNxt win + sn }
+
+-- | Set the Rcv.Wind variable for the local window.
+setRcvWind :: Word16 -> LocalWindow -> LocalWindow
+setRcvWind size lw = refreshLocalWindow $! lw
+  { lwRcvWind = size
+  }
+
+-- | Set the Rcv.Wind.Scale variable in the local window.
+setRcvWindScale :: Int -> LocalWindow -> LocalWindow
+setRcvWindScale scale lw = refreshLocalWindow $! lw
+  { lwRcvWindScale = scale
+  }
 
 -- | Process an incoming packet that needs to pass through the incoming queue.
 incomingPacket :: TcpHeader -> S.ByteString -> LocalWindow

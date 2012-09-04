@@ -33,7 +33,7 @@ fromInSegment  = inHeader &&& inBody
 -- that they will come out in the same order.
 prop_localOrdered = forAll packetStream $ \ segs ->
   let (hdr,_)         = Seq.index segs 0
-      win             = emptyLocalWindow (tcpSeqNum hdr)
+      win             = emptyLocalWindow (tcpSeqNum hdr) 14600 0
       step w (h,body) = addInSegment h body w
       win'            = F.foldl step win segs
       (segs',_)       = stepWindow win'
@@ -45,7 +45,7 @@ prop_localOrdered = forAll packetStream $ \ segs ->
 -- incoming packets.
 prop_localRandom = forAll packetStream $ \ segs ->
   let (hdr,_)         = Seq.index segs 0
-      win             = emptyLocalWindow (tcpSeqNum hdr)
+      win             = emptyLocalWindow (tcpSeqNum hdr) 14600 0
       step (h,body) w = addInSegment h body w
       win'            = F.foldr step win segs
       (segs',_)       = stepWindow win'
@@ -55,7 +55,7 @@ prop_localRandom = forAll packetStream $ \ segs ->
 -- packets should generate a single sack block.
 prop_sackOrdered = forAll packetStream $ \ segs ->
   let (hdr,_)         = Seq.index segs 0
-      win             = emptyLocalWindow (tcpSeqNum hdr)
+      win             = emptyLocalWindow (tcpSeqNum hdr) 14600 0
       step w (h,body) = addInSegment h body w
       win'            = F.foldl step win segs
    in Seq.length (localWindowSackBlocks win') == 1

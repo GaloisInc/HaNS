@@ -30,6 +30,9 @@ mkAck tcp = addSackOption tcp
             { tcpAck = True
             }
 
+
+-- Options ---------------------------------------------------------------------
+
 -- | Add the Sack option to a tcp packet.
 addSackOption :: TcpSocket -> TcpHeader -> TcpHeader
 addSackOption sock
@@ -43,6 +46,16 @@ addSackPermitted :: TcpSocket -> TcpHeader -> TcpHeader
 addSackPermitted sock
   | tcpSack sock = setTcpOption OptSackPermitted
   | otherwise    = id
+
+-- | Add the window scale option on the outgoing header.
+addWindowScale :: TcpSocket -> TcpHeader -> TcpHeader
+addWindowScale sock
+  | tcpWindowScale sock = setTcpOption
+                        $ OptWindowScaling
+                        $ fromIntegral
+                        $ rwSndWindScale
+                        $ tcpOut sock
+  | otherwise           = id
 
 
 -- Connection Refusal ----------------------------------------------------------
@@ -65,6 +78,7 @@ mkRstAck hdr = emptyTcpHeader
 
 mkSyn :: TcpSocket -> TcpHeader
 mkSyn tcp = addSackPermitted tcp
+          $ addWindowScale tcp
           $ setTcpOption (mkMSS tcp)
           $ (mkSegment tcp)
             { tcpSyn    = True
@@ -74,6 +88,7 @@ mkSyn tcp = addSackPermitted tcp
 -- | Construct a SYN ACK packet, in response to a SYN.
 mkSynAck :: TcpSocket -> TcpHeader
 mkSynAck tcp = addSackPermitted tcp
+             $ addWindowScale tcp
              $ setTcpOption (mkMSS tcp)
              $ (mkSegment tcp)
                { tcpSyn = True
