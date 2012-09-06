@@ -21,7 +21,7 @@ mkSegment tcp = case tcpTimestamp tcp of
     , tcpSeqNum     = tcpSndNxt tcp
     , tcpAckNum     = tcpRcvNxt tcp
       -- XXX this doesn't really reflect the right number
-    , tcpWindow     = fromIntegral (availableBytes (tcpInBuffer tcp))
+    , tcpWindow     = lwRcvWind (tcpIn tcp)
     }
 
 mkAck :: TcpSocket -> TcpHeader
