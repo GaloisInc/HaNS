@@ -166,38 +166,34 @@ outputSegment seg = do
 
 -- Flag Tests ------------------------------------------------------------------
 
-isSyn :: TcpHeader -> Bool
-isSyn hdr = foldr step (tcpSyn hdr) fields
+type SetFlag   = TcpHeader -> Bool
+type UnsetFlag = TcpHeader -> Bool
+
+testFlags :: [SetFlag] -> [UnsetFlag] -> TcpHeader -> Bool
+testFlags sfs ufs hdr = all test sfs && all (not . test) ufs
   where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpFin ]
+  test prj = prj hdr
+
+isSyn :: TcpHeader -> Bool
+isSyn  = testFlags [ tcpSyn ]
+                   [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpFin ]
 
 isSynAck :: TcpHeader -> Bool
-isSynAck hdr = foldr step (tcpSyn hdr && tcpAck hdr) fields
-  where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpFin ]
+isSynAck  = testFlags [ tcpSyn, tcpAck ]
+                      [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpFin ]
 
 isRstAck :: TcpHeader -> Bool
-isRstAck hdr = foldr step (tcpRst hdr && tcpAck hdr) fields
-  where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpSyn, tcpFin ]
+isRstAck = testFlags [ tcpRst, tcpAck ]
+                     [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpSyn, tcpFin ]
 
 isAck :: TcpHeader -> Bool
-isAck hdr = foldr step (tcpAck hdr) fields
-  where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn, tcpFin ]
+isAck = testFlags [ tcpAck ]
+                  [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn, tcpFin ]
 
 isFin :: TcpHeader -> Bool
-isFin hdr = foldr step (tcpFin hdr) fields
-  where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn ]
+isFin  = testFlags [ tcpFin ]
+                   [ tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn ]
 
 isFinAck :: TcpHeader -> Bool
-isFinAck hdr = foldr step (tcpFin hdr && tcpAck hdr) fields
-  where
-  step p r = r && not (p hdr)
-  fields   = [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn ]
+isFinAck  = testFlags [ tcpFin, tcpAck ]
+                      [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn ]
