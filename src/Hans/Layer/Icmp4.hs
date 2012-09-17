@@ -53,12 +53,12 @@ addIcmp4Handler h k = send h (handleAdd k)
 -- | Send a destination unreachable message to a host, with the given bytes as
 -- its body.  Don't send the message, if the message was broadcast.
 destUnreachable :: Icmp4Handle -> DestinationUnreachableCode
-                -> IP4Header -> S.ByteString -> IO ()
-destUnreachable h code hdr body
+                -> IP4Header -> Int -> S.ByteString -> IO ()
+destUnreachable h code hdr len body
   | ip4DestAddr hdr == broadcastIP4 = return ()
   | otherwise                       = send h $ do
     let bytes = runPut $ do
-          renderIP4Header hdr (S.length body)
+          renderIP4Header hdr len
           putByteString (S.take 8 body)
     sendPacket True (ip4SourceAddr hdr) (DestinationUnreachable code bytes)
 

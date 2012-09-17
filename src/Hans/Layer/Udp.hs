@@ -127,7 +127,7 @@ listening src hdr bytes = do
 unreachable :: IP4Header -> S.ByteString -> Udp ()
 unreachable hdr orig = do
   icmp4 <- icmp4Handle
-  output (Icmp4.destUnreachable icmp4 PortUnreachable hdr orig)
+  output (Icmp4.destUnreachable icmp4 PortUnreachable hdr (S.length orig) orig)
 
 handleOutgoing :: IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> Udp ()
 handleOutgoing dst mb dp bs = do
