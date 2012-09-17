@@ -32,7 +32,7 @@ handleIncomingTcp ip4 bytes = do
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (runGet getTcpPacket bytes)
   established src dst hdr body
-    `mplus` initializing src dst hdr
+    `mplus` listening ip4 hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty
 
 
@@ -220,22 +220,17 @@ enterTimeWait  = do
 
 -- Listening Connections -------------------------------------------------------
 
--- | Different states for connections that are being established.
-initializing :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-initializing remote local hdr
-  | isSyn hdr = listening remote local hdr
-  | otherwise = mzero
-
 -- | Handle an attempt to create a connection on a listening port.
-listening :: IP4 -> IP4 -> TcpHeader -> Tcp ()
-listening remote _local hdr = do
+listening :: IP4Header -> TcpHeader -> Tcp ()
+listening ip4 hdr = do
+  guard (isSyn hdr)
   let parent = listenSocketId (tcpDestPort hdr)
   isn <- initialSeqNum
   listeningConnection parent $ do
     tcp <- getTcpSocket
     let childSock = (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
           { tcpParent      = Just parent
-          , tcpSocketId    = incomingSocketId remote hdr
+          , tcpSocketId    = incomingSocketId (ip4SourceAddr ip4) hdr
           , tcpState       = SynReceived
           , tcpSndNxt      = isn
           , tcpSndUna      = isn
