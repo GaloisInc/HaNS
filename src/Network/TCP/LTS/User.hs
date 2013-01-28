@@ -304,6 +304,7 @@ process_connect local addr cont = do
            , t_advmss = adv_mss
            , tf_req_tstmp = tf_req_tstmp'
            }
+        , waiting_list = [(SockConnect local addr, cont)]
         }}
   insert_sock sock_id newsock
   emit_segs $ [TCPMessage $ make_syn_segment (clock h) newsock (ticks h)]

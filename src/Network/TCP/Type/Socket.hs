@@ -192,7 +192,7 @@ empty_host = Host
   , ticks           = Timestamp 0
   , clock           = 0
   , next_timers     = (0,0)
-  , local_ports     = [0..65535]
+  , local_ports     = [1..65535]
   , randomGenerator = mkStdGen 0xdeadbeef
   }
 

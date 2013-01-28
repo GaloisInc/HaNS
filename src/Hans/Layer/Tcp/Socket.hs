@@ -8,6 +8,7 @@ module Hans.Layer.Tcp.Socket (
   , acceptSocket
   , connect
   , sendSocket
+  , recvSocket
   , closeSocket
   , readBytes
   , readLine
@@ -192,7 +193,7 @@ readLine sock = do
   loop False 0 buf
   where
   loop cr ix buf
-    | L.null buf = fillBuffer cr ix buf
+    | L.length buf <= ix = fillBuffer cr ix buf
     | otherwise  =
       case L.index buf ix of
         0x0d          -> loop True (ix+1) buf

@@ -131,7 +131,10 @@ tcpFixedHeaderLength  = 5
 -- | Calculate the length of a TcpHeader, in 4-byte octets.
 tcpHeaderLength :: TcpHeader -> Int
 tcpHeaderLength hdr =
-  tcpFixedHeaderLength + tcpOptionsLength (tcpOptions hdr)
+  tcpFixedHeaderLength + optsLen
+  where
+    (len, left) = tcpOptionsLength (tcpOptions hdr)
+    optsLen = if left == 0 then len else len + 1
 
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
@@ -276,12 +279,9 @@ tcpOptionTag opt = case opt of
 
 -- | Get the length of a TcpOptions, in 4-byte words.  This rounds up to the
 -- nearest 4-byte word.
-tcpOptionsLength :: [TcpOption] -> Int
-tcpOptionsLength opts
-  | left == 0 = len
-  | otherwise = len + 1
+tcpOptionsLength :: [TcpOption] -> (Int, Int)
+tcpOptionsLength opts = foldl' step 0 opts `quotRem` 4
   where
-  (len,left)   = foldl' step 0 opts `quotRem` 4
   step acc opt = tcpOptionLength opt + acc
 
 tcpOptionLength :: TcpOption -> Int
@@ -297,8 +297,7 @@ tcpOptionLength (OptUnknown _ len _) = fromIntegral len
 -- 4-byte boundary.
 putTcpOptions :: Putter [TcpOption]
 putTcpOptions opts = do
-  let len     = tcpOptionsLength opts
-      left    = len `rem` 4
+  let (_, left)     = tcpOptionsLength opts
       padding
         | left == 0 = 0
         | otherwise = 4 - left
@@ -306,14 +305,15 @@ putTcpOptions opts = do
   when (padding > 0) (putByteString (S.replicate padding 0))
 
 putTcpOption :: Putter TcpOption
-putTcpOption opt =
+putTcpOption opt = do
+  putTcpOptionTag $ tcpOptionTag opt
   case opt of
     OptEndOfOptions       -> putWord8 0
     OptNoOption           -> putWord8 1
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
     OptTimestamp v r      -> putTimestamp v r
-    OptUnknown ty len bs  -> putUnknown ty len bs
+    OptUnknown _ len bs   -> putUnknown len bs
 
 -- | Parse in known tcp options.
 getTcpOptions :: Int -> Get [TcpOption]
@@ -378,7 +378,6 @@ getTimestamp  = label "Timestamp" $ isolate 9 $ do
 
 putTimestamp :: Word32 -> Word32 -> Put
 putTimestamp v r = do
-  putWord8 8
   putWord8 10
   putWord32be v
   putWord32be r
@@ -389,9 +388,8 @@ getUnknown ty = do
   body <- isolate (fromIntegral len - 2) (getBytes =<< remaining)
   return (OptUnknown ty len body)
 
-putUnknown :: Word8 -> Word8 -> S.ByteString -> Put
-putUnknown ty len body = do
-  putWord8 ty
+putUnknown :: Word8 -> S.ByteString -> Put
+putUnknown len body = do
   putWord8 len
   putByteString body
 
