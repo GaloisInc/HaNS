@@ -200,7 +200,7 @@ handleIncoming bs = do
     ]
 
   -- forward?
-  let payload = S.take plen rest
+  let payload = S.take (plen - hlen) rest
   routeLocal hdr payload `mplus` forward hdr (chunk payload)
 
 
