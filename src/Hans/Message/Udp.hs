@@ -2,6 +2,7 @@
 
 module Hans.Message.Udp where
 
+import Hans.Address.IP4
 import Hans.Message.Ip4
 import Hans.Utils
 import Hans.Utils.Checksum
@@ -38,12 +39,12 @@ data UdpHeader = UdpHeader
   { udpSourcePort :: !UdpPort
   , udpDestPort   :: !UdpPort
   , udpChecksum   :: !Word16
-  } deriving Show
+  } deriving (Eq,Show)
 
 udpHeaderSize :: Int
 udpHeaderSize  = 8
 
--- | Parse out a @UdpHeader@.
+-- | Parse out a @UdpHeader@, and the size of the payload.
 parseUdpHeader :: Get (UdpHeader,Int)
 parseUdpHeader  = do
   src <- parseUdpPort
@@ -51,7 +52,7 @@ parseUdpHeader  = do
   len <- getWord16be
   cs  <- getWord16be
   let hdr = UdpHeader src dst cs
-  return (hdr,fromIntegral len)
+  return (hdr,fromIntegral len - udpHeaderSize)
 
 -- | Render a @UdpHeader@.
 renderUdpHeader :: UdpHeader -> Int -> Put
@@ -67,7 +68,7 @@ renderUdpHeader hdr bodyLen = do
 parseUdpPacket :: Get (UdpHeader,S.ByteString)
 parseUdpPacket  = do
   (hdr,len) <- parseUdpHeader
-  label "UDPPacket" $ isolate (len - udpHeaderSize) $ do
+  label "UDPPacket" $ isolate len $ do
     bs <- getBytes =<< remaining
     return (hdr,bs)
 
@@ -82,7 +83,7 @@ renderUdpPacket hdr body mk = do
   -- pseudo header
   bodyLen  = fromIntegral (L.length body)
   ph       = mk (bodyLen + udpHeaderSize)
-  pcs      = computePartialChecksum 0 ph
+  pcs      = computePartialChecksum emptyPartialChecksum ph
 
   -- real header
   hdrBytes = runPut (renderUdpHeader (hdr { udpChecksum = 0 }) bodyLen)
@@ -90,3 +91,13 @@ renderUdpPacket hdr body mk = do
   -- body, and final checksum
   hcs = computePartialChecksum pcs hdrBytes
   cs  = finalizeChecksum (computePartialChecksumLazy hcs body)
+
+-- | Recreate the UDP checksum, given a rendered packet, and the source and
+-- destination.
+validateUdpChecksum :: IP4 -> IP4 -> S.ByteString -> Bool
+validateUdpChecksum src dst bytes =
+  finalizeChecksum (computePartialChecksum phcs bytes) == 0
+  where
+  phcs = computePartialChecksum emptyPartialChecksum
+       $ mkIP4PseudoHeader src dst udpProtocol
+       $ S.length bytes

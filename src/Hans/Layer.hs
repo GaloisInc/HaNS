@@ -12,7 +12,7 @@ import Control.Applicative (Applicative(..),Alternative(..))
 import Control.Monad (ap,MonadPlus(mzero,mplus))
 import Data.Monoid (Monoid(..))
 import Data.Time.Clock.POSIX
-import MonadLib (StateM(get,set))
+import MonadLib (StateM(get,set),BaseM(inBase))
 import qualified Control.Exception as X
 import qualified Data.Map as Map
 
@@ -53,15 +53,17 @@ runLayer :: LayerState i -> Layer i a -> Result i a
 runLayer i0 m = getLayer m i0 mempty Error success
   where success a i o = Result i a o
 
-loopLayer :: i -> IO msg -> (msg -> Layer i ()) -> IO ()
-loopLayer i0 msg k = loop (LayerState 0 i0)
+loopLayer :: String -> i -> IO msg -> (msg -> Layer i ()) -> IO ()
+loopLayer name i0 msg k =
+  loop (LayerState 0 i0) `X.finally` putStrLn (name ++ " died")
   where
   loop i = do
     a   <- msg
     now <- getPOSIXTime
     let res = runLayer (i {lsNow = now }) (k a)
-    _ <- X.evaluate res `X.catch` \ se ->
-           print (se :: X.SomeException) >> return res
+    _ <- X.evaluate res `X.catch` \ se -> do
+           putStrLn (name ++ show (se :: X.SomeException))
+           return res
     case res of
       Error        m -> runAction m >> loop i
       Result i' () m -> runAction m >> loop i'
@@ -89,6 +91,9 @@ instance MonadPlus (Layer i) where
 instance StateM (Layer i) i where
   get   = Layer (\i0 o0 _ k -> k (lsState i0) i0 o0)
   set i = Layer (\i0 o0 _ k -> k () (i0 { lsState = i }) o0)
+
+instance BaseM (Layer i) (Layer i) where
+  inBase = id
 
 
 -- Utilities -------------------------------------------------------------------

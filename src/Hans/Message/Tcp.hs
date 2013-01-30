@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Hans.Message.Tcp where
 
@@ -6,12 +7,11 @@ import Hans.Address.IP4 (IP4)
 import Hans.Message.Ip4 (mkIP4PseudoHeader,IP4Protocol(..))
 import Hans.Utils (chunk)
 import Hans.Utils.Checksum
-    (finalizeChecksum,computePartialChecksum,computeChecksum,pokeChecksum
-    ,computePartialChecksumLazy)
 
-import Control.Monad (when,unless,ap)
+import Control.Monad (unless,ap,replicateM_,replicateM)
 import Data.Bits ((.&.),setBit,testBit,shiftL,shiftR)
-import Data.List (foldl',find)
+import Data.List (find)
+import Data.Monoid (Monoid(..))
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
     ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut
@@ -20,6 +20,7 @@ import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
+import qualified Data.Foldable        as F
 
 
 -- Tcp Support Types -----------------------------------------------------------
@@ -29,7 +30,7 @@ tcpProtocol  = IP4Protocol 0x6
 
 newtype TcpPort = TcpPort
   { getPort :: Word16
-  } deriving (Eq,Ord,Read,Show)
+  } deriving (Eq,Ord,Read,Show,Num,Enum,Bounded)
 
 putTcpPort :: Putter TcpPort
 putTcpPort (TcpPort w16) = putWord16be w16
@@ -40,7 +41,11 @@ getTcpPort  = TcpPort `fmap` getWord16be
 
 newtype TcpSeqNum = TcpSeqNum
   { getSeqNum :: Word32
-  } deriving (Eq,Ord,Show)
+  } deriving (Eq,Ord,Show,Num,Bounded,Enum,Real,Integral)
+
+instance Monoid TcpSeqNum where
+  mempty  = 0
+  mappend = (+)
 
 putTcpSeqNum :: Putter TcpSeqNum
 putTcpSeqNum (TcpSeqNum w32) = putWord32be w32
@@ -49,15 +54,14 @@ getTcpSeqNum :: Get TcpSeqNum
 getTcpSeqNum  = TcpSeqNum `fmap` getWord32be
 
 
-newtype TcpAckNum = TcpAckNum
-  { getAckNum :: Word32
-  } deriving (Eq,Ord,Show)
+-- | An alias to TcpSeqNum, as these two are used in the same role.
+type TcpAckNum = TcpSeqNum
 
 putTcpAckNum :: Putter TcpAckNum
-putTcpAckNum (TcpAckNum w32) = putWord32be w32
+putTcpAckNum  = putTcpSeqNum
 
 getTcpAckNum :: Get TcpAckNum
-getTcpAckNum  = TcpAckNum `fmap` getWord32be
+getTcpAckNum  = getTcpSeqNum
 
 
 -- Tcp Header ------------------------------------------------------------------
@@ -98,7 +102,7 @@ data TcpHeader = TcpHeader
   , tcpChecksum      :: !Word16
   , tcpUrgentPointer :: !Word16
   , tcpOptions       :: [TcpOption]
-  } deriving Show
+  } deriving (Eq,Show)
 
 instance HasTcpOptions TcpHeader where
   findTcpOption tag hdr = findTcpOption tag (tcpOptions hdr)
@@ -108,8 +112,8 @@ emptyTcpHeader :: TcpHeader
 emptyTcpHeader  = TcpHeader
   { tcpSourcePort    = TcpPort 0
   , tcpDestPort      = TcpPort 0
-  , tcpSeqNum        = TcpSeqNum 0
-  , tcpAckNum        = TcpAckNum 0
+  , tcpSeqNum        = 0
+  , tcpAckNum        = 0
   , tcpCwr           = False
   , tcpEce           = False
   , tcpUrg           = False
@@ -128,11 +132,6 @@ emptyTcpHeader  = TcpHeader
 tcpFixedHeaderLength :: Int
 tcpFixedHeaderLength  = 5
 
--- | Calculate the length of a TcpHeader, in 4-byte octets.
-tcpHeaderLength :: TcpHeader -> Int
-tcpHeaderLength hdr =
-  tcpFixedHeaderLength + tcpOptionsLength (tcpOptions hdr)
-
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
 putTcpHeader :: Putter TcpHeader
@@ -141,17 +140,19 @@ putTcpHeader hdr = do
   putTcpPort (tcpDestPort hdr)
   putTcpSeqNum (tcpSeqNum hdr)
   putTcpAckNum (tcpAckNum hdr)
-  putWord8 (fromIntegral (tcpHeaderLength hdr) `shiftL` 4)
+  let (optLen,padding) = tcpOptionsLength (tcpOptions hdr)
+  putWord8 (fromIntegral ((tcpFixedHeaderLength + optLen) `shiftL` 4))
   putTcpControl hdr
   putWord16be (tcpWindow hdr)
   putWord16be 0
   putWord16be (tcpUrgentPointer hdr)
-  putTcpOptions (tcpOptions hdr)
+  mapM_ putTcpOption (tcpOptions hdr)
+  replicateM_ padding (putTcpOptionTag OptTagEndOfOptions)
 
 -- | Parse out a TcpHeader, and its length.  The resulting length is in bytes,
 -- and is derived from the data offset.
 getTcpHeader :: Get (TcpHeader,Int)
-getTcpHeader  = do
+getTcpHeader  = label "TcpHeader" $ do
   src    <- getTcpPort
   dst    <- getTcpPort
   seqNum <- getTcpSeqNum
@@ -163,7 +164,7 @@ getTcpHeader  = do
   cs     <- getWord16be
   urgent <- getWord16be
   let optsLen = len - tcpFixedHeaderLength
-  opts   <- getTcpOptions optsLen
+  opts   <- label "options" (isolate (optsLen `shiftL` 2) getTcpOptions)
   let hdr = setTcpControl cont emptyTcpHeader
         { tcpSourcePort    = src
         , tcpDestPort      = dst
@@ -172,7 +173,7 @@ getTcpHeader  = do
         , tcpWindow        = win
         , tcpChecksum      = cs
         , tcpUrgentPointer = urgent
-        , tcpOptions       = opts
+        , tcpOptions       = filter (/= OptEndOfOptions) opts
         }
   return (hdr,len * 4)
 
@@ -212,11 +213,16 @@ class HasTcpOptions a where
   findTcpOption :: TcpOptionTag -> a -> Maybe TcpOption
   setTcpOption  :: TcpOption    -> a -> a
 
+setTcpOptions :: HasTcpOptions a => [TcpOption] -> a -> a
+setTcpOptions opts a = foldr setTcpOption a opts
+
 data TcpOptionTag
   = OptTagEndOfOptions
   | OptTagNoOption
   | OptTagMaxSegmentSize
   | OptTagWindowScaling
+  | OptTagSackPermitted
+  | OptTagSack
   | OptTagTimestamp
   | OptTagUnknown !Word8
     deriving (Eq,Show)
@@ -229,6 +235,8 @@ getTcpOptionTag  = do
     1 -> OptTagNoOption
     2 -> OptTagMaxSegmentSize
     3 -> OptTagWindowScaling
+    4 -> OptTagSackPermitted
+    5 -> OptTagSack
     8 -> OptTagTimestamp
     _ -> OptTagUnknown ty
 
@@ -239,6 +247,8 @@ putTcpOptionTag tag =
     OptTagNoOption       -> 1
     OptTagMaxSegmentSize -> 2
     OptTagWindowScaling  -> 3
+    OptTagSackPermitted  -> 4
+    OptTagSack           -> 5
     OptTagTimestamp      -> 8
     OptTagUnknown ty     -> ty
 
@@ -261,73 +271,73 @@ data TcpOption
   | OptNoOption
   | OptMaxSegmentSize !Word16
   | OptWindowScaling !Word8
+  | OptSackPermitted
+  | OptSack [SackBlock]
   | OptTimestamp !Word32 !Word32
   | OptUnknown !Word8 !Word8 !S.ByteString
-    deriving Show
+    deriving (Show,Eq)
+
+data SackBlock = SackBlock
+  { sbLeft  :: !TcpSeqNum
+  , sbRight :: !TcpSeqNum
+  } deriving (Show,Eq)
 
 tcpOptionTag :: TcpOption -> TcpOptionTag
 tcpOptionTag opt = case opt of
   OptEndOfOptions{}   -> OptTagEndOfOptions
   OptNoOption{}       -> OptTagNoOption
   OptMaxSegmentSize{} -> OptTagMaxSegmentSize
+  OptSackPermitted{}  -> OptTagSackPermitted
+  OptSack{}           -> OptTagSack
   OptWindowScaling{}  -> OptTagWindowScaling
   OptTimestamp{}      -> OptTagTimestamp
   OptUnknown ty _ _   -> OptTagUnknown ty
 
--- | Get the length of a TcpOptions, in 4-byte words.  This rounds up to the
--- nearest 4-byte word.
-tcpOptionsLength :: [TcpOption] -> Int
+-- | Get the rendered length of a list of TcpOptions, in 4-byte words, and the
+-- number of padding bytes required.  This rounds up to the nearest 4-byte word.
+tcpOptionsLength :: [TcpOption] -> (Int,Int)
 tcpOptionsLength opts
-  | left == 0 = len
-  | otherwise = len + 1
+  | left == 0 = (len,0)
+  | otherwise = (len + 1,4 - left)
   where
-  (len,left)   = foldl' step 0 opts `quotRem` 4
-  step acc opt = tcpOptionLength opt + acc
+  (len,left) = F.sum (fmap tcpOptionLength opts) `quotRem` 4
 
 tcpOptionLength :: TcpOption -> Int
-tcpOptionLength OptEndOfOptions{}    = 1
-tcpOptionLength OptNoOption{}        = 1
-tcpOptionLength OptMaxSegmentSize{}  = 4
-tcpOptionLength OptWindowScaling{}   = 3
-tcpOptionLength OptTimestamp{}       = 10
-tcpOptionLength (OptUnknown _ len _) = fromIntegral len
+tcpOptionLength opt = case opt of
+  OptEndOfOptions{}   -> 1
+  OptNoOption{}       -> 1
+  OptMaxSegmentSize{} -> 4
+  OptWindowScaling{}  -> 3
+  OptSackPermitted{}  -> 2
+  OptSack bs          -> sackLength bs
+  OptTimestamp{}      -> 10
+  OptUnknown _ len _  -> fromIntegral len
 
-
--- | Render out the tcp options, and pad with zeros if they don't fall on a
--- 4-byte boundary.
-putTcpOptions :: Putter [TcpOption]
-putTcpOptions opts = do
-  let len     = tcpOptionsLength opts
-      left    = len `rem` 4
-      padding
-        | left == 0 = 0
-        | otherwise = 4 - left
-  mapM_ putTcpOption opts
-  when (padding > 0) (putByteString (S.replicate padding 0))
 
 putTcpOption :: Putter TcpOption
-putTcpOption opt =
+putTcpOption opt = do
+  putTcpOptionTag (tcpOptionTag opt)
   case opt of
-    OptEndOfOptions       -> putWord8 0
-    OptNoOption           -> putWord8 1
+    OptEndOfOptions       -> return ()
+    OptNoOption           -> return ()
     OptMaxSegmentSize mss -> putMaxSegmentSize mss
     OptWindowScaling w    -> putWindowScaling w
+    OptSackPermitted      -> putSackPermitted
+    OptSack bs            -> putSack bs
     OptTimestamp v r      -> putTimestamp v r
-    OptUnknown ty len bs  -> putUnknown ty len bs
+    OptUnknown _ len bs   -> putUnknown len bs
 
 -- | Parse in known tcp options.
-getTcpOptions :: Int -> Get [TcpOption]
-getTcpOptions len = label ("Tcp Options (" ++ show len ++ ")")
-                  $ isolate (len * 4) loop
+getTcpOptions :: Get [TcpOption]
+getTcpOptions  = label "Tcp Options" loop
   where
   loop = do
     left <- remaining
-    if left <= 0 then return [] else body
+    if left > 0 then body else return []
 
   body = do
-    opt  <- getTcpOption
+    opt <- getTcpOption
     case opt of
-      OptNoOption -> loop
 
       OptEndOfOptions -> do
         skip =<< remaining
@@ -345,6 +355,8 @@ getTcpOption  = do
     OptTagNoOption       -> return OptNoOption
     OptTagMaxSegmentSize -> getMaxSegmentSize
     OptTagWindowScaling  -> getWindowScaling
+    OptTagSackPermitted  -> getSackPermitted
+    OptTagSack           -> getSack
     OptTagTimestamp      -> getTimestamp
     OptTagUnknown ty     -> getUnknown ty
 
@@ -358,6 +370,44 @@ putMaxSegmentSize :: Putter Word16
 putMaxSegmentSize w16 = do
   putWord8 4
   putWord16be w16
+
+getSackPermitted :: Get TcpOption
+getSackPermitted  = label "Sack Permitted" $ isolate 1 $ do
+  len <- getWord8
+  unless (len == 2) (fail ("Unexpected length: " ++ show len))
+  return OptSackPermitted
+
+putSackPermitted :: Put
+putSackPermitted  = do
+  putWord8 2
+
+getSack :: Get TcpOption
+getSack  = label "Sack" $ do
+  len <- getWord8
+  let edgeLen = fromIntegral len - 2
+  OptSack `fmap` isolate edgeLen (replicateM (edgeLen `shiftR` 3) getSackBlock)
+
+putSack :: Putter [SackBlock]
+putSack bs = do
+  putWord8 (fromIntegral (sackLength bs))
+  mapM_ putSackBlock bs
+
+getSackBlock :: Get SackBlock
+getSackBlock  = do
+  l <- getTcpSeqNum
+  r <- getTcpSeqNum
+  return $! SackBlock
+    { sbLeft  = l
+    , sbRight = r
+    }
+
+putSackBlock :: Putter SackBlock
+putSackBlock sb = do
+  putTcpSeqNum (sbLeft sb)
+  putTcpSeqNum (sbRight sb)
+
+sackLength :: [SackBlock] -> Int
+sackLength bs = length bs * 8 + 2
 
 getWindowScaling :: Get TcpOption
 getWindowScaling  = label "Window Scaling" $ isolate 2 $ do
@@ -378,7 +428,6 @@ getTimestamp  = label "Timestamp" $ isolate 9 $ do
 
 putTimestamp :: Word32 -> Word32 -> Put
 putTimestamp v r = do
-  putWord8 8
   putWord8 10
   putWord32be v
   putWord32be r
@@ -389,9 +438,8 @@ getUnknown ty = do
   body <- isolate (fromIntegral len - 2) (getBytes =<< remaining)
   return (OptUnknown ty len body)
 
-putUnknown :: Word8 -> Word8 -> S.ByteString -> Put
-putUnknown ty len body = do
-  putWord8 ty
+putUnknown :: Word8 -> S.ByteString -> Put
+putUnknown len body = do
   putWord8 len
   putByteString body
 
@@ -427,7 +475,7 @@ computeTcpChecksumIP4 src dst hdr body =
   -- its creation time.
   (cs `seq` unsafePerformIO (pokeChecksum cs hdrbs 16), cs)
   where
-  phcs  = computePartialChecksum 0
+  phcs  = computePartialChecksum emptyPartialChecksum
         $ mkIP4PseudoHeader src dst tcpProtocol
         $ S.length hdrbs + fromIntegral (L.length body)
   hdrbs = runPut (putTcpHeader hdr { tcpChecksum = 0 })
@@ -436,13 +484,11 @@ computeTcpChecksumIP4 src dst hdr body =
 
 -- | Re-create the checksum, minimizing duplication of the original, rendered
 -- TCP packet.
-recreateTcpChecksumIP4 :: IP4 -> IP4 -> S.ByteString -> Word16
-recreateTcpChecksumIP4 src dst bytes = computeChecksum hdrcs rest
+validateTcpChecksumIP4 :: IP4 -> IP4 -> S.ByteString -> Bool
+validateTcpChecksumIP4 src dst bytes =
+  finalizeChecksum (computePartialChecksum phcs bytes) == 0
   where
-  phcs         = computePartialChecksum 0
-               $ mkIP4PseudoHeader src dst tcpProtocol
-               $ S.length bytes
-  (hdrbs,rest) = S.splitAt 18 bytes
-  hdrbs'       = unsafePerformIO (pokeChecksum 0 (S.copy hdrbs) 16)
-  hdrcs        = computePartialChecksum phcs hdrbs'
+  phcs = computePartialChecksum emptyPartialChecksum
+       $ mkIP4PseudoHeader src dst tcpProtocol
+       $ S.length bytes
 

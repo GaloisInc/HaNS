@@ -77,7 +77,7 @@ dhcpIP4Handler ns bytes =
       | ip4Protocol hdr == udpProtocol -> queue
       | otherwise                      -> return ()
       where
-      queue = queueUdp (udpHandle ns) (ip4SourceAddr hdr) (ip4DestAddr hdr)
+      queue = queueUdp (udpHandle ns) hdr
             $ S.take (len - ihl)
             $ S.drop ihl bytes
 
@@ -207,7 +207,11 @@ mkIpBytes srcAddr dstAddr srcPort dstPort payload = do
     renderUdpPacket udpHdr payload mk
 
   ipBytes  <- do
-    let ipHdr = emptyIP4Header udpProtocol srcAddr dstAddr
+    let ipHdr = emptyIP4Header
+          { ip4SourceAddr = srcAddr
+          , ip4DestAddr   = dstAddr
+          , ip4Protocol   = udpProtocol
+          }
     renderIP4Packet ipHdr udpBytes
 
   return ipBytes

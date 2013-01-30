@@ -1,5 +1,5 @@
 name:           hans
-version:        2.2.0.0
+version:        2.3.0.0
 cabal-version:  >= 1.8
 license:        BSD3
 license-file:   LICENSE
@@ -50,71 +50,60 @@ library
 
         ghc-options:            -Wall
         hs-source-dirs:         src
-        build-depends:          base       >= 4.0.0.0 && < 5.0.0.0,
-                                cereal     >= 0.3.5.0 && < 0.4.0.0,
-                                bytestring >= 0.9.1.0 && < 0.10.0.0,
-                                containers >= 0.3.0.0 && < 0.5.0.0,
-                                monadLib   >= 3.6.0   && < 3.7.0,
-                                time       >= 1.1.0.0 && < 1.5.0.0,
-                                fingertree >= 0.0.1.0 && < 0.1.0.0
+        build-depends:          base       >= 4.0.0.0,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                fingertree >= 0.0.1.0
 
         if flag(word32-in-random)
-                build-depends:  random     >= 1.0.1.0 && < 1.1.0.0
+                build-depends:  random     >= 1.0.1.0
                 cpp-options:    -DWORD32_IN_RANDOM
         else
-                build-depends:  random     >= 1.0.0.0 && < 1.0.1.0
+                build-depends:  random     >= 1.0.0.0
 
         exposed-modules:        Data.PrefixTree,
                                 Hans.Address,
-                                Hans.Utils.Checksum,
-                                Hans.Layer,
-                                Hans.NetworkStack,
-                                Hans.Ports,
-                                Hans.Utils,
+                                Hans.Address.IP4,
+                                Hans.Address.Mac,
                                 Hans.Channel,
                                 Hans.DhcpClient,
-                                Hans.Simple,
-                                Hans.Layer.Tcp,
+                                Hans.Layer,
+                                Hans.Layer.Arp,
                                 Hans.Layer.Arp.Table,
+                                Hans.Layer.Ethernet,
+                                Hans.Layer.IP4,
+                                Hans.Layer.IP4.Fragmentation,
+                                Hans.Layer.IP4.Routing,
+                                Hans.Layer.Icmp4,
+                                Hans.Layer.Tcp,
                                 Hans.Layer.Tcp.Handlers,
+                                Hans.Layer.Tcp.Messages,
                                 Hans.Layer.Tcp.Monad,
                                 Hans.Layer.Tcp.Socket,
-                                Hans.Layer.IP4,
-                                Hans.Layer.Udp,
-                                Hans.Layer.Arp,
-                                Hans.Layer.IP4.Routing,
-                                Hans.Layer.IP4.Fragmentation,
+                                Hans.Layer.Tcp.Timers,
+                                Hans.Layer.Tcp.Types,
+                                Hans.Layer.Tcp.WaitBuffer,
+                                Hans.Layer.Tcp.Window,
                                 Hans.Layer.Timer,
-                                Hans.Layer.Ethernet,
-                                Hans.Layer.Icmp4,
+                                Hans.Layer.Udp,
+                                Hans.Message.Arp,
+                                Hans.Message.Dhcp4,
+                                Hans.Message.Dhcp4Codec,
+                                Hans.Message.Dhcp4Options,
+                                Hans.Message.EthernetFrame,
+                                Hans.Message.Icmp4,
+                                Hans.Message.Ip4,
                                 Hans.Message.Tcp,
                                 Hans.Message.Types,
                                 Hans.Message.Udp,
-                                Hans.Message.Ip4,
-                                Hans.Message.EthernetFrame,
-                                Hans.Message.Arp,
-                                Hans.Message.Dhcp4Codec,
-                                Hans.Message.Dhcp4,
-                                Hans.Message.Dhcp4Options,
-                                Hans.Message.Icmp4,
-                                Hans.Address.Mac,
-                                Hans.Address.IP4,
-                                Network.TCP.Aux.SockMonad,
-                                Network.TCP.Aux.Param,
-                                Network.TCP.Aux.Misc,
-                                Network.TCP.Aux.Output,
-                                Network.TCP.LTS.User,
-                                Network.TCP.LTS.Out,
-                                Network.TCP.LTS.InPassive,
-                                Network.TCP.LTS.InActive,
-                                Network.TCP.LTS.InMisc,
-                                Network.TCP.LTS.In,
-                                Network.TCP.LTS.InData,
-                                Network.TCP.Type.Socket,
-                                Network.TCP.Type.Syscall,
-                                Network.TCP.Type.Datagram,
-                                Network.TCP.Type.Base,
-                                Network.TCP.Type.Timer
+                                Hans.NetworkStack,
+                                Hans.Ports,
+                                Hans.Simple,
+                                Hans.Utils,
+                                Hans.Utils.Checksum
 
 
 executable test
@@ -131,19 +120,62 @@ executable test
         other-modules:  WebServer
         ghc-options:    -Wall
         hs-source-dirs: example
-        build-depends:  base       >= 4.0.0.0 && < 5.0.0.0,
-                        cereal     >= 0.3.5.0 && < 0.4.0.0,
-                        bytestring >= 0.9.1.0 && < 0.10.0.0,
-                        containers >= 0.3.0.0 && < 0.5.0.0,
-                        monadLib   >= 3.6.0   && < 3.7.0,
-                        time       >= 1.1.0.0 && < 1.5.0.0,
-                        old-locale >= 1.0.0.0 && < 1.1.0.0,
+        build-depends:  base       >= 4.0.0.0,
+                        cereal     >= 0.3.5.2,
+                        bytestring >= 0.9.1.0,
+                        containers >= 0.3.0.0,
+                        monadLib   >= 3.6.0,
+                        time       >= 1.1.0.0,
+                        old-locale >= 1.0.0.0,
                         hans
 
         if flag(halvm)
-                build-depends:      XenDevice     >= 1.0.0 && < 1.3.0,
-                                    RendezvousLib >= 1.0.0 && < 1.3.0,
-                                    HALVMCore     >= 1.0.0 && < 1.3.0,
-                                    communication >= 1.0.0 && < 1.3.0
+                build-depends:      XenDevice     >= 1.0.0,
+                                    RendezvousLib >= 1.0.0,
+                                    HALVMCore     >= 1.0.0,
+                                    communication >= 1.0.0
         else
                 ghc-options: -threaded
+
+executable tcp-test
+        if flag(halvm)
+                buildable:      False
+        else
+                buildable:      True
+                main-is:        Main.hs
+                hs-source-dirs: tcp-test
+                ghc-options:    -Wall -threaded
+                build-depends:  base       >= 4.0.0.0,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                hans
+
+test-suite hans-tests
+        hs-source-dirs: tests
+        main-is:        Main.hs
+        type:           exitcode-stdio-1.0
+        other-modules:  Icmp4,
+                        Icmp4.Packet,
+                        IP4,
+                        IP4.Addr,
+                        IP4.Packet,
+                        Tcp,
+                        Tcp.Packet,
+                        Tcp.Window,
+                        Udp,
+                        Udp.Packet,
+                        Utils
+        build-depends:  base                       >= 4,
+                        containers                 >= 0.3,
+                        bytestring                 >= 0.9.1,
+                        old-locale                 >= 1,
+                        test-framework-quickcheck2 >= 0.2.12.2,
+                        test-framework             >= 0.6,
+                        QuickCheck                 >= 2.4.2,
+                        random                     >= 1.0.1.1,
+                        cereal                     >= 0.3.5.2,
+                        hans

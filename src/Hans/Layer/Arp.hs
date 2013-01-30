@@ -43,7 +43,7 @@ runArpLayer :: ArpHandle -> EthernetHandle -> TimerHandle -> IO ()
 runArpLayer h eth th = do
   addEthernetHandler eth (EtherType 0x0806) (send h . handleIncoming)
   let i = emptyArpState h eth th
-  void (forkIO (loopLayer i (receive h) id))
+  void (forkIO (loopLayer "arp" i (receive h) id))
 
 
 -- External Interface ----------------------------------------------------------

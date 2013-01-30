@@ -17,6 +17,7 @@ module Hans.Layer.Udp (
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
+import Hans.Message.Icmp4
 import Hans.Message.Ip4
 import Hans.Message.Udp
 import Hans.Ports
@@ -25,6 +26,7 @@ import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Icmp4 as Icmp4
 
 import Control.Concurrent (forkIO)
+import Control.Monad (guard,mplus)
 import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
@@ -38,13 +40,13 @@ type UdpHandle = Channel (Udp ())
 runUdpLayer :: UdpHandle -> IP4.IP4Handle -> Icmp4.Icmp4Handle -> IO ()
 runUdpLayer h ip4 icmp4 = do
   IP4.addIP4Handler ip4 udpProtocol (queueUdp h)
-  void (forkIO (loopLayer (emptyUdp4State ip4 icmp4) (receive h) id))
+  void (forkIO (loopLayer "udp" (emptyUdp4State ip4 icmp4) (receive h) id))
 
 sendUdp :: UdpHandle -> IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> IO ()
 sendUdp h !dst mb !dp !bs = send h (handleOutgoing dst mb dp bs)
 
-queueUdp :: UdpHandle -> IP4 -> IP4 -> S.ByteString -> IO ()
-queueUdp h !src !dst !bs = send h (handleIncoming src dst bs)
+queueUdp :: UdpHandle -> IP4Header -> S.ByteString -> IO ()
+queueUdp h !ip4 !bs = send h (handleIncoming ip4 bs)
 
 addUdpHandler :: UdpHandle -> UdpPort -> Handler -> IO ()
 addUdpHandler h !sp k = send h (handleAddHandler sp k)
@@ -82,8 +84,8 @@ instance ProvidesHandlers UdpState UdpPort Handler where
 ip4Handle :: Udp IP4.IP4Handle
 ip4Handle  = udpIp4Handle `fmap` get
 
---icmp4Handle :: Udp Icmp4Handle
---icmp4Handle  = udpIcmp4Handle `fmap` get
+icmp4Handle :: Udp Icmp4.Icmp4Handle
+icmp4Handle  = udpIcmp4Handle `fmap` get
 
 maybePort :: Maybe UdpPort -> Udp UdpPort
 maybePort (Just p) = return p
@@ -109,13 +111,23 @@ handleRemoveHandler sp = do
   pm' `seq` set state { udpPorts = pm' }
   removeHandler sp
 
+handleIncoming :: IP4Header -> S.ByteString -> Udp ()
+handleIncoming ip4 bs = do
+  let src = ip4SourceAddr ip4
+  guard (validateUdpChecksum src (ip4DestAddr ip4) bs)
+  (hdr,bytes) <- liftRight (runGet parseUdpPacket bs)
+  listening src hdr bytes `mplus` unreachable ip4 bs
 
-handleIncoming :: IP4 -> IP4 -> S.ByteString -> Udp ()
-handleIncoming src _dst bs = do
-  (hdr,pkt) <- liftRight (runGet parseUdpPacket bs)
-  h         <- getHandler (udpDestPort hdr)
-  output (h src (udpSourcePort hdr) pkt)
+listening :: IP4 -> UdpHeader -> S.ByteString -> Udp ()
+listening src hdr bytes = do
+  h <- getHandler (udpDestPort hdr)
+  output (h src (udpSourcePort hdr) bytes)
 
+-- | Deliver a destination unreachable mesasge, via the icmp layer.
+unreachable :: IP4Header -> S.ByteString -> Udp ()
+unreachable hdr orig = do
+  icmp4 <- icmp4Handle
+  output (Icmp4.destUnreachable icmp4 PortUnreachable hdr (S.length orig) orig)
 
 handleOutgoing :: IP4 -> Maybe UdpPort -> UdpPort -> L.ByteString -> Udp ()
 handleOutgoing dst mb dp bs = do
@@ -123,5 +135,10 @@ handleOutgoing dst mb dp bs = do
   ip4 <- ip4Handle
   let hdr = UdpHeader sp dp 0
   output $ IP4.withIP4Source ip4 dst $ \ src -> do
+    let ip4Hdr = emptyIP4Header
+          { ip4DestAddr     = dst
+          , ip4Protocol     = udpProtocol
+          , ip4DontFragment = False
+          }
     pkt <- renderUdpPacket hdr bs (mkIP4PseudoHeader src dst udpProtocol)
-    IP4.sendIP4Packet ip4 udpProtocol dst pkt
+    IP4.sendIP4Packet ip4 ip4Hdr pkt

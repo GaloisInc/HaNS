@@ -1,212 +1,252 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
 module Hans.Layer.Tcp.Socket (
-    -- * Socket Layer
     Socket()
-  , SocketError(..)
-  , listenPort
-  , acceptSocket
-  , connect
-  , sendSocket
-  , closeSocket
-  , readBytes
-  , readLine
-
-  , getSocketHost
-  , getSocketPort
+  , sockRemoteHost
+  , sockRemotePort
+  , sockLocalPort
+  , connect, ConnectError(..)
+  , listen, ListenError(..)
+  , accept, AcceptError(..)
+  , close, CloseError(..)
+  , sendBytes
+  , recvBytes
   ) where
 
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
+import Hans.Layer.Tcp.Handlers
+import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
-import Hans.Message.Tcp (TcpPort(..))
+import Hans.Layer.Tcp.Types
+import Hans.Layer.Tcp.Window
+import Hans.Message.Tcp
 
-import Network.TCP.LTS.User (tcp_process_user_request)
-import Network.TCP.Type.Base
-    (IPAddr(..),SocketID(..),TCPAddr(..))
-import Network.TCP.Type.Syscall (SockReq(..),SockRsp(..))
-
-import Control.Exception (throwIO,Exception)
-import Control.Concurrent (MVar,newMVar,newEmptyMVar,takeMVar,putMVar)
+import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
+import Control.Exception (Exception,throwIO)
+import Control.Monad (mplus)
+import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
-import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
 
--- Socket Layer ----------------------------------------------------------------
+
+-- Socket Interface ------------------------------------------------------------
 
 data Socket = Socket
-  { socketTcpHandle :: TcpHandle
-  , socketId        :: !SocketID
-  , socketBuffer    :: MVar L.ByteString
-  , socketPort      :: !TcpPort
-  , socketHost      :: !IP4
+  { sockHandle :: TcpHandle
+  , sockId     :: !SocketId
   }
 
-mkSocket :: TcpHandle -> SocketID -> MVar L.ByteString -> Socket
-mkSocket tcp sid@(SocketID (_,TCPAddr (IPAddr a,p))) buf = Socket
-  { socketTcpHandle = tcp
-  , socketId        = sid
-  , socketBuffer    = buf
-  , socketPort      = port
-  , socketHost      = addr
-  }
-  where
-  port = TcpPort p
-  addr = convertFromWord32 a
+-- | The remote host of a socket.
+sockRemoteHost :: Socket -> IP4
+sockRemoteHost  = sidRemoteHost . sockId
 
-getSocketHost :: Socket -> IP4
-getSocketHost  = socketHost
+-- | The remote port of a socket.
+sockRemotePort :: Socket -> TcpPort
+sockRemotePort  = sidRemotePort . sockId
 
-getSocketPort :: Socket -> TcpPort
-getSocketPort  = socketPort
+-- | The local port of a socket.
+sockLocalPort :: Socket -> TcpPort
+sockLocalPort  = sidLocalPort . sockId
 
-data SocketResult a
-  = SocketResult a
-  | SocketError SocketError
+data SocketGenericError = SocketGenericError
+    deriving (Show,Typeable)
 
-data SocketError
-  = ListenError String
-  | AcceptError String
-  | ConnectError String
-  | SendError String
-  | RecvError String
-  | CloseError String
-    deriving (Typeable,Show)
+instance Exception SocketGenericError
 
-instance Exception SocketError
-
--- | Block on a socket operation, waiting for the TCP layer to finish an action.
+-- | Block on the result of a Tcp action, from a different context.
+--
+-- XXX closing the socket should also unblock any other threads waiting on
+-- socket actions
 blockResult :: TcpHandle -> (MVar (SocketResult a) -> Tcp ()) -> IO a
-blockResult tcp k = do
-  var <- newEmptyMVar
-  send tcp (k var)
-  sr  <- takeMVar var
-  case sr of
+blockResult tcp action = do
+  res     <- newEmptyMVar
+  -- XXX put a more meaningful error here
+  let unblock = output (putMVar res (socketError SocketGenericError))
+  send tcp (action res `mplus` unblock)
+  sockRes <- takeMVar res
+  case sockRes of
     SocketResult a -> return a
-    SocketError se -> throwIO se
+    SocketError e  -> throwIO e
 
--- | Call @output@ if the @Tcp@ action returns a @Just@.
-maybeOutput :: Tcp (Maybe (IO ())) -> Tcp ()
-maybeOutput body = do
-  mb <- body
+
+-- Connect ---------------------------------------------------------------------
+
+-- | A connect call failed.
+data ConnectError = ConnectionRefused
+    deriving (Show,Typeable)
+
+instance Exception ConnectError
+
+-- | Connect to a remote host.
+connect :: TcpHandle -> IP4 -> TcpPort -> Maybe TcpPort -> IO Socket
+connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
+  localPort <- maybe allocatePort return mbLocal
+  isn       <- initialSeqNum
+  now       <- time
+  let sid  = SocketId
+        { sidLocalPort  = localPort
+        , sidRemoteHost = remote
+        , sidRemotePort = remotePort
+        }
+      sock = (emptyTcpSocket 0 0)
+        { tcpSocketId  = sid
+        , tcpNotify    = Just $ \ success -> putMVar res $! if success
+            then SocketResult Socket
+              { sockHandle = tcp
+              , sockId     = sid
+              }
+            else socketError ConnectionRefused
+        , tcpState     = Listen
+        , tcpSndNxt    = isn
+        , tcpSndUna    = isn
+        , tcpTimestamp = Just (emptyTimestamp now)
+        }
+  -- XXX how should the retry/backoff be implemented
+  runSock sock $ do
+    syn
+    setState SynSent
+
+
+-- Listen ----------------------------------------------------------------------
+
+data ListenError = ListenError
+    deriving (Show,Typeable)
+
+instance Exception ListenError
+
+-- | Open a new listening socket that can be used to accept new connections.
+listen :: TcpHandle -> IP4 -> TcpPort -> IO Socket
+listen tcp _src port = blockResult tcp $ \ res -> do
+  let sid = listenSocketId port
+  mb <- lookupConnection sid
   case mb of
-    Just m  -> output m
-    Nothing -> return ()
 
--- | Listen on a port.
-listenPort :: TcpHandle -> TcpPort -> IO Socket
-listenPort tcp (TcpPort port) = blockResult tcp $ \ res -> do
-  let mkError = SocketError . ListenError
-      k rsp = case rsp of
-        SockNew sid   -> do
-          buf <- newMVar L.empty
-          putMVar res (SocketResult (mkSocket tcp sid buf))
-        SockError err -> putMVar res (mkError err)
-        _             -> putMVar res (mkError "Unexpected response")
-  maybeOutput (tcp_process_user_request (SockListen port,k))
+    Nothing -> do
+      now <- time
+      let con = (emptyTcpSocket 0 0)
+            { tcpSocketId  = sid
+            , tcpState     = Listen
+            , tcpTimestamp = Just (emptyTimestamp now)
+            }
+      addConnection sid con
+      output $ putMVar res $ SocketResult Socket
+        { sockHandle = tcp
+        , sockId     = sid
+        }
 
--- | Accept a client connection on a @Socket@.
-acceptSocket :: Socket -> IO Socket
-acceptSocket sock = blockResult (socketTcpHandle sock) $ \ res -> do
-  let mkError = SocketError . AcceptError
-      k rsp = case rsp of
-        SockNew sid   -> do
-          buf <- newMVar L.empty
-          putMVar res (SocketResult (mkSocket (socketTcpHandle sock) sid buf))
-        SockError err -> putMVar res (mkError err)
-        _             -> putMVar res (mkError "Unexpected response")
-  maybeOutput (tcp_process_user_request (SockAccept (socketId sock),k))
-
--- | Connect to a remote server.
-connect :: TcpHandle -> IP4 -> IP4 -> TcpPort -> IO Socket
-connect tcp src dst (TcpPort port) = blockResult tcp $ \ res -> do
-  let us   = IPAddr (convertToWord32 src)
-      them = TCPAddr (IPAddr (convertToWord32 dst), port)
-      mkError = SocketError . ConnectError
-      k rsp = case rsp of
-        SockNew sid   -> do
-          buf <- newMVar L.empty
-          putMVar res (SocketResult (mkSocket tcp sid buf))
-        SockError err -> putMVar res (mkError err)
-        _             -> putMVar res (mkError "Unexpected response")
-  maybeOutput (tcp_process_user_request (SockConnect us them,k))
-
--- | Send on a @Socket@.
-sendSocket :: Socket -> S.ByteString -> IO ()
-sendSocket sock bytes = blockResult (socketTcpHandle sock) $ \ res -> do
-  let mkError = SocketError . SendError
-      k rsp = putMVar res $! case rsp of
-        SockOK        -> SocketResult ()
-        SockError err -> mkError err
-        _             -> mkError "Unexpected response"
-  maybeOutput (tcp_process_user_request (SockSend (socketId sock) bytes,k))
-
--- | Receive from a @Socket@.
-recvSocket :: Socket -> IO S.ByteString
-recvSocket sock = blockResult (socketTcpHandle sock) $ \ res -> do
-  let mkError = SocketError . RecvError
-      k rsp = putMVar res $! case rsp of
-        SockData bs   -> SocketResult bs
-        SockError err -> mkError err
-        _             -> mkError "Unexpected response"
-  maybeOutput (tcp_process_user_request (SockRecv (socketId sock),k))
-
--- | Close a socket.
-closeSocket :: Socket -> IO ()
-closeSocket sock =
-  blockResult (socketTcpHandle sock) $ \ res -> do
-  let mkError = SocketError . CloseError
-      k rsp = putMVar res $! case rsp of
-        SockOK        -> SocketResult ()
-        SockError err -> mkError err
-        _             -> mkError "Unexpected response"
-  maybeOutput (tcp_process_user_request (SockClose (socketId sock),k))
+    Just _ -> output (putMVar res (socketError ListenError))
 
 
--- Derived Interaction ---------------------------------------------------------
+-- Accept ----------------------------------------------------------------------
 
--- | Read n bytes from a @Socket@.
-readBytes :: Socket -> Int -> IO S.ByteString
-readBytes sock goal = do
-  buf <- takeMVar (socketBuffer sock)
-  loop buf (fromIntegral (L.length buf))
+data AcceptError = AcceptError
+    deriving (Show,Typeable)
+
+instance Exception AcceptError
+
+-- | Accept new incoming connections on a listening socket.
+accept :: Socket -> IO Socket
+accept sock = blockResult (sockHandle sock) $ \ res ->
+  establishedConnection (sockId sock) $ do
+    state <- getState
+    case state of
+      Listen -> pushAcceptor $ \ sid -> putMVar res $ SocketResult $ Socket
+        { sockHandle = sockHandle sock
+        , sockId     = sid
+        }
+
+      -- XXX need more descriptive errors
+      _ -> outputS (putMVar res (socketError AcceptError))
+
+
+-- Close -----------------------------------------------------------------------
+
+data CloseError = CloseError
+    deriving (Show,Typeable)
+
+instance Exception CloseError
+
+-- | Close an open socket.
+close :: Socket -> IO ()
+close sock = blockResult (sockHandle sock) $ \ res -> do
+  let unblock   = output . putMVar res
+      connected = establishedConnection (sockId sock) $ do
+        userClose
+        state <- getState
+        case state of
+
+          Established -> do
+            finAck
+            setState FinWait1
+
+          -- XXX how should we close a listening socket?
+          Listen -> do
+            setState Closed
+
+          _ -> return ()
+
+        return (SocketResult ())
+
+  -- closing a connection that doesn't exist causes a CloseError
+  unblock =<< connected `mplus` return (socketError CloseError)
+
+userClose :: Sock ()
+userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
+
+
+-- Writing ---------------------------------------------------------------------
+
+-- | Send bytes over a socket.  The number of bytes delivered will be returned,
+-- with 0 representing the other side having closed the connection.
+sendBytes :: Socket -> L.ByteString -> IO Int64
+sendBytes sock bytes = blockResult (sockHandle sock) $ \ res ->
+  let result len  = putMVar res (SocketResult len)
+      performSend = establishedConnection (sockId sock) $ do
+        let wakeup continue
+              | continue  = send (sockHandle sock) performSend
+              | otherwise = result 0
+        mbWritten <- modifyTcpSocket (outputBytes bytes wakeup)
+        case mbWritten of
+          Just len -> outputS (result len)
+          Nothing  -> return ()
+        outputSegments
+   in performSend
+
+outputBytes :: L.ByteString -> Wakeup -> TcpSocket -> (Maybe Int64, TcpSocket)
+outputBytes bytes wakeup tcp
+  | tcpState tcp == Established = (mbWritten,    tcp { tcpOutBuffer = bufOut })
+  | otherwise                   = (Just written, tcp { tcpOutBuffer = flushed })
   where
-  loop buf len
-    | goal <= len = finish buf
-    | otherwise   = do
-      bytes <- recvSocket sock
-      if S.null bytes
-         then finish buf
-         else loop (buf `L.append` L.fromChunks [bytes]) (len + S.length bytes)
+  (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
+  flushed            = flushWaiting bufOut
+  written            = fromMaybe 0 mbWritten
 
-  finish buf = do
-    let (as,bs) = L.splitAt (fromIntegral goal) buf
-    putMVar (socketBuffer sock) bs
-    return (S.concat (L.toChunks as))
 
--- | Read until a CRLF, LF or CR are read.
-readLine :: Socket -> IO S.ByteString
-readLine sock = do
-  buf <- takeMVar (socketBuffer sock)
-  loop False 0 buf
+-- Reading ---------------------------------------------------------------------
+
+-- | Receive bytes from a socket.  A null ByteString represents the other end
+-- closing the socket.
+recvBytes :: Socket -> Int64 -> IO L.ByteString
+recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
+  let result bytes = putMVar res (SocketResult bytes)
+      performRecv  = establishedConnection (sockId sock) $ do
+        let wakeup continue
+              | continue  = send (sockHandle sock) performRecv
+              | otherwise = result L.empty
+        mbRead <- modifyTcpSocket (inputBytes len wakeup)
+        case mbRead of
+          Just bytes -> outputS (result bytes)
+          Nothing    -> return ()
+   in performRecv
+
+inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
+inputBytes len wakeup tcp
+  | tcpState tcp == Established = (mbRead,     tcp { tcpInBuffer = bufIn   })
+  | otherwise                   = (Just bytes, tcp { tcpInBuffer = flushed })
   where
-  loop cr ix buf
-    | L.null buf = fillBuffer cr ix buf
-    | otherwise  =
-      case L.index buf ix of
-        0x0d          -> loop True (ix+1) buf
-        0x0a          -> finish (ix+1) buf
-        _ | cr        -> finish ix buf
-          | otherwise -> loop False (ix+1) buf
-
-  fillBuffer cr ix buf = do
-    bytes <- recvSocket sock
-    if S.null bytes
-       then finish ix buf
-       else loop cr ix (buf `L.append` L.fromChunks [bytes])
-
-  finish ix buf = do
-    let (as,bs) = L.splitAt ix buf
-    putMVar (socketBuffer sock) bs
-    return (S.concat (L.toChunks as))
+  (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
+  flushed        = flushWaiting bufIn
+  bytes          = fromMaybe L.empty mbRead

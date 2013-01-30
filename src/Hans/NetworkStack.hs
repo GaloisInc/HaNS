@@ -4,27 +4,33 @@
 module Hans.NetworkStack (
     module Hans.NetworkStack
 
-    -- * Re-exported
+    -- * Re-exported Types
+  , UdpPort
+  , TcpPort
 
-    -- ** TCP
+    -- * Sockets
   , Tcp.Socket()
-  , Tcp.SocketError(..)
-  , Tcp.acceptSocket
-  , Tcp.connect
-  , Tcp.sendSocket
-  , Tcp.readBytes
-  , Tcp.readLine
-  , Tcp.closeSocket
 
-  , Tcp.getSocketHost
-  , Tcp.getSocketPort
+    -- ** Socket Functions
+  , Tcp.sockRemoteHost
+  , Tcp.sockRemotePort
+  , Tcp.sockLocalPort
+  , Tcp.accept
+  , Tcp.close
+  , Tcp.sendBytes
+  , Tcp.recvBytes
+
+    -- ** Socket Exceptions
+  , Tcp.AcceptError(..)
+  , Tcp.CloseError(..)
+  , Tcp.ConnectError(..)
   ) where
 
 import Hans.Address (getMaskComponents)
 import Hans.Address.IP4 (IP4Mask,IP4)
 import Hans.Address.Mac (Mac)
 import Hans.Channel (newChannel)
-import Hans.Message.Ip4 (IP4Protocol)
+import Hans.Message.Ip4 (IP4Protocol,IP4Header)
 import Hans.Message.Tcp (TcpPort)
 import Hans.Message.Udp (UdpPort)
 import qualified Hans.Layer.Arp as Arp
@@ -32,6 +38,7 @@ import qualified Hans.Layer.Ethernet as Eth
 import qualified Hans.Layer.Icmp4 as Icmp4
 import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Tcp as Tcp
+import qualified Hans.Layer.Tcp.Socket as Tcp
 import qualified Hans.Layer.Timer as Timer
 import qualified Hans.Layer.Udp as Udp
 
@@ -207,7 +214,7 @@ removeUdpHandler :: HasUdp stack => stack -> UdpPort -> IO ()
 removeUdpHandler stack = Udp.removeUdpHandler (udpHandle stack)
 
 -- | Inject a packet into the UDP layer.
-queueUdp :: HasUdp stack => stack -> IP4 -> IP4 -> S.ByteString -> IO ()
+queueUdp :: HasUdp stack => stack -> IP4Header -> S.ByteString -> IO ()
 queueUdp stack = Udp.queueUdp (udpHandle stack)
 
 -- | Send a UDP packet.
@@ -228,9 +235,13 @@ startTcpLayer :: (HasIP4 stack, HasTimer stack, HasTcp stack) => stack -> IO ()
 startTcpLayer stack =
   Tcp.runTcpLayer (tcpHandle stack) (ip4Handle stack) (timerHandle stack)
 
--- | Open a socket.
-listenPort :: HasTcp stack => stack -> TcpPort -> IO Tcp.Socket
-listenPort stack = Tcp.listenPort (tcpHandle stack)
+-- | Listen for incoming connections.
+listen :: HasTcp stack => stack -> IP4 -> TcpPort -> IO Tcp.Socket
+listen stack = Tcp.listen (tcpHandle stack)
+
+-- | Make a remote connection.
+connect :: HasTcp stack => stack -> IP4 -> TcpPort -> Maybe TcpPort -> IO Tcp.Socket
+connect stack = Tcp.connect (tcpHandle stack)
 
 
 -- Timer Layer Interface -------------------------------------------------------

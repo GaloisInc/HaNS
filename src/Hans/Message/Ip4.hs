@@ -2,17 +2,15 @@
 
 module Hans.Message.Ip4 where
 
-import Hans.Address.IP4 (IP4)
+import Hans.Address.IP4 (IP4(..))
 import Hans.Utils
 import Hans.Utils.Checksum
 
 import Control.Monad (unless)
 import Data.Int (Int64)
-import Data.Serialize (Serialize(..))
-import Data.Serialize.Get
-    (Get,getWord8,getWord16be,isolate,label,getByteString)
-import Data.Serialize.Put
-    (Put,runPut,putWord8,putWord16be,putWord16le,putByteString)
+import Data.Serialize
+    (Serialize(..),Get,getWord8,getWord16be,isolate,label,getByteString
+    ,Put,runPut,putWord8,putWord16be,putByteString)
 import Data.Bits (Bits((.&.),(.|.),testBit,setBit,shiftR,shiftL,bit))
 import Data.Word (Word8,Word16)
 import qualified Data.ByteString as S
@@ -48,7 +46,7 @@ data IP4Header = IP4Header
   { ip4Version        :: !Word8
   , ip4TypeOfService  :: !Word8
   , ip4Ident          :: !Ident
-  , ip4MayFragment    :: Bool
+  , ip4DontFragment   :: Bool
   , ip4MoreFragments  :: Bool
   , ip4FragmentOffset :: !Word16
   , ip4TimeToLive     :: !Word8
@@ -57,21 +55,21 @@ data IP4Header = IP4Header
   , ip4SourceAddr     :: !IP4
   , ip4DestAddr       :: !IP4
   , ip4Options        :: [IP4Option]
-  } deriving Show
+  } deriving (Eq,Show)
 
-emptyIP4Header :: IP4Protocol -> IP4 -> IP4 -> IP4Header
-emptyIP4Header prot src dst = IP4Header
+emptyIP4Header :: IP4Header
+emptyIP4Header  = IP4Header
   { ip4Version        = 4
   , ip4TypeOfService  = 0
   , ip4Ident          = 0
-  , ip4MayFragment    = False
+  , ip4DontFragment   = False
   , ip4MoreFragments  = False
   , ip4FragmentOffset = 0
   , ip4TimeToLive     = 127
-  , ip4Protocol       = prot
+  , ip4Protocol       = IP4Protocol 0
   , ip4Checksum       = 0
-  , ip4SourceAddr     = src
-  , ip4DestAddr       = dst
+  , ip4SourceAddr     = IP4 0 0 0 0
+  , ip4DestAddr       = IP4 0 0 0 0
   , ip4Options        = []
   }
 
@@ -162,7 +160,7 @@ parseIP4Packet = do
           { ip4Version        = ver
           , ip4TypeOfService  = tos
           , ip4Ident          = ident
-          , ip4MayFragment    = flags `testBit` 1
+          , ip4DontFragment   = flags `testBit` 1
           , ip4MoreFragments  = flags `testBit` 0
           , ip4FragmentOffset = off * 8
           , ip4TimeToLive     = ttl
@@ -181,10 +179,9 @@ renderIP4Header hdr pktlen = do
   putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
   putWord8    (ip4TypeOfService hdr)
   putWord16be (fromIntegral pktlen + fromIntegral ihl)
-
-  putWord16le (getIdent (ip4Ident hdr))
-  let frag | ip4MayFragment hdr = (`setBit` 1)
-           | otherwise          = id
+  put         (getIdent (ip4Ident hdr))
+  let frag | ip4DontFragment hdr = (`setBit` 1)
+           | otherwise           = id
   let morefrags | ip4MoreFragments hdr = (`setBit` 0)
                 | otherwise            = id
   let flags = frag (morefrags 0)
@@ -241,7 +238,7 @@ data IP4Option = IP4Option
   , ip4OptionClass  :: !Word8
   , ip4OptionNum    :: !Word8
   , ip4OptionData   :: S.ByteString
-  } deriving Show
+  } deriving (Eq,Show)
 
 
 ip4OptionSize :: IP4Option -> Int

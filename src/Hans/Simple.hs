@@ -55,5 +55,10 @@ renderIp4 :: Ident -> Maybe MTU -> IP4Protocol -> IP4 -> IP4 -> L.ByteString
           -> IO [L.ByteString]
 renderIp4 ident mb prot source dest payload = do
   i <- nextIdent ident
-  let hdr = (emptyIP4Header prot source dest) { ip4Ident = i }
+  let hdr = emptyIP4Header
+        { ip4Protocol   = prot
+        , ip4SourceAddr = source
+        , ip4DestAddr   = dest
+        , ip4Ident      = i
+        }
   mapM (uncurry renderIP4Packet) (splitPacket (fromMTU mb) hdr payload)
