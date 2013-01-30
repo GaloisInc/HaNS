@@ -154,13 +154,10 @@ executable tcp-test
                                 old-locale >= 1.0.0.0,
                                 hans
 
-flag build-tests
-        default:        False
-        description:    Build the test suite
-
-executable hans-tests
+test-suite hans-tests
         hs-source-dirs: tests
         main-is:        Main.hs
+        type:           exitcode-stdio-1.0
         other-modules:  Icmp4,
                         Icmp4.Packet,
                         IP4,
@@ -172,17 +169,13 @@ executable hans-tests
                         Udp,
                         Udp.Packet,
                         Utils
-        if flag(build-tests)
-                buildable:      True
-                build-depends:  base                       >= 4,
-                                containers                 >= 0.3,
-                                bytestring                 >= 0.9.1,
-                                old-locale                 >= 1,
-                                test-framework-quickcheck2 >= 0.2.12.2,
-                                test-framework             >= 0.6,
-                                QuickCheck                 >= 2.4.2,
-                                random                     >= 1.0.1.1,
-                                cereal                     >= 0.3.5.2,
-                                hans
-        else
-                buildable:      False
+        build-depends:  base                       >= 4,
+                        containers                 >= 0.3,
+                        bytestring                 >= 0.9.1,
+                        old-locale                 >= 1,
+                        test-framework-quickcheck2 >= 0.2.12.2,
+                        test-framework             >= 0.6,
+                        QuickCheck                 >= 2.4.2,
+                        random                     >= 1.0.1.1,
+                        cereal                     >= 0.3.5.2,
+                        hans
