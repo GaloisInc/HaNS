@@ -1,6 +1,6 @@
 #!/bin/sh
 
-set -e
+set -ev
 
 cabal-dev install-deps --enable-tests
 cabal-dev configure --enable-tests
