@@ -2,5 +2,7 @@
 
 set -e
 
-cabal-dev install -fbuild-tests
-cabal-dev/bin/hans-tests --jxml=results.xml
+cabal-dev install-deps
+cabal-dev configure --enable-tests
+cabal-dev build
+cabal-dev test --test-option='--jxml=results.xml'
