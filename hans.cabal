@@ -21,6 +21,10 @@ flag bounded-channels
         default:        False
         description:    Use bounded channels for message passing
 
+flag enable-tests
+        default:        False
+        description:    Enable building the test suite
+
 flag example
         default:        False
         description:    Build the example program
@@ -154,28 +158,35 @@ executable tcp-test
                                 old-locale >= 1.0.0.0,
                                 hans
 
-test-suite hans-tests
-        hs-source-dirs: tests
-        main-is:        Main.hs
-        type:           exitcode-stdio-1.0
-        other-modules:  Icmp4,
-                        Icmp4.Packet,
-                        IP4,
-                        IP4.Addr,
-                        IP4.Packet,
-                        Tcp,
-                        Tcp.Packet,
-                        Tcp.Window,
-                        Udp,
-                        Udp.Packet,
-                        Utils
-        build-depends:  base                       >= 4,
-                        containers                 >= 0.3,
-                        bytestring                 >= 0.9.1,
-                        old-locale                 >= 1,
-                        test-framework-quickcheck2 >= 0.2.12.2,
-                        test-framework             >= 0.6,
-                        QuickCheck                 >= 2.4.2,
-                        random                     >= 1.0.1.1,
-                        cereal                     >= 0.3.5.2,
-                        hans
+executable test-suite
+
+        if flag(enable-tests)
+                buildable:      True
+                hs-source-dirs: tests
+                main-is:        Main.hs
+
+                other-modules:  Icmp4,
+                                Icmp4.Packet,
+                                IP4,
+                                IP4.Addr,
+                                IP4.Packet,
+                                Tcp,
+                                Tcp.Packet,
+                                Tcp.Window,
+                                Udp,
+                                Udp.Packet,
+                                Utils
+
+                build-depends:  base                       >= 4,
+                                containers                 >= 0.3,
+                                bytestring                 >= 0.9.1,
+                                old-locale                 >= 1,
+                                test-framework-quickcheck2 >= 0.2.12.2,
+                                test-framework             >= 0.6,
+                                QuickCheck                 >= 2.4.2,
+                                random                     >= 1.0.1.1,
+                                cereal                     >= 0.3.5.2,
+                                hans
+
+        else
+                buildable:      False
