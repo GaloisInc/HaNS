@@ -159,11 +159,11 @@ executable tcp-test
                                 hans
 
 executable test-suite
+        hs-source-dirs: tests
+        main-is:        Main.hs
 
         if flag(enable-tests)
                 buildable:      True
-                hs-source-dirs: tests
-                main-is:        Main.hs
 
                 other-modules:  Icmp4,
                                 Icmp4.Packet,

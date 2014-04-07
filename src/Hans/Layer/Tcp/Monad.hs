@@ -12,6 +12,7 @@ import Hans.Layer.Timer
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
+import Control.Applicative(Applicative,Alternative)
 import Control.Monad (MonadPlus(..),guard,when)
 import Data.Time.Clock.POSIX (POSIXTime)
 import MonadLib (get,set,StateT,runStateT,inBase)
@@ -154,7 +155,7 @@ closePort port = modifyHost (releasePort port)
 
 newtype Sock a = Sock
   { unSock :: StateT TcpSocket Tcp a
-  } deriving (Functor,Monad,MonadPlus)
+  } deriving (Alternative,Applicative,Functor,Monad,MonadPlus)
 
 inTcp :: Tcp a -> Sock a
 inTcp  = Sock . inBase
