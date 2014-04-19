@@ -1,5 +1,5 @@
 name:           hans
-version:        2.3.0.0
+version:        2.4.0.0
 cabal-version:  >= 1.8
 license:        BSD3
 license-file:   LICENSE
@@ -39,7 +39,8 @@ flag word32-in-random
 
 library
         if(flag(halvm))
-                build-depends:          XenDevice, communication
+                build-depends:          XenDevice >= 2.0.0 && < 3.0.0,
+                                        HALVMCore >= 2.0.0 && < 3.0.0
                 exposed-modules:        Hans.Device.Xen,
                                         Hans.Device.Ivc
         else
@@ -134,19 +135,17 @@ executable test
                         hans
 
         if flag(halvm)
-                build-depends:      XenDevice     >= 1.0.0,
-                                    RendezvousLib >= 1.0.0,
-                                    HALVMCore     >= 1.0.0,
-                                    communication >= 1.0.0
+                build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
+                                    HALVMCore     >= 2.0.0 && < 3.0.0
         else
                 ghc-options: -threaded
 
 executable tcp-test
+        main-is:        Main.hs
         if flag(halvm)
                 buildable:      False
         else
                 buildable:      True
-                main-is:        Main.hs
                 hs-source-dirs: tcp-test
                 ghc-options:    -Wall -threaded
                 build-depends:  base       >= 4.0.0.0,
@@ -164,7 +163,6 @@ executable test-suite
 
         if flag(enable-tests)
                 buildable:      True
-
                 other-modules:  Icmp4,
                                 Icmp4.Packet,
                                 IP4,

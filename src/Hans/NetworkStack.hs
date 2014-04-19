@@ -24,6 +24,7 @@ module Hans.NetworkStack (
   , Tcp.AcceptError(..)
   , Tcp.CloseError(..)
   , Tcp.ConnectError(..)
+  , Tcp.ListenError(..)
   ) where
 
 import Hans.Address (getMaskComponents)

@@ -1,30 +1,19 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
-
+{-# LANGUAGE FlexibleContexts #-}
 module Hans.Device.Ivc (
     ivcSend
   , ivcReceiveLoop
-  , Bytes(getBytes)
   ) where
 
 import Hans.Layer.Ethernet (EthernetHandle,queueEthernet)
-
-import Communication.IVC as IVC (put,OutChannelEx,get,InChannelEx,Bin)
+import Communication.IVC as IVC
 import Control.Monad (forever,when)
-import Data.Serialize (Serialize(get,put),getByteString,putByteString,remaining)
 import qualified Data.ByteString as S
 
-newtype Bytes = Bytes
-  { getBytes :: S.ByteString
-  } deriving Show
+ivcSend :: IVC.WriteableChan c S.ByteString => c -> S.ByteString -> IO ()
+ivcSend chan = IVC.put chan
 
-instance Serialize Bytes where
-  get = Bytes `fmap` (getByteString =<< remaining)
-  put = putByteString . getBytes
-
-ivcSend :: OutChannelEx Bin Bytes -> S.ByteString -> IO ()
-ivcSend chan = IVC.put chan . Bytes
-
-ivcReceiveLoop :: InChannelEx Bin Bytes -> EthernetHandle -> IO ()
-ivcReceiveLoop chan eth = forever $ do
-  Bytes bs <- IVC.get chan
-  when (S.length bs > 14) (queueEthernet eth bs)
+ivcReceiveLoop :: IVC.ReadableChan c S.ByteString => c -> EthernetHandle -> IO ()
+ivcReceiveLoop chan eth = forever $
+  do bs <- IVC.get chan
+     when (S.length bs > 14) (queueEthernet eth bs)
