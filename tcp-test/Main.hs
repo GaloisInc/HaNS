@@ -12,6 +12,7 @@ import Control.Monad (forever,when,unless)
 import System.Environment (getArgs)
 import qualified Control.Exception as X
 import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Char8 as LC
 
 
 localAddr :: IP4
@@ -41,12 +42,12 @@ client ns = body `X.catch` \ ConnectionRefused ->
 
     sock <- connect ns (IP4 192 168 90 1) 8000 local
     putStrLn "Connected!"
-    sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
+    _ <- sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
     putStrLn "request in..."
 
     let loop = do
           bytes <- recvBytes sock 1024
-          L.putStrLn bytes
+          LC.putStrLn bytes
           unless (L.null bytes) loop
     loop
 
@@ -60,16 +61,16 @@ server ns = do
 
   forever $ do
     putStrLn "accepting"
-    client <- accept sock
+    conn <- accept sock
     _ <- forkIO $ do
-      putStrLn ("Got one: " ++ show (sockRemoteHost client))
+      putStrLn ("Got one: " ++ show (sockRemoteHost conn))
       forever $ do
-        buf <- recvBytes client 512
+        buf <- recvBytes conn 512
         when (L.null buf) $ do
           putStrLn "Client closed connection"
-          close client
+          close conn
           killThread =<< myThreadId
-        _ <- sendBytes client buf
+        _ <- sendBytes conn buf
         return ()
     return ()
 
@@ -85,7 +86,7 @@ sleep s = threadDelay (s * 1000 * 1000)
 initEthernetDevice :: NetworkStack -> IO Mac
 initEthernetDevice ns = do
   let mac = Mac 0x52 0x54 0x00 0x12 0x34 0x56
-  Just dev <- openTapDevice "tap0"
+  Just dev <- openTapDevice "tap6"
   addDevice ns mac (tapSend dev) (tapReceiveLoop dev)
   return mac
 
