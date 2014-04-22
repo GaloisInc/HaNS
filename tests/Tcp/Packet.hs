@@ -67,7 +67,7 @@ packetStream  = do
 
 
 arbitraryTcpPort :: Gen TcpPort
-arbitraryTcpPort  = arbitrarySizedIntegral
+arbitraryTcpPort  = TcpPort `fmap` arbitrarySizedIntegral
 
 -- | Generate a completely arbitrary header.  This may be a semantically
 -- incorrect header, and is mainly useful for testing the parser.
