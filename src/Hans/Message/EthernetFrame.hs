@@ -9,10 +9,11 @@ module Hans.Message.EthernetFrame (
   ) where
 
 import Hans.Address.Mac (Mac,parseMac,renderMac)
+import Hans.Utils (chunk)
 
 import Control.Applicative ((<$>),(<*>))
 import Data.Serialize.Get (Get,remaining,getWord16be,getBytes)
-import Data.Serialize.Put (Putter,Put,putWord16be,putLazyByteString)
+import Data.Serialize.Put (Putter,putWord16be,runPut)
 import Data.Word (Word16)
 import Numeric (showHex)
 import qualified Data.ByteString.Lazy as L
@@ -50,9 +51,10 @@ parseEthernetFrame = (,) <$> header <*> (getBytes =<< remaining)
         <*> parseMac
         <*> parseEtherType
 
-renderEthernetFrame :: EthernetFrame -> L.ByteString -> Put
-renderEthernetFrame frame body = do
-  renderMac         (etherDest   frame)
-  renderMac         (etherSource frame)
-  renderEtherType   (etherType   frame)
-  putLazyByteString body
+renderEthernetFrame :: EthernetFrame -> L.ByteString -> L.ByteString
+renderEthernetFrame frame body = chunk hdr `L.append` body
+  where
+  hdr = runPut $ do
+    renderMac         (etherDest   frame)
+    renderMac         (etherSource frame)
+    renderEtherType   (etherType   frame)

@@ -30,7 +30,6 @@ import Hans.Utils (void,just)
 import Control.Concurrent (forkIO,ThreadId,killThread)
 import Control.Monad (mplus)
 import Data.Serialize.Get (runGet)
-import Data.Serialize.Put (runPutLazy)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map             as Map
@@ -147,7 +146,7 @@ setDevice mac dev = do
 handleOutgoing :: EthernetFrame -> L.ByteString -> Eth ()
 handleOutgoing frame body = do
   dev <- getDevice (etherSource frame)
-  output (devTx dev (runPutLazy (renderEthernetFrame frame body)))
+  output (devTx dev (renderEthernetFrame frame body))
 
 
 -- | Add an ethernet device to the state.
