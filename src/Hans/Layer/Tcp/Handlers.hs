@@ -14,7 +14,6 @@ import Control.Monad (mzero,mplus,guard,when)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
-import Data.Serialize (runGet)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -30,7 +29,7 @@ handleIncomingTcp ip4 bytes = do
   let src = ip4SourceAddr ip4
       dst = ip4DestAddr ip4
   guard (validateTcpChecksumIP4 src dst bytes)
-  (hdr,body) <- liftRight (runGet getTcpPacket bytes)
+  (hdr,body) <- liftRight (parseTcpPacket bytes)
   established src dst hdr body
     `mplus` listening ip4 hdr
     `mplus` sendSegment src (mkRstAck hdr) L.empty

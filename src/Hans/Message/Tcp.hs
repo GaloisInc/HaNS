@@ -14,7 +14,7 @@ import Data.List (find)
 import Data.Monoid (Monoid(..))
 import Data.Serialize
     (Get,Put,Putter,getWord16be,putWord16be,getWord32be,putWord32be,getWord8
-    ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runPut
+    ,putWord8,putByteString,getBytes,remaining,label,isolate,skip,runGet,runPut
     ,putLazyByteString)
 import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
@@ -445,6 +445,10 @@ putUnknown len body = do
 
 
 -- Tcp Packet ------------------------------------------------------------------
+
+{-# INLINE parseTcpPacket #-}
+parseTcpPacket :: S.ByteString -> Either String (TcpHeader,S.ByteString)
+parseTcpPacket bytes = runGet getTcpPacket bytes
 
 -- | Parse a TcpPacket.
 getTcpPacket :: Get (TcpHeader,S.ByteString)
