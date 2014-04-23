@@ -1,11 +1,14 @@
 module Hans.Message.Arp where
 
 import Hans.Address (Address(addrSize))
+import Hans.Utils (chunk)
 
 import Control.Applicative (Applicative(..),(<$>))
-import Data.Serialize.Get (Get,getWord8,getWord16be)
-import Data.Serialize.Put (Putter,putWord16be,putWord8)
+import Data.Serialize.Get (Get,runGet,getWord8,getWord16be)
+import Data.Serialize.Put (Putter,runPut,putWord16be,putWord8)
 import Data.Word (Word16)
+import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 -- Arp Packets -----------------------------------------------------------------
@@ -21,9 +24,10 @@ data ArpPacket hw p = ArpPacket
   } deriving (Show)
 
 -- | Parse an Arp packet, given a way to parse hardware and protocol addresses.
-parseArpPacket :: Get hw -> Get p -> Get (ArpPacket hw p)
-parseArpPacket getHw getP
-   =  ArpPacket
+parseArpPacket :: Get hw -> Get p
+               -> S.ByteString -> Either String (ArpPacket hw p)
+parseArpPacket getHw getP = runGet $
+      ArpPacket
   <$> getWord16be  -- hardware type
   <*> getWord16be  -- protocol type
   <*  getWord8     -- hardware address length (ignored)
@@ -37,8 +41,9 @@ parseArpPacket getHw getP
 -- | Render an Arp packet, given a way to render hardware and protocol
 -- addresses.
 renderArpPacket :: (Address hw, Address p)
-                => Putter hw -> Putter p -> Putter (ArpPacket hw p)
-renderArpPacket putHw putP arp = do
+                => Putter hw -> Putter p
+                -> ArpPacket hw p -> L.ByteString
+renderArpPacket putHw putP arp = chunk $ runPut $ do
   putWord16be   (arpHwType arp)
   putWord16be   (arpPType arp)
   putWord8      (addrSize (arpSHA arp))

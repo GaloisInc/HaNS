@@ -29,7 +29,6 @@ import Hans.Utils (void,just)
 
 import Control.Concurrent (forkIO,ThreadId,killThread)
 import Control.Monad (mplus)
-import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map             as Map
@@ -122,7 +121,7 @@ self = ethHandle `fmap` get
 -- | Handle an incoming packet, from a device.
 handleIncoming :: S.ByteString -> Eth ()
 handleIncoming pkt = do
-  (hdr,body) <- liftRight (runGet parseEthernetFrame pkt)
+  (hdr,body) <- liftRight (parseEthernetFrame pkt)
   h          <- getHandler (etherType hdr)
   output (h body)
 

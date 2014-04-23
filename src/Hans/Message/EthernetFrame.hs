@@ -12,7 +12,7 @@ import Hans.Address.Mac (Mac,parseMac,renderMac)
 import Hans.Utils (chunk)
 
 import Control.Applicative ((<$>),(<*>))
-import Data.Serialize.Get (Get,remaining,getWord16be,getBytes)
+import Data.Serialize.Get (Get,remaining,getWord16be,getBytes,runGet)
 import Data.Serialize.Put (Putter,putWord16be,runPut)
 import Data.Word (Word16)
 import Numeric (showHex)
@@ -43,8 +43,8 @@ data EthernetFrame = EthernetFrame
   , etherType   :: !EtherType
   } deriving (Eq,Show)
 
-parseEthernetFrame :: Get (EthernetFrame,S.ByteString)
-parseEthernetFrame = (,) <$> header <*> (getBytes =<< remaining)
+parseEthernetFrame :: S.ByteString -> Either String (EthernetFrame,S.ByteString)
+parseEthernetFrame = runGet ((,) <$> header <*> (getBytes =<< remaining))
   where
   header =  EthernetFrame
         <$> parseMac

@@ -25,7 +25,6 @@ import Hans.Utils
 
 import Control.Concurrent (forkIO,takeMVar,putMVar,newEmptyMVar)
 import Control.Monad (forM_,mplus,guard,unless,when)
-import Data.Serialize (runGet,runPutLazy)
 import MonadLib (BaseM(inBase),set,get)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map             as Map
@@ -142,7 +141,7 @@ sendArpPacket msg = do
         , etherDest   = arpTHA msg
         , etherType   = 0x0806
         }
-      body = runPutLazy (renderArpPacket renderMac renderIP4 msg)
+      body = renderArpPacket renderMac renderIP4 msg
   output (sendEthernet eth frame body)
 
 advanceArpTable :: Arp ()
@@ -187,7 +186,7 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
 -- | Process an incoming arp packet
 handleIncoming :: S.ByteString -> Arp ()
 handleIncoming bs = do
-  msg <- liftRight (runGet (parseArpPacket parseMac parseIP4) bs)
+  msg <- liftRight (parseArpPacket parseMac parseIP4 bs)
   -- ?Do I have the hardware type in ar$hrd
   -- Yes: (This check is enforced by the type system)
   --   [optionally check the hardware length ar$hln]

@@ -18,7 +18,7 @@ import Hans.Utils
 import qualified Hans.Layer.IP4 as IP4
 
 import Control.Concurrent (forkIO)
-import Data.Serialize (runGet,runPutLazy,runPut,putByteString)
+import Data.Serialize (runPut,putByteString)
 import MonadLib (get,set)
 import qualified Data.ByteString as S
 
@@ -58,7 +58,7 @@ destUnreachable h code hdr len body
   | ip4DestAddr hdr == broadcastIP4 = return ()
   | otherwise                       = send h $ do
     let bytes = runPut $ do
-          renderIP4Header hdr len
+          putIP4Header hdr len
           putByteString (S.take 8 body)
     sendPacket True (ip4SourceAddr hdr) (DestinationUnreachable code bytes)
 
@@ -74,13 +74,12 @@ sendPacket df dst pkt = do
         , ip4DontFragment = df
         }
   output $ IP4.sendIP4Packet ip4 hdr
-         $ runPutLazy
          $ renderIcmp4Packet pkt
 
 -- | Handle incoming ICMP packets
 handleIncoming :: IP4Header -> S.ByteString -> Icmp4 ()
 handleIncoming hdr bs = do
-  pkt <- liftRight (runGet parseIcmp4Packet bs)
+  pkt <- liftRight (parseIcmp4Packet bs)
   matchHandlers pkt
   case pkt of
     -- XXX: Only echo-request is handled at the moment

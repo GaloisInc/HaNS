@@ -59,8 +59,8 @@ ip4PacketTests  = testGroup "packet parsing"
 
 prop_headerRoundTrip = forAll arbitraryIP4PacketLen $ \ pktLen ->
   let parse = do
-        (hdr,_,_) <- parseIP4Packet
+        (hdr,_,_) <- getIP4Packet
         return hdr
-      render hdr = renderIP4Header hdr pktLen
+      render hdr = putIP4Header hdr pktLen
    in roundTrip arbitraryIP4Header parse render
 

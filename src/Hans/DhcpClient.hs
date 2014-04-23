@@ -17,7 +17,6 @@ import Hans.Message.Udp
 import Hans.NetworkStack
 
 import Control.Monad (guard)
-import Data.Serialize (runGet,runPutLazy)
 import Data.Maybe (fromMaybe)
 import System.Random (randomIO)
 import qualified Data.ByteString as S
@@ -71,7 +70,7 @@ restoreIp4 ns = connectEthernet (ip4Handle ns) (ethernetHandle ns)
 dhcpIP4Handler :: (HasUdp stack)
                => stack -> S.ByteString -> IO ()
 dhcpIP4Handler ns bytes =
-  case runGet parseIP4Packet bytes of
+  case parseIP4Packet bytes of
     Left err            -> putStrLn err >> return ()
     Right (hdr,ihl,len)
       | ip4Protocol hdr == udpProtocol -> queue
@@ -91,7 +90,7 @@ handleOffer :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
             => stack -> Maybe AckHandler -> IP4 -> UdpPort
             -> S.ByteString -> IO ()
 handleOffer ns mbh _src _srcPort bytes =
-  case runGet (getDhcp4Message) bytes of
+  case getDhcp4Message bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (OfferMessage offer)) -> do
@@ -119,7 +118,7 @@ handleAck :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
           => stack -> Offer -> Maybe AckHandler -> IP4 -> UdpPort
           -> S.ByteString -> IO ()
 handleAck ns offer mbh _src _srcPort bytes =
-  case runGet (getDhcp4Message) bytes of
+  case getDhcp4Message bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (AckMessage ack)) -> do
@@ -187,8 +186,7 @@ ackNsOptions ack ns = do
 sendMessage :: (HasEthernet stack)
             => stack -> Dhcp4Message -> IP4 -> IP4 -> Mac -> IO ()
 sendMessage ns resp src dst hwdst = do
-  ipBytes <- mkIpBytes src dst bootpc bootps
-      (runPutLazy (putDhcp4Message resp))
+  ipBytes <- mkIpBytes src dst bootpc bootps (putDhcp4Message resp)
   let mac   = dhcp4ClientHardwareAddr resp
   let frame = EthernetFrame
         { etherDest         = hwdst

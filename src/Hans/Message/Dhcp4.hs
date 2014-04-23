@@ -51,17 +51,20 @@ import Hans.Address.IP4 (IP4(..))
 import Hans.Address.Mac (Mac)
 import Hans.Message.Dhcp4Codec
 import Hans.Message.Dhcp4Options
+import Hans.Utils (chunk)
 
 import Control.Applicative ((<*), (<$>))
 import Control.Monad (unless)
 import Data.Bits (testBit,bit)
 import Data.Maybe (mapMaybe)
-import Data.Serialize.Get (Get, getByteString, isolate, remaining, label, skip)
-import Data.Serialize.Put (Put, putByteString)
+import Data.Serialize.Get (Get, runGet, getByteString, isolate, remaining, label
+                          , skip)
+import Data.Serialize.Put (Put, runPut, putByteString)
 import Data.Word (Word8,Word16,Word32)
 import Numeric (showHex)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.ByteString.Lazy as L
 
 -- DHCP Static Server Settings ---------------------------------------------
 
@@ -228,8 +231,8 @@ data Dhcp4Message = Dhcp4Message
   } deriving (Eq,Show)
 
 -- |'getDhcp4Message' is the binary decoder for parsing 'Dhcp4Message' values.
-getDhcp4Message :: Get Dhcp4Message
-getDhcp4Message = do
+getDhcp4Message :: BS.ByteString -> Either String Dhcp4Message
+getDhcp4Message = runGet $ do
     op     <- getAtom
     hwtype <- getAtom
     len    <- getAtom
@@ -264,8 +267,8 @@ getDhcp4Message = do
       }
 
 -- |'getDhcp4Message' is the binary encoder for rendering 'Dhcp4Message' values.
-putDhcp4Message :: Dhcp4Message -> Put
-putDhcp4Message dhcp = do
+putDhcp4Message :: Dhcp4Message -> L.ByteString
+putDhcp4Message dhcp = chunk $ runPut $ do
     putAtom (dhcp4Op dhcp)
     let hwType = Ethernet
     putAtom hwType

@@ -10,7 +10,7 @@ import Control.Monad (unless)
 import Data.Int (Int64)
 import Data.Serialize
     (Serialize(..),Get,getWord8,getWord16be,isolate,label,getByteString
-    ,Put,runPut,putWord8,putWord16be,putByteString)
+    ,Put,runPut,putWord8,putWord16be,putByteString,runGet)
 import Data.Bits (Bits((.&.),(.|.),testBit,setBit,shiftR,shiftL,bit))
 import Data.Word (Word8,Word16)
 import qualified Data.ByteString as S
@@ -134,8 +134,8 @@ fragmentPacket mtu = loop
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 -- |                    Destination Address                        |
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-parseIP4Packet :: Get (IP4Header, Int, Int)
-parseIP4Packet = do
+getIP4Packet :: Get (IP4Header, Int, Int)
+getIP4Packet  = do
   b0    <- getWord8
   let ver = b0 `shiftR` 4
   let ihl = fromIntegral ((b0 .&. 0xf) * 4)
@@ -172,8 +172,16 @@ parseIP4Packet = do
           }
     return (hdr, fromIntegral ihl, fromIntegral len)
 
-renderIP4Header :: IP4Header -> Int -> Put
-renderIP4Header hdr pktlen = do
+{-# INLINE parseIP4Packet #-}
+parseIP4Packet :: S.ByteString -> Either String (IP4Header, Int, Int)
+parseIP4Packet bytes = runGet getIP4Packet bytes
+
+{-# INLINE renderIP4Header #-}
+renderIP4Header :: IP4Header -> Int -> S.ByteString
+renderIP4Header hdr pktlen = runPut (putIP4Header hdr pktlen)
+
+putIP4Header :: IP4Header -> Int -> Put
+putIP4Header hdr pktlen = do
   let (optbs,optlen) = renderOptions (ip4Options hdr)
   let ihl            = 20 + optlen
   putWord8    (ip4Version hdr `shiftL` 4 .|. (ihl `div` 4))
@@ -205,7 +213,7 @@ renderIP4Packet hdr pkt = do
 
   hdrBytes <-
     let pktlen = fromIntegral (L.length pkt)
-        bytes  = runPut (renderIP4Header hdr pktlen)
+        bytes  = renderIP4Header hdr pktlen
         cs     = computeChecksum 0 bytes
      in pokeChecksum cs bytes 10
 

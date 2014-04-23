@@ -34,7 +34,6 @@ import Hans.Utils.Checksum
 
 import Control.Concurrent (forkIO)
 import Control.Monad (guard,mplus,(<=<))
-import Data.Serialize.Get (runGet)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
@@ -183,7 +182,7 @@ nextIdent = do
 -- | Incoming packet from the network
 handleIncoming :: S.ByteString -> IP ()
 handleIncoming bs = do
-  (hdr,hlen,plen) <- liftRight (runGet parseIP4Packet bs)
+  (hdr,hlen,plen) <- liftRight (parseIP4Packet bs)
   let (header,rest) = S.splitAt hlen bs
   let checksum      = computeChecksum 0 header
   guard $ and

@@ -4,17 +4,19 @@ module Hans.Message.Icmp4 where
 
 import Hans.Address.IP4 (IP4)
 import Hans.Message.Types (Lifetime,parseLifetime,renderLifetime)
+import Hans.Utils (chunk)
 import Hans.Utils.Checksum (pokeChecksum, computeChecksum)
 
 import Control.Monad (liftM2, unless, when, replicateM)
 import Data.Serialize (Serialize(..))
 import Data.Serialize.Get (getWord8, getByteString, remaining, skip, Get, label,
-                           lookAhead, getBytes, isEmpty)
+                           lookAhead, getBytes, isEmpty, runGet)
 import Data.Serialize.Put (Putter, putWord8,putByteString, Put, runPut)
 import Data.Int (Int32)
 import Data.Word (Word8,Word16,Word32)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 -- General ICMP Packets --------------------------------------------------------
@@ -49,12 +51,18 @@ noCode str = do
   unless (code == 0)
     (fail (str ++ " expects code 0"))
 
-parseIcmp4Packet :: Get Icmp4Packet
-parseIcmp4Packet  = label "ICMP" $ do
+{-# INLINE parseIcmp4Packet #-}
+parseIcmp4Packet :: S.ByteString -> Either String Icmp4Packet
+parseIcmp4Packet  = runGet $ do
   rest <- lookAhead (getBytes =<< remaining)
   unless (computeChecksum 0 rest == 0)
     (fail "Bad checksum")
-  ty      <- get
+  getIcmp4Packet
+
+getIcmp4Packet :: Get Icmp4Packet
+getIcmp4Packet  = label "ICMP" $ do
+
+  ty <- get
 
   let firstGet :: Serialize a => String -> (a -> Get b) -> Get b
       firstGet labelString f = label labelString $ do
@@ -164,15 +172,18 @@ parseIcmp4Packet  = label "ICMP" $ do
     _ -> fail ("Unknown type: " ++ show ty)
 
 
-renderIcmp4Packet :: Putter Icmp4Packet
-renderIcmp4Packet  =
-      putByteString . unsafePerformIO . setChecksum . runPut . put'
-                       -- Argument for safety: The bytestring being
-                       -- destructively modified here is only accessible
-                       -- through the composition and will never escape
+renderIcmp4Packet :: Icmp4Packet -> L.ByteString
+renderIcmp4Packet icmp =
+  -- Argument for safety: The bytestring being
+  -- destructively modified here is only accessible
+  -- through the composition and will never escape
+  chunk (unsafePerformIO (setChecksum (runPut (putIcmp4Packet icmp))))
   where
   setChecksum pkt = pokeChecksum (computeChecksum 0 pkt) pkt 2
 
+putIcmp4Packet :: Putter Icmp4Packet
+putIcmp4Packet  = put'
+  where
   firstPut :: Serialize a => Word8 -> a -> Put
   firstPut ty code
     = do put ty

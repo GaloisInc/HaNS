@@ -136,4 +136,4 @@ icmp4PacketTests  = testGroup "packet parsing"
   ]
 
 prop_roundTrip =
-  roundTrip arbitraryIcmp4Packet parseIcmp4Packet renderIcmp4Packet
+  roundTrip arbitraryIcmp4Packet getIcmp4Packet putIcmp4Packet
