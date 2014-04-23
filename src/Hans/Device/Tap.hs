@@ -49,14 +49,11 @@ tapReceiveLoop fd eh = forever (k =<< tapReceive fd)
 tapReceive :: Fd -> IO S.ByteString
 tapReceive fd = do
   threadWaitRead fd
-  ready <- hIsReadable =<< fdToHandle fd
-  if ready
-     then do let packet ptr = fromIntegral `fmap` c_read' fd ptr 1514
-             bs <- S.createAndTrim 1514 packet
-             if S.length bs <= 14
-               then tapReceive fd
-               else return bs
-     else tapReceive fd
+  let packet ptr = fromIntegral `fmap` c_read' fd ptr 1514
+  bs <- S.createAndTrim 1514 packet
+  if S.length bs <= 14
+    then tapReceive fd
+    else return bs
 
 c_read' fd buf size = do
   res <- c_read fd buf size
