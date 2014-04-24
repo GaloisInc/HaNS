@@ -12,14 +12,11 @@ import Foreign.C.String (CString,withCString)
 import Foreign.C.Types (CLong(..),CSize(..),CInt(..))
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
-import System.IO(hIsReadable)
 import System.Posix.Types (Fd(..))
-import System.Posix.IO(fdToHandle)
 import qualified Data.ByteString          as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy     as L
 
-import Foreign.C.Error
 
 -- | Open a device by name.
 openTapDevice :: DeviceName -> IO (Maybe Fd)
@@ -55,6 +52,7 @@ tapReceive fd = do
     then tapReceive fd
     else return bs
 
+c_read' :: Fd -> Ptr Word8 -> CSize -> IO CLong
 c_read' fd buf size = do
   res <- c_read fd buf size
 --  Errno eno <- getErrno
