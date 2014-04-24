@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hans.NetworkStack (
     module Hans.NetworkStack
@@ -36,6 +37,7 @@ import Hans.Message.Tcp (TcpPort)
 import Hans.Message.Udp (UdpPort)
 import qualified Hans.Layer.Arp as Arp
 import qualified Hans.Layer.Ethernet as Eth
+import qualified Hans.Layer.Dns as Dns
 import qualified Hans.Layer.Icmp4 as Icmp4
 import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Tcp as Tcp
@@ -58,6 +60,7 @@ data NetworkStack = NetworkStack
   , nsTimers    :: Timer.TimerHandle
   , nsUdp       :: Udp.UdpHandle
   , nsTcp       :: Tcp.TcpHandle
+  , nsDns       :: Dns.DnsHandle
   }
 
 instance HasArp      NetworkStack where arpHandle      = nsArp
@@ -67,26 +70,20 @@ instance HasIcmp4    NetworkStack where icmp4Handle    = nsIcmp4
 instance HasTimer    NetworkStack where timerHandle    = nsTimers
 instance HasTcp      NetworkStack where tcpHandle      = nsTcp
 instance HasUdp      NetworkStack where udpHandle      = nsUdp
+instance HasDns      NetworkStack where dnsHandle      = nsDns
 
 newNetworkStack :: IO NetworkStack
 newNetworkStack  = do
-  eth  <- newChannel
-  arp  <- newChannel
-  ip4  <- newChannel
-  icmp <- newChannel
-  th   <- newChannel
-  udp  <- newChannel
-  tcp  <- newChannel
+  nsEthernet <- newChannel
+  nsArp      <- newChannel
+  nsIp4      <- newChannel
+  nsIcmp4    <- newChannel
+  nsTimers   <- newChannel
+  nsUdp      <- newChannel
+  nsTcp      <- newChannel
+  nsDns      <- newChannel
 
-  let ns = NetworkStack
-        { nsArp     = arp
-        , nsEthernet= eth
-        , nsIp4     = ip4
-        , nsIcmp4   = icmp
-        , nsTimers  = th
-        , nsUdp     = udp
-        , nsTcp     = tcp
-        }
+  let ns = NetworkStack { .. }
 
   startTimerLayer    ns
   startEthernetLayer ns
@@ -95,6 +92,7 @@ newNetworkStack  = do
   startIP4Layer      ns
   startUdpLayer      ns
   startTcpLayer      ns
+  startDnsLayer      ns
 
   return ns
 
@@ -255,3 +253,12 @@ instance HasTimer Timer.TimerHandle where timerHandle = id
 -- | Start the Timer layer in a network stack.
 startTimerLayer :: HasTimer stack => stack -> IO ()
 startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
+
+
+-- Dns Layer Interface ---------------------------------------------------------
+
+class HasDns stack where
+  dnsHandle :: stack -> Dns.DnsHandle
+
+startDnsLayer :: (HasUdp stack, HasDns stack) => stack -> IO ()
+startDnsLayer stack = Dns.runDnsLayer (dnsHandle stack) (udpHandle stack)
