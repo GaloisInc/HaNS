@@ -2,31 +2,36 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
+
 module Hans.Message.Dns where
 
 import Hans.Address.IP4
 
 import Control.Monad
 import Data.Bits
-import Data.Char ( chr, ord )
-import Data.Foldable ( traverse_ )
+import Data.Foldable ( Foldable, traverse_, foldMap )
 import Data.Int
 import Data.Serialize
+import Data.Traversable ( Traversable )
 import Data.Word
 
 import qualified Data.ByteString as S
+import qualified Data.Map as Map
 
 
 -- DNS Packets -----------------------------------------------------------------
 
-data DNSPacket = DNSPacket { dnsHeader            :: DNSHeader
-                           , dnsQuestions         :: [Query]
-                           , dnsAnswers           :: [RR]
-                           , dnsAuthorityRecords  :: [RR]
-                           , dnsAdditionalRecords :: [RR]
-                           } deriving (Show)
+data DNSPacket name = DNSPacket { dnsHeader            :: DNSHeader
+                                , dnsQuestions         :: [Query name]
+                                , dnsAnswers           :: [RR name]
+                                , dnsAuthorityRecords  :: [RR name]
+                                , dnsAdditionalRecords :: [RR name]
+                                } deriving (Show,Functor,Foldable,Traversable)
 
-getDNSPacket :: Get DNSPacket
+getDNSPacket :: Get (DNSPacket Name)
 getDNSPacket  = label "DNSPacket" $
   do dnsHeader <- getDNSHeader
      qdCount   <- getWord16be
@@ -41,7 +46,7 @@ getDNSPacket  = label "DNSPacket" $
 
      return DNSPacket { .. }
 
-putDNSPacket :: Putter DNSPacket
+putDNSPacket :: Putter (DNSPacket Name)
 putDNSPacket DNSPacket{ .. } =
   do putDNSHeader dnsHeader
 
@@ -54,6 +59,10 @@ putDNSPacket DNSPacket{ .. } =
      traverse_ putRR dnsAnswers
      traverse_ putRR dnsAuthorityRecords
      traverse_ putRR dnsAdditionalRecords
+
+
+resolvePointers :: DNSPacket Name -> DNSPacket String
+resolvePointers pkt = undefined
 
 data DNSHeader = DNSHeader { dnsId     :: !Word16
                            , dnsQuery  :: Bool
@@ -161,7 +170,7 @@ renderRespCode (RespReserved c)   = c .&. 0xf
 -- Utilities -------------------------------------------------------------------
 
 data Label = Label S.ByteString
-           | Ptr Word8
+           | Ptr Int
              deriving (Show)
 
 type Name = [Label]
@@ -169,12 +178,16 @@ type Name = [Label]
 getName :: Get Name
 getName  =
   do len <- getWord8
-     if | len > 63  -> do l <- getWord8
-                          return [Ptr l]
-        | len == 0  -> return []
-        | otherwise -> do l  <- getBytes (fromIntegral len)
-                          ls <- getName
-                          return (Label l:ls)
+     if | len .&. 0xc0 /= 0 ->
+          do l <- getWord8
+             return [Ptr $ fromIntegral ((0x3f .&. len) `shiftL` 8)
+                         + fromIntegral l ]
+        | len == 0 ->
+             return []
+        | otherwise ->
+          do l  <- getBytes (fromIntegral len)
+             ls <- getName
+             return (Label l:ls)
 
 putName :: Putter Name
 putName (Label bytes : ls) =
@@ -182,27 +195,27 @@ putName (Label bytes : ls) =
      putByteString bytes
      putName ls
 putName (Ptr off:_) =
-  do putWord8 0xc0
-     putWord8 off
+  do putWord8 (0xc0 .|. (fromIntegral off `shiftR` 8))
+     putWord8 (fromIntegral off)
 putName [] =
      putWord8 0
 
 
 -- Queries ---------------------------------------------------------------------
 
-data Query = Query { qName  :: Name
-                   , qType  :: QType
-                   , qClass :: QClass
-                   } deriving (Show)
+data Query name = Query { qName  :: name
+                        , qType  :: QType
+                        , qClass :: QClass
+                        } deriving (Show,Functor,Foldable,Traversable)
 
-getQuery :: Get Query
+getQuery :: Get (Query Name)
 getQuery  = label "Question" $
   do qName  <- getName
      qType  <- label "QTYPE"  getQType
      qClass <- label "QCLASS" getQClass
      return Query { .. }
 
-putQuery :: Putter Query
+putQuery :: Putter (Query Name)
 putQuery Query { .. } =
   do putName   qName
      putQType  qType
@@ -312,11 +325,11 @@ putQClass QAnyClass  = putWord16be 255
 
 -- Resource Records ------------------------------------------------------------
 
-data RR = RR { rrName  :: Name
-             , rrClass :: Class
-             , rrTTL   :: !Int32
-             , rrRData :: RData
-             } deriving (Show)
+data RR name = RR { rrName  :: name
+                  , rrClass :: Class
+                  , rrTTL   :: !Int32
+                  , rrRData :: RData name
+                  } deriving (Show,Functor,Foldable,Traversable)
 
 --                                  1  1  1  1  1  1
 --    0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
@@ -338,7 +351,7 @@ data RR = RR { rrName  :: Name
 --  /                     RDATA                     /
 --  /                                               /
 --  +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-getRR :: Get RR
+getRR :: Get (RR Name)
 getRR  = label "RR" $
   do rrName  <- getName
      ty      <- getType
@@ -348,7 +361,7 @@ getRR  = label "RR" $
      rrRData <- getRData ty
      return RR { .. }
 
-putRR :: Putter RR
+putRR :: Putter (RR Name)
 putRR RR { .. } =
   do putName rrName
      let (ty,rd) = putRData rrRData
@@ -376,12 +389,12 @@ putClass HS = putWord16be 4
 
 -- RDATA Formats ---------------------------------------------------------------
 
-data RData = RDA IP4
-           | RDCNAME Name
-           | RDHInfo String String
-             deriving (Show)
+data RData name = RDA IP4
+                | RDCNAME name
+                | RDHInfo String String
+                  deriving (Show,Functor,Foldable,Traversable)
 
-getRData :: Type -> Get RData
+getRData :: Type -> Get (RData Name)
 getRData ty =
   do len <- getWord16be
      isolate (fromIntegral len) $ case ty of
@@ -401,7 +414,14 @@ getRData ty =
        MINFO -> fail "MINFO not implemented"
        MX    -> fail "MX not implemented"
 
-putRData :: RData -> (Type,Put)
+putRData :: RData Name -> (Type,Put)
 putRData (RDA addr) = (A,) $
+  do putWord16be 4
      renderIP4 addr
 putRData rd = error ("unimplemented " ++ show rd)
+
+
+-- Test Data -------------------------------------------------------------------
+
+testBytes :: S.ByteString
+testBytes  = "}\SOH\129\128\NUL\SOH\NUL\ETX\NUL\NUL\NUL\NUL\ENQyahoo\ETXcom\NUL\NUL\SOH\NUL\SOH\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOTb\139\183\CAN\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOT\206\190$-\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOTb\138\253m"
