@@ -13,7 +13,8 @@ module Hans.Layer.Tcp.WaitBuffer (
   , Buffer
   , emptyBuffer
   , shutdownWaiting
-  , availableBytes
+  , isFull
+  , isEmpty
   , flushWaiting
 
     -- ** Application Side
@@ -71,9 +72,13 @@ emptyBuffer size = Buffer
   , bufAvailable = size
   }
 
--- | External interface.
-availableBytes :: Buffer d -> Int64
-availableBytes  = bufAvailable
+-- | A queue is empty when all space is available.
+isEmpty :: Buffer d -> Bool
+isEmpty buf = bufAvailable buf == bufSize buf
+
+-- | A queue is full when there is no available space.
+isFull :: Buffer d -> Bool
+isFull buf = bufAvailable buf == 0
 
 -- | Flush the queue of blocked processes.
 flushWaiting :: Buffer d -> Buffer d

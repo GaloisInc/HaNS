@@ -9,8 +9,8 @@ module Hans.Layer.Tcp.Socket (
   , listen, ListenError(..)
   , accept, AcceptError(..)
   , close, CloseError(..)
-  , sendBytes
-  , recvBytes
+  , sendBytes, canSend
+  , recvBytes, canRecv
   ) where
 
 import Hans.Address.IP4
@@ -199,6 +199,13 @@ userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
 
 -- Writing ---------------------------------------------------------------------
 
+canSend :: Socket -> IO Bool
+canSend sock =
+  blockResult           (sockHandle sock) $ \ res ->
+  establishedConnection (sockId sock)     $
+    do tcp <- getTcpSocket
+       outputS (putMVar res (SocketResult (not (isFull (tcpOutBuffer tcp)))))
+
 -- | Send bytes over a socket.  The number of bytes delivered will be returned,
 -- with 0 representing the other side having closed the connection.
 sendBytes :: Socket -> L.ByteString -> IO Int64
@@ -226,6 +233,14 @@ outputBytes bytes wakeup tcp
 
 
 -- Reading ---------------------------------------------------------------------
+
+-- | True when there are bytes queued to receive.
+canRecv :: Socket -> IO Bool
+canRecv sock =
+  blockResult           (sockHandle sock) $ \ res ->
+  establishedConnection (sockId sock)     $
+    do tcp <- getTcpSocket
+       outputS (putMVar res (SocketResult (not (isEmpty (tcpInBuffer tcp)))))
 
 -- | Receive bytes from a socket.  A null ByteString represents the other end
 -- closing the socket.
