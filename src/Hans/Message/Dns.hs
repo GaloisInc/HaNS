@@ -14,12 +14,62 @@ import Control.Monad
 import Data.Bits
 import Data.Foldable ( Foldable, traverse_, foldMap )
 import Data.Int
-import Data.Serialize
+import Data.Serialize ( Put, Putter, putWord8, putWord16be, putWord32be
+                      , putByteString )
 import Data.Traversable ( Traversable )
 import Data.Word
+import MonadLib ( lift, StateT, runStateT, get, set )
 
 import qualified Data.ByteString as S
 import qualified Data.Map as Map
+import qualified Data.Serialize.Get as C
+
+-- Cereal With Stream Offsets --------------------------------------------------
+
+type Get = StateT Int C.Get
+
+{-# INLINE unGet #-}
+unGet :: Get a -> C.Get a
+unGet m =
+  do (a,_) <- runStateT 0 m
+     return a
+
+bytesRead :: Get Int
+bytesRead  = get
+
+{-# INLINE increment #-}
+increment :: Int -> C.Get a -> Get a
+increment n m =
+  do off <- get
+     a   <- lift m
+     set $! off + n
+     return a
+
+getWord8 :: Get Word8
+getWord8  = increment 1 C.getWord8
+
+getWord16be :: Get Word16
+getWord16be  = increment 2 C.getWord16be
+
+getWord32be :: Get Word32
+getWord32be  = increment 4 C.getWord32be
+
+getBytes :: Int -> Get S.ByteString
+getBytes n = increment n (C.getBytes n)
+
+isolate :: Int -> Get a -> Get a
+isolate n body =
+  do off      <- get
+     (a,off') <- lift (C.isolate n (runStateT off body))
+     set off'
+     return a
+
+label :: String -> Get a -> Get a
+label str m =
+  do off      <- get
+     (a,off') <- lift (C.label str (runStateT off m))
+     set off'
+     return a
 
 
 -- DNS Packets -----------------------------------------------------------------
@@ -31,8 +81,8 @@ data DNSPacket name = DNSPacket { dnsHeader            :: DNSHeader
                                 , dnsAdditionalRecords :: [RR name]
                                 } deriving (Show,Functor,Foldable,Traversable)
 
-getDNSPacket :: Get (DNSPacket Name)
-getDNSPacket  = label "DNSPacket" $
+getDNSPacket :: C.Get (DNSPacket Name)
+getDNSPacket  = unGet $ label "DNSPacket" $
   do dnsHeader <- getDNSHeader
      qdCount   <- getWord16be
      anCount   <- getWord16be
@@ -60,9 +110,9 @@ putDNSPacket DNSPacket{ .. } =
      traverse_ putRR dnsAuthorityRecords
      traverse_ putRR dnsAdditionalRecords
 
-
-resolvePointers :: DNSPacket Name -> DNSPacket String
+resolvePointers :: DNSPacket Name -> DNSPacket [String]
 resolvePointers pkt = undefined
+
 
 data DNSHeader = DNSHeader { dnsId     :: !Word16
                            , dnsQuery  :: Bool
@@ -169,7 +219,7 @@ renderRespCode (RespReserved c)   = c .&. 0xf
 
 -- Utilities -------------------------------------------------------------------
 
-data Label = Label S.ByteString
+data Label = Label Int S.ByteString
            | Ptr Int
              deriving (Show)
 
@@ -177,7 +227,8 @@ type Name = [Label]
 
 getName :: Get Name
 getName  =
-  do len <- getWord8
+  do off <- bytesRead
+     len <- getWord8
      if | len .&. 0xc0 /= 0 ->
           do l <- getWord8
              return [Ptr $ fromIntegral ((0x3f .&. len) `shiftL` 8)
@@ -187,10 +238,10 @@ getName  =
         | otherwise ->
           do l  <- getBytes (fromIntegral len)
              ls <- getName
-             return (Label l:ls)
+             return (Label off l:ls)
 
 putName :: Putter Name
-putName (Label bytes : ls) =
+putName (Label _ bytes : ls) =
   do putWord8 (fromIntegral (S.length bytes))
      putByteString bytes
      putName ls
@@ -398,7 +449,7 @@ getRData :: Type -> Get (RData Name)
 getRData ty =
   do len <- getWord16be
      isolate (fromIntegral len) $ case ty of
-       A     -> RDA `fmap` parseIP4
+       A     -> RDA `fmap` lift parseIP4
        NS    -> fail "NS not implemented"
        MD    -> fail "MD not implemented"
        MF    -> fail "MF not implemented"
