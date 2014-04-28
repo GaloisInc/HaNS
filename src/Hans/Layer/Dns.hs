@@ -6,6 +6,7 @@ module Hans.Layer.Dns (
 import Hans.Channel
 import Hans.Layer
 import Hans.Layer.Udp
+import Hans.Message.Dns
 
 import Control.Concurrent (forkIO)
 
@@ -18,6 +19,8 @@ runDnsLayer :: DnsHandle -> UdpHandle -> IO ()
 runDnsLayer h udp =
   do _ <- forkIO (loopLayer "dns" (emptyDnsState udp) (receive h) id)
      return ()
+
+
 
 
 -- Handlers --------------------------------------------------------------------

@@ -15,6 +15,7 @@ module Hans.Message.Dns (
   , Type(..)
   , Class(..)
   , RData(..)
+  , Name
 
   , getDNSPacket
   , putDNSPacket
@@ -165,8 +166,8 @@ addLabels labels =
   newLabels = go labels (labelsToName labels)
 
   go (Label off _ : rest) name@(_ : ns) = (off,name) : go rest ns
-  go (Ptr off _   : rest) name          = [(off,name)]
-  go []                   _             = []
+  go (Ptr off _   : _)    name          = [(off,name)]
+  go _                    _             = []
 
 
 {-# INLINE getWord8 #-}
@@ -515,9 +516,3 @@ putRData (RDA addr) = (A,) $
   do putWord16be 4
      renderIP4 addr
 putRData rd = error ("unimplemented " ++ show rd)
-
-
--- Test Data -------------------------------------------------------------------
-
-testBytes :: S.ByteString
-testBytes  = "}\SOH\129\128\NUL\SOH\NUL\ETX\NUL\NUL\NUL\NUL\ENQyahoo\ETXcom\NUL\NUL\SOH\NUL\SOH\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOTb\139\183\CAN\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOT\206\190$-\192\f\NUL\SOH\NUL\SOH\NUL\NUL\SOHL\NUL\EOTb\138\253m"
