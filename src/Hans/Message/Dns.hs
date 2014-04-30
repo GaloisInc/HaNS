@@ -246,7 +246,7 @@ getDNSHeader :: Get DNSHeader
 getDNSHeader  = label "DNS Header" $
   do dnsId <- getWord16be
      flags <- getWord16be
-     let dnsQuery  = flags `testBit` 15
+     let dnsQuery  = not (flags `testBit` 15)
          dnsOpCode = parseOpCode (flags `shiftR` 11)
          dnsAA     = flags `testBit` 10
          dnsTC     = flags `testBit`  9
@@ -432,7 +432,7 @@ putDNSHeader DNSHeader { .. } =
   do putWord16be dnsId
      let flag i b w | b         = setBit w i
                     | otherwise = clearBit w i
-         flags = flag 15 dnsQuery
+         flags = flag 15 (not dnsQuery)
                $ flag 10 dnsAA
                $ flag  9 dnsTC
                $ flag  8 dnsRD

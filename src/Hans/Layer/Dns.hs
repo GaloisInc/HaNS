@@ -25,12 +25,15 @@ import Hans.Message.Udp
 import Control.Concurrent ( forkIO, MVar, newEmptyMVar, takeMVar, putMVar )
 import Control.Monad ( mzero, guard, when )
 import Data.Bits ( shiftR, (.&.), (.|.) )
+import Data.Foldable ( foldl' )
+import Data.List ( intercalate )
 import Data.String ( fromString )
 import Data.Typeable ( Typeable )
 import Data.Word ( Word16 )
 import MonadLib ( get, set )
 import qualified Control.Exception as X
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 
@@ -147,7 +150,7 @@ getHostEntry res host qs =
      -- register a upd handler on a fresh port, and query the name servers in
      -- order
      output $
-       do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf)
+       do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf host)
           send dnsSelf (createRequest res dnsNameServers host qs port)
 
 
@@ -178,17 +181,39 @@ sendRequest reqId =
 
 
 -- | Handle the response from the server.
-handleResponse :: IP4 -> UdpPort -> S.ByteString -> Dns ()
-handleResponse srcIp srcPort bytes =
+handleResponse :: HostName -> IP4 -> UdpPort -> S.ByteString -> Dns ()
+handleResponse host srcIp srcPort bytes =
   do guard (srcPort == 53)
 
      pkt <- liftRight (parseDNSPacket bytes)
-     req <- lookupRequest (dnsId (dnsHeader pkt))
+     let reqId = dnsId (dnsHeader pkt)
+     req <- lookupRequest reqId
 
-     -- require that the last name server we sent to was the one that responded
-     guard (maybe False (srcIp ==) (qLastServer req))
+     -- require that the last name server we sent to was the one that responded,
+     -- and that it responded with a response, not a request.
+     guard $ Just srcIp == qLastServer req
+          && not (dnsQuery (dnsHeader pkt))
 
-     output (print pkt)
+     removeRequest reqId
+     DnsState { .. } <- get
+     output $ do putResult (qResult req) (parseHostEntry host pkt)
+                 removeUdpHandler dnsUdpHandle (qUdpPort req)
+
+-- | Parse the A and CNAME parts out of a response.
+parseHostEntry :: HostName -> DNSPacket -> HostEntry
+parseHostEntry host pkt = foldl' processAnswer emptyHostEntry (dnsAnswers pkt)
+  where
+
+  emptyHostEntry = HostEntry { hostName      = host
+                             , hostAliases   = []
+                             , hostAddresses = [] }
+
+  processAnswer he RR { .. } = case rrRData of
+    RDA ip     -> he { hostAddresses = ip : hostAddresses he }
+    RDCNAME ns -> he { hostName      = intercalate "." (map C8.unpack ns)
+                     , hostAliases   = hostName he : hostAliases he }
+
+    _          -> he
 
 
 -- Query Management ------------------------------------------------------------
@@ -265,6 +290,6 @@ sendQuery nameServer sp bytes =
      output (sendUdp dnsUdpHandle nameServer (Just sp) 53 bytes)
 
 -- | Queue the packet into the DNS layer for processing.
-serverResponse :: DnsHandle -> UdpPort -> Udp.Handler
-serverResponse dns _ srcIp srcPort bytes =
-  send dns (handleResponse srcIp srcPort bytes)
+serverResponse :: DnsHandle -> HostName -> UdpPort -> Udp.Handler
+serverResponse dns host _ srcIp srcPort bytes =
+  send dns (handleResponse host srcIp srcPort bytes)
