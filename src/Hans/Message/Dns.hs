@@ -28,15 +28,17 @@ import Control.Monad
 import Data.Bits
 import Data.Foldable ( traverse_, foldMap )
 import Data.Int
-import Data.Serialize ( Put, Putter, runPut, putWord8, putWord16be, putWord32be
+import Data.Serialize ( Putter, runPut, putWord8, putWord16be, putWord32be
                       , putByteString )
 import Data.Word
 import MonadLib ( lift, StateT, runStateT, get, set )
+import Numeric ( showHex )
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Serialize.Get as C
+
 
 -- DNS Packets -----------------------------------------------------------------
 
@@ -70,7 +72,7 @@ data RespCode = RespNoError
               | RespNotImplemented
               | RespRefused
               | RespReserved !Word16
-                deriving (Show)
+                deriving (Eq,Show)
 
 type Name = [S.ByteString]
 
@@ -107,6 +109,7 @@ data Type = A
           | HINFO
           | MINFO
           | MX
+          | AAAA
             deriving (Show)
 
 data QClass = QClass Class
@@ -117,7 +120,9 @@ data Class = IN | CS | CH | HS
              deriving (Show,Eq)
 
 data RData = RDA IP4
+           | RDNS Name
            | RDCNAME Name
+           | RDUnknown Type S.ByteString
              deriving (Show)
 
 
@@ -149,10 +154,12 @@ lookupPtr off =
      when (off >= rwOffset rw) (fail "Invalid offset in pointer")
      case Map.lookup off (rwLabels rw) of
        Just ls -> return ls
-       Nothing -> fail ("Unknown label for offset: " ++ show off)
+       Nothing -> fail $ "Unknown label for offset: " ++ showHex off "\n"
+                      ++ show (rwLabels rw)
 
 data Label = Label Int S.ByteString
            | Ptr Int Name
+             deriving (Show)
 
 labelsToName :: [Label] -> Name
 labelsToName  = foldMap toName
@@ -172,25 +179,27 @@ addLabels labels =
   go _                    _             = []
 
 
+{-# INLINE liftGet #-}
+liftGet :: Int -> C.Get a -> Get a
+liftGet n m = do addOffset n
+                 lift m
+
+
 {-# INLINE getWord8 #-}
 getWord8 :: Get Word8
-getWord8  = do addOffset 1
-               lift C.getWord8
+getWord8  = liftGet 1 C.getWord8
 
 {-# INLINE getWord16be #-}
 getWord16be :: Get Word16
-getWord16be  = do addOffset 2
-                  lift C.getWord16be
+getWord16be  = liftGet 2 C.getWord16be
 
 {-# INLINE getWord32be #-}
 getWord32be :: Get Word32
-getWord32be  = do addOffset 4
-                  lift C.getWord32be
+getWord32be  = liftGet 4 C.getWord32be
 
 {-# INLINE getBytes #-}
 getBytes :: Int -> Get S.ByteString
-getBytes n = do addOffset n
-                lift (C.getBytes n)
+getBytes n = liftGet n (C.getBytes n)
 
 isolate :: Int -> Get a -> Get a
 isolate n body =
@@ -220,10 +229,11 @@ getDNSPacket  = unGet $ label "DNSPacket" $
      nsCount   <- getWord16be
      arCount   <- getWord16be
 
-     dnsQuestions         <- replicateM (fromIntegral qdCount) getQuery
-     dnsAnswers           <- replicateM (fromIntegral anCount) getRR
-     dnsAuthorityRecords  <- replicateM (fromIntegral nsCount) getRR
-     dnsAdditionalRecords <- replicateM (fromIntegral arCount) getRR
+     let blockOf c l m = label l (replicateM (fromIntegral c) m)
+     dnsQuestions         <- blockOf qdCount "Questions"          getQuery
+     dnsAnswers           <- blockOf anCount "Answers"            getRR
+     dnsAuthorityRecords  <- blockOf nsCount "Authority Records"  getRR
+     dnsAdditionalRecords <- blockOf arCount "Additional Records" getRR
 
      return DNSPacket { .. }
 
@@ -339,6 +349,7 @@ getQType  =
        13  -> return (QType HINFO)
        14  -> return (QType MINFO)
        15  -> return (QType MX)
+       28  -> return (QType AAAA)
        252 -> return AFXR
        253 -> return MAILB
        254 -> return MAILA
@@ -365,7 +376,7 @@ getName  =
   where
   go = do off <- getOffset
           len <- getWord8
-          if | len .&. 0xc0 /= 0 ->
+          if | len .&. 0xc0 == 0xc0 ->
                do l <- getWord8
                   let ptr = fromIntegral ((0x3f .&. len) `shiftL` 8)
                           + fromIntegral l
@@ -388,11 +399,11 @@ getClass  = label "CLASS" $
        QAnyClass -> fail "Invalid CLASS"
 
 getRData :: Type -> Get RData
-getRData ty =
+getRData ty = label (show ty) $
   do len <- getWord16be
      isolate (fromIntegral len) $ case ty of
-       A     -> RDA `fmap` lift parseIP4
-       NS    -> fail "NS not implemented"
+       A     -> RDA  `fmap` liftGet 4 parseIP4
+       NS    -> RDNS `fmap` getName
        MD    -> fail "MD not implemented"
        MF    -> fail "MF not implemented"
        CNAME -> RDCNAME `fmap` getName
@@ -406,6 +417,8 @@ getRData ty =
        HINFO -> fail "HINFO not implemented"
        MINFO -> fail "MINFO not implemented"
        MX    -> fail "MX not implemented"
+
+       _     -> RDUnknown ty `fmap` (getBytes =<< lift C.remaining)
 
 
 -- Rendering -------------------------------------------------------------------
@@ -492,6 +505,7 @@ putType PTR   = putWord16be 12
 putType HINFO = putWord16be 13
 putType MINFO = putWord16be 14
 putType MX    = putWord16be 15
+putType AAAA  = putWord16be 28
 
 putQType :: Putter QType
 putQType (QType ty) = putType ty
@@ -507,11 +521,12 @@ putQClass QAnyClass  = putWord16be 255
 putRR :: Putter RR
 putRR RR { .. } =
   do putName rrName
-     let (ty,rd) = putRData rrRData
+     let (ty,rdata) = putRData rrRData
      putType ty
      putClass rrClass
      putWord32be (fromIntegral rrTTL)
-     rd
+     putWord16be (fromIntegral (S.length rdata))
+     putByteString rdata
 
 putClass :: Putter Class
 putClass IN = putWord16be 1
@@ -519,8 +534,11 @@ putClass CS = putWord16be 2
 putClass CH = putWord16be 3
 putClass HS = putWord16be 4
 
-putRData :: RData -> (Type,Put)
-putRData (RDA addr) = (A,) $
-  do putWord16be 4
-     renderIP4 addr
-putRData rd = error ("unimplemented " ++ show rd)
+putRData :: RData -> (Type,S.ByteString)
+putRData rd = case rd of
+  RDA addr           -> rdata A     (renderIP4 addr)
+  RDNS name          -> rdata NS    (putName name)
+  RDCNAME name       -> rdata CNAME (putName name)
+  RDUnknown ty bytes -> (ty,bytes)
+  where
+  rdata tag m = (tag,runPut m)

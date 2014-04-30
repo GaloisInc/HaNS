@@ -53,6 +53,7 @@ data DnsException = NoNameServers
                     -- ^ Ran out of name servers to try
                   | DoesNotExist
                     -- ^ Unable to find any information about the host
+                  | DnsRequestFailed HostName
                     deriving (Show,Typeable)
 
 instance X.Exception DnsException
@@ -79,7 +80,7 @@ getHostByName :: DnsHandle -> HostName -> IO HostEntry
 getHostByName h host =
   do res <- newEmptyMVar
 
-     send h (getHostEntry res host [QType A,QType CNAME])
+     send h (getHostEntry res host [QType A])
 
      e <- takeMVar res
      case e of
@@ -185,23 +186,25 @@ handleResponse :: HostName -> IP4 -> UdpPort -> S.ByteString -> Dns ()
 handleResponse host srcIp srcPort bytes =
   do guard (srcPort == 53)
 
-     pkt <- liftRight (parseDNSPacket bytes)
-     let reqId = dnsId (dnsHeader pkt)
-     req <- lookupRequest reqId
+     DNSPacket { .. } <- liftRight (parseDNSPacket bytes)
+     let DNSHeader { .. } = dnsHeader
+     req <- lookupRequest dnsId
 
      -- require that the last name server we sent to was the one that responded,
      -- and that it responded with a response, not a request.
-     guard $ Just srcIp == qLastServer req
-          && not (dnsQuery (dnsHeader pkt))
+     guard (Just srcIp == qLastServer req && not dnsQuery)
 
-     removeRequest reqId
+     if dnsRC == RespNoError
+        then output (putResult (qResult req) (parseHostEntry host dnsAnswers))
+        else output (putError  (qResult req) (DnsRequestFailed host))
+
+     removeRequest dnsId
      DnsState { .. } <- get
-     output $ do putResult (qResult req) (parseHostEntry host pkt)
-                 removeUdpHandler dnsUdpHandle (qUdpPort req)
+     output (removeUdpHandler dnsUdpHandle (qUdpPort req))
 
 -- | Parse the A and CNAME parts out of a response.
-parseHostEntry :: HostName -> DNSPacket -> HostEntry
-parseHostEntry host pkt = foldl' processAnswer emptyHostEntry (dnsAnswers pkt)
+parseHostEntry :: HostName -> [RR] -> HostEntry
+parseHostEntry host = foldl' processAnswer emptyHostEntry
   where
 
   emptyHostEntry = HostEntry { hostName      = host
