@@ -189,7 +189,8 @@ handleIncoming ip4 bs = do
 listening :: IP4 -> UdpHeader -> S.ByteString -> Udp ()
 listening src hdr bytes = do
   h <- getHandler (udpDestPort hdr)
-  output (h src (udpSourcePort hdr) bytes)
+  output $ do _ <- forkIO (h src (udpSourcePort hdr) bytes)
+              return ()
 
 -- | Deliver a destination unreachable mesasge, via the icmp layer.
 unreachable :: IP4Header -> S.ByteString -> Udp ()
