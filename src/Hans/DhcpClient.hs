@@ -17,7 +17,7 @@ import Hans.Message.Udp
 import Hans.NetworkStack
 
 import Control.Monad (guard)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe,mapMaybe)
 import System.Random (randomIO)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -49,7 +49,7 @@ type AckHandler = IP4 -> IO ()
 
 -- | Discover a dhcp server, and request an address.
 dhcpDiscover :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
-                , HasTimer stack)
+                , HasDns stack, HasTimer stack)
              => stack -> Mac -> AckHandler -> IO ()
 dhcpDiscover ns mac h = do
   w32 <- randomIO
@@ -86,7 +86,7 @@ dhcpIP4Handler ns bytes =
 --  * Install an DHCP Ack handler
 --  * Send a DHCP Request
 handleOffer :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
-               , HasTimer stack)
+               , HasDns stack, HasTimer stack)
             => stack -> Maybe AckHandler -> IP4 -> UdpPort
             -> S.ByteString -> IO ()
 handleOffer ns mbh _src _srcPort bytes =
@@ -114,7 +114,7 @@ handleOffer ns mbh _src _srcPort bytes =
 --  * Install a timer that renews the address after 50% of the lease time
 --    has passed
 handleAck :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
-             , HasTimer stack)
+             , HasDns stack, HasTimer stack)
           => stack -> Offer -> Maybe AckHandler -> IP4 -> UdpPort
           -> S.ByteString -> IO ()
 handleAck ns offer mbh _src _srcPort bytes =
@@ -127,7 +127,6 @@ handleAck ns offer mbh _src _srcPort bytes =
         ackNsOptions ack ns
         let ms = fromIntegral (ackLeaseTime ack) * 500
         delay (timerHandle ns) ms (dhcpRenew ns offer)
-        putStrLn ("Bound to: " ++ show (ackYourAddr ack))
 
         case mbh of
           Nothing -> return ()
@@ -145,7 +144,7 @@ handleAck ns offer mbh _src _srcPort bytes =
 --  * Add a UDP handler for an Ack message
 --  * Re-send a renquest message, generated from the offer given.
 dhcpRenew :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
-             , HasTimer stack)
+             , HasDns stack, HasTimer stack)
           => stack -> Offer -> IO ()
 dhcpRenew ns offer = do
   addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
@@ -170,7 +169,8 @@ lookupSubnet  = foldr p Nothing
   p _                              a = a
 
 -- | Produce options for the network stack from a DHCP Ack.
-ackNsOptions :: (HasIP4 stack, HasArp stack) => Ack -> stack -> IO ()
+ackNsOptions :: (HasIP4 stack, HasArp stack, HasDns stack)
+             => Ack -> stack -> IO ()
 ackNsOptions ack ns = do
   let mac     = ackClientHardwareAddr ack
       addr    = ackYourAddr ack
@@ -179,6 +179,14 @@ ackNsOptions ack ns = do
       gateway = fromMaybe (ackRelayAddr ack) (lookupGateway opts)
   addIP4Addr ns (addr `withMask` mask) mac 1500
   routeVia ns defaultRoute gateway
+
+  let nameServers = concat (mapMaybe getNameServers (ackOptions ack))
+  print nameServers
+  mapM_ (addNameServer ns) nameServers
+
+getNameServers :: Dhcp4Option -> Maybe [IP4]
+getNameServers (OptNameServers addrs) = Just addrs
+getNameServers _                      = Nothing
 
 
 -- Packet Helpers --------------------------------------------------------------
