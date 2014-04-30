@@ -9,7 +9,7 @@ module Hans.Ports (
   , nextPort
   ) where
 
-import Control.Monad (MonadPlus(mzero),guard)
+import Control.Monad (guard)
 import Data.List (delete)
 import qualified Data.Set as Set
 
@@ -30,7 +30,7 @@ emptyPortManager range = PortManager
 isReserved :: (Eq i, Ord i) => i -> PortManager i -> Bool
 isReserved i pm = i `Set.member` portActive pm
 
-reserve :: (MonadPlus m, Eq i, Ord i) => i -> PortManager i -> m (PortManager i)
+reserve :: (Eq i, Ord i) => i -> PortManager i -> Maybe (PortManager i)
 reserve i pm = do
   guard (not (isReserved i pm))
   return $! pm
@@ -38,8 +38,7 @@ reserve i pm = do
     , portActive = Set.insert i (portActive pm)
     }
 
-unreserve :: (MonadPlus m, Eq i, Ord i)
-          => i -> PortManager i -> m (PortManager i)
+unreserve :: (Eq i, Ord i) => i -> PortManager i -> Maybe (PortManager i)
 unreserve i pm = do
   guard (isReserved i pm)
   return $! pm
@@ -47,10 +46,11 @@ unreserve i pm = do
     , portActive = Set.delete i (portActive pm)
     }
 
-nextPort :: (MonadPlus m, Eq i, Ord i)
-         => PortManager i -> m (i, PortManager i)
+nextPort :: (Eq i, Ord i) => PortManager i -> Maybe (i, PortManager i)
 nextPort pm = case portNext pm of
-  []  -> mzero
+
   i:_ -> do
     pm' <- reserve i pm
     return $! (i,pm')
+
+  []  -> Nothing

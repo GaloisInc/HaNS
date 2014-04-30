@@ -17,22 +17,24 @@ module Hans.Message.Dns (
   , RData(..)
   , Name
 
-  , getDNSPacket
-  , putDNSPacket
+  , parseDNSPacket,  getDNSPacket
+  , renderDNSPacket, putDNSPacket
   ) where
 
 import Hans.Address.IP4
+import Hans.Utils (chunk)
 
 import Control.Monad
 import Data.Bits
 import Data.Foldable ( traverse_, foldMap )
 import Data.Int
-import Data.Serialize ( Put, Putter, putWord8, putWord16be, putWord32be
+import Data.Serialize ( Put, Putter, runPut, putWord8, putWord16be, putWord32be
                       , putByteString )
 import Data.Word
 import MonadLib ( lift, StateT, runStateT, get, set )
 
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Serialize.Get as C
 
@@ -206,6 +208,9 @@ label str m =
 
 
 -- Parsing ---------------------------------------------------------------------
+
+parseDNSPacket :: S.ByteString -> Either String DNSPacket
+parseDNSPacket  = C.runGet getDNSPacket
 
 getDNSPacket :: C.Get DNSPacket
 getDNSPacket  = unGet $ label "DNSPacket" $
@@ -404,6 +409,9 @@ getRData ty =
 
 
 -- Rendering -------------------------------------------------------------------
+
+renderDNSPacket :: DNSPacket -> L.ByteString
+renderDNSPacket pkt = chunk (runPut (putDNSPacket pkt))
 
 putDNSPacket :: Putter DNSPacket
 putDNSPacket DNSPacket{ .. } =

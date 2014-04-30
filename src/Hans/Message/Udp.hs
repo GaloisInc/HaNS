@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Hans.Message.Udp where
 
@@ -10,6 +11,7 @@ import Hans.Utils.Checksum
 import Control.Applicative ((<$>))
 import Data.Serialize.Get (Get,getWord16be,isolate,label,getBytes,remaining)
 import Data.Serialize.Put (Put,Putter,runPut,putWord16be)
+import Data.Typeable (Typeable)
 import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
@@ -24,7 +26,7 @@ udpProtocol  = IP4Protocol 0x11
 -- Udp Ports -------------------------------------------------------------------
 
 newtype UdpPort = UdpPort { getUdpPort :: Word16 }
-  deriving (Eq,Ord,Num,Read,Show,Enum,Bounded)
+  deriving (Eq,Ord,Num,Read,Show,Enum,Bounded,Typeable)
 
 parseUdpPort :: Get UdpPort
 parseUdpPort  = UdpPort <$> getWord16be
