@@ -9,6 +9,10 @@ module Hans.NetworkStack (
   , UdpPort
   , TcpPort
 
+    -- * DNS
+  , Dns.HostName
+  , Dns.HostEntry(..)
+
     -- * Sockets
   , Tcp.Socket()
 
@@ -257,8 +261,17 @@ startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
 
 -- Dns Layer Interface ---------------------------------------------------------
 
-class HasDns stack where
+class HasUdp stack => HasDns stack where
   dnsHandle :: stack -> Dns.DnsHandle
 
-startDnsLayer :: (HasUdp stack, HasDns stack) => stack -> IO ()
+startDnsLayer :: HasDns stack => stack -> IO ()
 startDnsLayer stack = Dns.runDnsLayer (dnsHandle stack) (udpHandle stack)
+
+addNameServer :: HasDns stack => stack -> IP4 -> IO ()
+addNameServer stack = Dns.addNameServer (dnsHandle stack)
+
+removeNameServer :: HasDns stack => stack -> IP4 -> IO ()
+removeNameServer stack = Dns.removeNameServer (dnsHandle stack)
+
+getHostByName :: HasDns stack => stack -> Dns.HostName -> IO Dns.HostEntry
+getHostByName stack = Dns.getHostByName (dnsHandle stack)
