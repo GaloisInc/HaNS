@@ -29,7 +29,8 @@ import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Icmp4 as Icmp4
 
 import Control.Concurrent (forkIO,newEmptyMVar,takeMVar,putMVar)
-import Control.Monad (guard,mplus)
+import Control.Monad (guard,mplus,when)
+import Data.Maybe (isNothing)
 import Data.Serialize.Get (runGet)
 import Data.Typeable (Typeable)
 import MonadLib (get,set)
@@ -89,9 +90,7 @@ addUdpHandler :: UdpHandle -> UdpPort -> Handler -> IO ()
 addUdpHandler h sp k = do
   res <- newEmptyMVar
   send h $ do mb <- reservePort sp
-              case mb of
-                Nothing -> addHandler sp k
-                Just _  -> return ()
+              when (isNothing mb) (addHandler sp k)
               output (putMVar res mb)
   mb <- takeMVar res
   case mb of

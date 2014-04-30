@@ -21,6 +21,9 @@ data PortManager i = PortManager
   , portActive :: Set.Set i
   }
 
+instance Show i => Show (PortManager i) where
+  show pm = "<Active ports: " ++ show (portActive pm) ++ ">"
+
 emptyPortManager :: [i] -> PortManager i
 emptyPortManager range = PortManager
   { portNext   = range
@@ -30,15 +33,14 @@ emptyPortManager range = PortManager
 isReserved :: (Eq i, Ord i) => i -> PortManager i -> Bool
 isReserved i pm = i `Set.member` portActive pm
 
-reserve :: (Eq i, Ord i) => i -> PortManager i -> Maybe (PortManager i)
+reserve :: (Eq i, Ord i, Show i) => i -> PortManager i -> Maybe (PortManager i)
 reserve i pm = do
   guard (not (isReserved i pm))
   return $! pm
-    { portNext   = delete i (portNext pm)
-    , portActive = Set.insert i (portActive pm)
+    { portActive = Set.insert i (portActive pm)
     }
 
-unreserve :: (Eq i, Ord i) => i -> PortManager i -> Maybe (PortManager i)
+unreserve :: (Eq i, Ord i, Show i) => i -> PortManager i -> Maybe (PortManager i)
 unreserve i pm = do
   guard (isReserved i pm)
   return $! pm
@@ -46,11 +48,10 @@ unreserve i pm = do
     , portActive = Set.delete i (portActive pm)
     }
 
-nextPort :: (Eq i, Ord i) => PortManager i -> Maybe (i, PortManager i)
-nextPort pm = case portNext pm of
+nextPort :: (Eq i, Ord i, Show i) => PortManager i -> Maybe (i, PortManager i)
+nextPort pm = case span (`isReserved` pm) (portNext pm) of
 
-  i:_ -> do
-    pm' <- reserve i pm
-    return $! (i,pm')
+  (_,i:rest) -> return (i, pm { portNext = rest
+                              , portActive = Set.insert i (portActive pm) })
 
-  []  -> Nothing
+  _ -> Nothing
