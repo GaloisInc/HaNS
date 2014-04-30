@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Hans.Layer.Dns (
     DnsHandle
@@ -13,6 +14,7 @@ module Hans.Layer.Dns (
   , HostName
   , HostEntry(..)
   , getHostByName
+  , getHostByAddr
   ) where
 
 import Hans.Address.IP4
@@ -53,7 +55,7 @@ data DnsException = NoNameServers
                     -- ^ Ran out of name servers to try
                   | DoesNotExist
                     -- ^ Unable to find any information about the host
-                  | DnsRequestFailed HostName
+                  | DnsRequestFailed
                     deriving (Show,Typeable)
 
 instance X.Exception DnsException
@@ -79,9 +81,17 @@ data HostEntry = HostEntry { hostName      :: HostName
 getHostByName :: DnsHandle -> HostName -> IO HostEntry
 getHostByName h host =
   do res <- newEmptyMVar
+     send h (getHostEntry res (FromHost host))
+     e <- takeMVar res
+     case e of
+       Right he -> return he
+       Left err -> X.throwIO err
 
-     send h (getHostEntry res host [QType A])
 
+getHostByAddr :: DnsHandle -> IP4 -> IO HostEntry
+getHostByAddr h addr =
+  do res <- newEmptyMVar
+     send h (getHostEntry res (FromIP4 addr))
      e <- takeMVar res
      case e of
        Right he -> return he
@@ -139,8 +149,26 @@ removeRequest reqId =
      set state { dnsQueries = Map.delete reqId (dnsQueries state) }
 
 
-getHostEntry :: DnsResult -> HostName -> [QType] -> Dns ()
-getHostEntry res host qs =
+data Source = FromHost HostName
+            | FromIP4 IP4
+              deriving (Show)
+
+sourceQType :: Source -> [QType]
+sourceQType FromHost{} = [QType A]
+sourceQType FromIP4{}  = [QType PTR]
+
+sourceHost :: Source -> Name
+sourceHost (FromHost h)            = toLabels h
+sourceHost (FromIP4 (IP4 a b c d)) = let byte w = fromString (show w)
+                                      in map byte [a,b,c,d] ++ ["in-addr","arpa"]
+
+toLabels :: String -> Name
+toLabels str = case break (== '.') str of
+  (as,_:bs) -> fromString as : toLabels bs
+  (as,_)    -> [fromString as]
+
+getHostEntry :: DnsResult -> Source -> Dns ()
+getHostEntry res src =
   do DnsState { .. } <- get
 
      -- make sure that there are name servers to work with
@@ -151,16 +179,16 @@ getHostEntry res host qs =
      -- register a upd handler on a fresh port, and query the name servers in
      -- order
      output $
-       do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf host)
-          send dnsSelf (createRequest res dnsNameServers host qs port)
+       do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf src)
+          send dnsSelf (createRequest res dnsNameServers src port)
 
 
 -- | Create the query packet, and register the request with the DNS layer.
 -- Then, send a request to the first name server.
-createRequest :: DnsResult -> [IP4] -> HostName -> [QType] -> UdpPort -> Dns ()
-createRequest res nss host qs port =
+createRequest :: DnsResult -> [IP4] -> Source -> UdpPort -> Dns ()
+createRequest res nss src port =
   do DnsState { .. } <- get
-     reqId <- registerRequest (mkDnsQuery res nss port host qs)
+     reqId <- registerRequest (mkDnsQuery res nss port src)
      sendRequest reqId
 
 
@@ -182,8 +210,8 @@ sendRequest reqId =
 
 
 -- | Handle the response from the server.
-handleResponse :: HostName -> IP4 -> UdpPort -> S.ByteString -> Dns ()
-handleResponse host srcIp srcPort bytes =
+handleResponse :: Source -> IP4 -> UdpPort -> S.ByteString -> Dns ()
+handleResponse src srcIp srcPort bytes =
   do guard (srcPort == 53)
 
      DNSPacket { .. } <- liftRight (parseDNSPacket bytes)
@@ -195,16 +223,20 @@ handleResponse host srcIp srcPort bytes =
      guard (Just srcIp == qLastServer req && not dnsQuery)
 
      if dnsRC == RespNoError
-        then output (putResult (qResult req) (parseHostEntry host dnsAnswers))
-        else output (putError  (qResult req) (DnsRequestFailed host))
+        then output (putResult (qResult req) (parseHostEntry src dnsAnswers))
+        else output (putError  (qResult req) DnsRequestFailed)
 
      removeRequest dnsId
      DnsState { .. } <- get
      output (removeUdpHandler dnsUdpHandle (qUdpPort req))
 
+parseHostEntry :: Source -> [RR] -> HostEntry
+parseHostEntry (FromHost host) = parseAddr host
+parseHostEntry (FromIP4 addr)  = parsePtr addr
+
 -- | Parse the A and CNAME parts out of a response.
-parseHostEntry :: HostName -> [RR] -> HostEntry
-parseHostEntry host = foldl' processAnswer emptyHostEntry
+parseAddr :: HostName -> [RR] -> HostEntry
+parseAddr host = foldl' processAnswer emptyHostEntry
   where
 
   emptyHostEntry = HostEntry { hostName      = host
@@ -215,7 +247,17 @@ parseHostEntry host = foldl' processAnswer emptyHostEntry
     RDA ip     -> he { hostAddresses = ip : hostAddresses he }
     RDCNAME ns -> he { hostName      = intercalate "." (map C8.unpack ns)
                      , hostAliases   = hostName he : hostAliases he }
+    _          -> he
 
+parsePtr :: IP4 -> [RR] -> HostEntry
+parsePtr addr = foldl' processAnswer emptyHostEntry
+  where
+  emptyHostEntry = HostEntry { hostName      = ""
+                             , hostAliases   = []
+                             , hostAddresses = [addr] }
+
+  processAnswer he RR { .. } = case rrRData of
+    RDPTR name -> he { hostName = intercalate "." (map C8.unpack name) }
     _          -> he
 
 
@@ -241,18 +283,21 @@ data DnsQuery = DnsQuery { qResult     :: DnsResult
                          , qLastServer :: Maybe IP4
                          }
 
-mkDnsQuery :: DnsResult -> [IP4] -> UdpPort -> HostName -> [QType] -> Word16
-           -> DnsQuery
-mkDnsQuery res nss port host qs reqId =
+mkDnsQuery :: DnsResult -> [IP4] -> UdpPort -> Source -> Word16 -> DnsQuery
+mkDnsQuery res nss port src reqId =
   DnsQuery { qResult     = res
            , qUdpPort    = port
            , qRequest    = renderDNSPacket (mkDNSPacket host qs reqId)
            , qServers    = nss
            , qLastServer = Nothing
            }
+  where
+  host = sourceHost src
+  qs   = sourceQType src
 
-mkDNSPacket :: HostName -> [QType] -> Word16 -> DNSPacket
-mkDNSPacket host qs reqId =
+
+mkDNSPacket :: Name -> [QType] -> Word16 -> DNSPacket
+mkDNSPacket name qs reqId =
   DNSPacket { dnsHeader            = hdr
             , dnsQuestions         = [ mkQuery q | q <- qs ]
             , dnsAnswers           = []
@@ -275,14 +320,6 @@ mkDNSPacket host qs reqId =
                       , qClass = QClass IN
                       }
 
-  name = toLabels host
-
-  toLabels str = case break (== '.') str of
-    (as,_:bs) -> fromString as : toLabels bs
-    (as,_)    -> [fromString as]
-
-
-
 
 -- UDP Interaction -------------------------------------------------------------
 
@@ -293,6 +330,6 @@ sendQuery nameServer sp bytes =
      output (sendUdp dnsUdpHandle nameServer (Just sp) 53 bytes)
 
 -- | Queue the packet into the DNS layer for processing.
-serverResponse :: DnsHandle -> HostName -> UdpPort -> Udp.Handler
-serverResponse dns host _ srcIp srcPort bytes =
-  send dns (handleResponse host srcIp srcPort bytes)
+serverResponse :: DnsHandle -> Source -> UdpPort -> Udp.Handler
+serverResponse dns src _ srcIp srcPort bytes =
+  send dns (handleResponse src srcIp srcPort bytes)

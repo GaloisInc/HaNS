@@ -122,6 +122,7 @@ data Class = IN | CS | CH | HS
 data RData = RDA IP4
            | RDNS Name
            | RDCNAME Name
+           | RDPTR Name
            | RDUnknown Type S.ByteString
              deriving (Show)
 
@@ -413,7 +414,7 @@ getRData ty = label (show ty) $
        MR    -> fail "MR not implemented"
        NULL  -> fail "NULL not implemented"
        WKS   -> fail "WKS not implemented"
-       PTR   -> fail "PTR not implemented"
+       PTR   -> RDPTR `fmap` getName
        HINFO -> fail "HINFO not implemented"
        MINFO -> fail "MINFO not implemented"
        MX    -> fail "MX not implemented"
@@ -539,6 +540,7 @@ putRData rd = case rd of
   RDA addr           -> rdata A     (renderIP4 addr)
   RDNS name          -> rdata NS    (putName name)
   RDCNAME name       -> rdata CNAME (putName name)
+  RDPTR name         -> rdata PTR   (putName name)
   RDUnknown ty bytes -> (ty,bytes)
   where
   rdata tag m = (tag,runPut m)

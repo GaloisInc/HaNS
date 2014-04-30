@@ -275,3 +275,6 @@ removeNameServer stack = Dns.removeNameServer (dnsHandle stack)
 
 getHostByName :: HasDns stack => stack -> Dns.HostName -> IO Dns.HostEntry
 getHostByName stack = Dns.getHostByName (dnsHandle stack)
+
+getHostByAddr :: HasDns stack => stack -> IP4 -> IO Dns.HostEntry
+getHostByAddr stack = Dns.getHostByAddr (dnsHandle stack)
