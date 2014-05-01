@@ -181,7 +181,6 @@ ackNsOptions ack ns = do
   routeVia ns defaultRoute gateway
 
   let nameServers = concat (mapMaybe getNameServers (ackOptions ack))
-  print nameServers
   mapM_ (addNameServer ns) nameServers
 
 getNameServers :: Dhcp4Option -> Maybe [IP4]
@@ -201,8 +200,6 @@ sendMessage ns resp src dst hwdst = do
         , etherSource       = mac
         , etherType         = ethernetIp4
         }
-  putStrLn (show mac ++ " -> " ++ show hwdst)
-
   sendEthernet (ethernetHandle ns) frame ipBytes
 
 mkIpBytes :: IP4 -> IP4 -> UdpPort -> UdpPort -> L.ByteString -> IO L.ByteString
