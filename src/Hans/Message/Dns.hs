@@ -104,7 +104,6 @@ data Type = A
           | MG
           | MR
           | NULL
-          | WKS
           | PTR
           | HINFO
           | MINFO
@@ -121,8 +120,18 @@ data Class = IN | CS | CH | HS
 
 data RData = RDA IP4
            | RDNS Name
+           | RDMD Name
+           | RDMF Name
            | RDCNAME Name
+           | RDSOA Name Name !Word32 !Int32 !Int32 !Int32 !Word32
+           | RDMB Name
+           | RDMG Name
+           | RDMR Name
            | RDPTR Name
+           | RDHINFO S.ByteString S.ByteString
+           | RDMINFO Name Name
+           | RDMX !Word16 Name
+           | RDNULL S.ByteString
            | RDUnknown Type S.ByteString
              deriving (Show)
 
@@ -198,6 +207,10 @@ getWord16be  = liftGet 2 C.getWord16be
 getWord32be :: Get Word32
 getWord32be  = liftGet 4 C.getWord32be
 
+{-# INLINE getInt32be #-}
+getInt32be :: Get Int32
+getInt32be  = fromIntegral `fmap` liftGet 4 C.getWord32be
+
 {-# INLINE getBytes #-}
 getBytes :: Int -> Get S.ByteString
 getBytes n = liftGet n (C.getBytes n)
@@ -216,6 +229,10 @@ label str m =
      set off'
      return a
 
+
+{-# INLINE putInt32be #-}
+putInt32be :: Putter Int32
+putInt32be i = putWord32be (fromIntegral i)
 
 -- Parsing ---------------------------------------------------------------------
 
@@ -318,8 +335,7 @@ getRR  = label "RR" $
   do rrName  <- getName
      ty      <- getType
      rrClass <- getClass
-     ttl     <- getWord32be
-     let rrTTL = fromIntegral ttl
+     rrTTL   <- getInt32be
      rrRData <- getRData ty
      return RR { .. }
 
@@ -345,7 +361,6 @@ getQType  =
        8   -> return (QType MG)
        9   -> return (QType MR)
        10  -> return (QType NULL)
-       11  -> return (QType WKS)
        12  -> return (QType PTR)
        13  -> return (QType HINFO)
        14  -> return (QType MINFO)
@@ -405,19 +420,36 @@ getRData ty = label (show ty) $
      isolate (fromIntegral len) $ case ty of
        A     -> RDA  `fmap` liftGet 4 parseIP4
        NS    -> RDNS `fmap` getName
-       MD    -> fail "MD not implemented"
-       MF    -> fail "MF not implemented"
+       MD    -> RDMD `fmap` getName
+       MF    -> RDMF `fmap` getName
        CNAME -> RDCNAME `fmap` getName
-       SOA   -> fail "SOA not implemented"
-       MB    -> fail "MB not implemented"
-       MG    -> fail "MG not implemented"
-       MR    -> fail "MR not implemented"
-       NULL  -> fail "NULL not implemented"
-       WKS   -> fail "WKS not implemented"
+       SOA   -> do mname   <- getName
+                   rname   <- getName
+                   serial  <- getWord32be
+                   refresh <- getInt32be
+                   retry   <- getInt32be
+                   expire  <- getInt32be
+                   minTTL  <- getWord32be
+                   return (RDSOA mname rname serial refresh retry expire minTTL)
+       MB    -> RDMB `fmap` getName
+       MG    -> RDMG `fmap` getName
+       MR    -> RDMR `fmap` getName
+       NULL  -> RDNULL `fmap` (getBytes =<< lift C.remaining)
        PTR   -> RDPTR `fmap` getName
-       HINFO -> fail "HINFO not implemented"
-       MINFO -> fail "MINFO not implemented"
-       MX    -> fail "MX not implemented"
+
+       HINFO -> do cpuLen <- getWord8
+                   cpu    <- getBytes (fromIntegral cpuLen)
+                   osLen  <- getWord8
+                   os     <- getBytes (fromIntegral osLen)
+                   return (RDHINFO cpu os)
+
+       MINFO -> do rmailBx <- getName
+                   emailBx <- getName
+                   return (RDMINFO rmailBx emailBx)
+
+       MX    -> do pref <- getWord16be
+                   ex   <- getName
+                   return (RDMX pref ex)
 
        _     -> RDUnknown ty `fmap` (getBytes =<< lift C.remaining)
 
@@ -501,7 +533,6 @@ putType MB    = putWord16be 7
 putType MG    = putWord16be 8
 putType MR    = putWord16be 9
 putType NULL  = putWord16be 10
-putType WKS   = putWord16be 11
 putType PTR   = putWord16be 12
 putType HINFO = putWord16be 13
 putType MINFO = putWord16be 14
@@ -539,8 +570,32 @@ putRData :: RData -> (Type,S.ByteString)
 putRData rd = case rd of
   RDA addr           -> rdata A     (renderIP4 addr)
   RDNS name          -> rdata NS    (putName name)
+  RDMD name          -> rdata MD    (putName name)
+  RDMF name          -> rdata MF    (putName name)
   RDCNAME name       -> rdata CNAME (putName name)
+  RDSOA m r s f t ex ttl ->
+                        rdata SOA $ do putName m
+                                       putName r
+                                       putWord32be s
+                                       putInt32be f
+                                       putInt32be t
+                                       putInt32be ex
+                                       putWord32be ttl
+
+  RDMB name          -> rdata MB    (putName name)
+  RDMG name          -> rdata MG    (putName name)
+  RDMR name          -> rdata MR    (putName name)
+  RDNULL bytes       -> rdata NULL  $ do putWord8 (fromIntegral (S.length bytes))
+                                         putByteString bytes
   RDPTR name         -> rdata PTR   (putName name)
+  RDHINFO cpu os     -> rdata HINFO $ do putWord8 (fromIntegral (S.length cpu))
+                                         putByteString cpu
+                                         putWord8 (fromIntegral (S.length os))
+                                         putByteString os
+  RDMINFO rm em      -> rdata MINFO $ do putName rm
+                                         putName em
+  RDMX pref ex       -> rdata MX    $ do putWord16be pref
+                                         putName ex
   RDUnknown ty bytes -> (ty,bytes)
   where
   rdata tag m = (tag,runPut m)
