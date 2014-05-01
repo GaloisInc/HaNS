@@ -9,15 +9,12 @@ import Hans.Address.Mac
 import Hans.Address.IP4
 import Hans.Device.Tap
 import Hans.NetworkStack
-import Hans.Message.Tcp (TcpPort(..))
 
 import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO
                           ,killThread,myThreadId)
-import Control.Monad (forever,when,unless)
+import Control.Monad (forever,when)
 import System.Environment (getArgs)
-import qualified Control.Exception as X
 import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.Char8 as LC
 
 
 localAddr :: IP4
