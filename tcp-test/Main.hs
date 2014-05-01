@@ -1,13 +1,17 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Main where
 
 import Hans.Address
+import Hans.DhcpClient
 import Hans.Address.Mac
 import Hans.Address.IP4
 import Hans.Device.Tap
 import Hans.NetworkStack
 import Hans.Message.Tcp (TcpPort(..))
 
-import Control.Concurrent (threadDelay,forkIO,killThread,myThreadId)
+import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO
+                          ,killThread,myThreadId)
 import Control.Monad (forever,when,unless)
 import System.Environment (getArgs)
 import qualified Control.Exception as X
@@ -23,36 +27,24 @@ main  = do
   ns  <- newNetworkStack
   mac <- initEthernetDevice ns
   deviceUp ns mac
-  setAddress mac ns
   putStrLn "Network stack running..."
 
-  client ns
-  server ns
+  args <- getArgs
+  if args == ["dhcp"]
+     then do putStrLn "Discovering address"
+             res <- newEmptyMVar
+             dhcpDiscover ns mac (putMVar res)
+             ip  <- takeMVar res
+             putStrLn ("Bound to address: " ++ show ip)
 
-client :: NetworkStack -> IO ()
-client ns = body `X.catch` \ ConnectionRefused ->
-  putStrLn "192.168.90.1:8000 -> Connection refused"
-  where
-  body = do
-    args <- getArgs
+             putStrLn "Looking up galois.com..."
+             HostEntry { .. } <- getHostByName ns "galois.com"
+             print hostAddresses
 
-    let local = case args of
-          [p] -> Just (TcpPort (read p))
-          _   -> Nothing
+             server ns
 
-    sock <- connect ns (IP4 192 168 90 1) 8000 local
-    putStrLn "Connected!"
-    _ <- sendBytes sock $ fromString "GET / HTTP/1.1\r\n\r\n"
-    putStrLn "request in..."
-
-    let loop = do
-          bytes <- recvBytes sock 1024
-          LC.putStrLn bytes
-          unless (L.null bytes) loop
-    loop
-
-    putStrLn "Done!"
-    close sock
+     else do setAddress mac ns
+             server ns
 
 server :: NetworkStack -> IO ()
 server ns = do
