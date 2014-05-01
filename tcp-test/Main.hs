@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
@@ -66,11 +67,8 @@ server ns = do
         return ()
     return ()
 
-fromString :: String -> L.ByteString
-fromString  = L.pack . map (toEnum . fromEnum)
-
 message :: L.ByteString
-message  = fromString "Hello, world\n"
+message  = "Hello, world\n"
 
 sleep :: Int -> IO ()
 sleep s = threadDelay (s * 1000 * 1000)
