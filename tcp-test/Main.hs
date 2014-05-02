@@ -47,7 +47,6 @@ main  = do
 server :: NetworkStack -> IO ()
 server ns = do
   sock <- listen ns localAddr 9001
-  print (sockLocalPort sock)
 
   forever $ do
     putStrLn "accepting"

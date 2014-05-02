@@ -46,7 +46,6 @@ import qualified Hans.Layer.Icmp4 as Icmp4
 import qualified Hans.Layer.IP4 as IP4
 import qualified Hans.Layer.Tcp as Tcp
 import qualified Hans.Layer.Tcp.Socket as Tcp
-import qualified Hans.Layer.Timer as Timer
 import qualified Hans.Layer.Udp as Udp
 
 import qualified Data.ByteString as S
@@ -61,7 +60,6 @@ data NetworkStack = NetworkStack
   , nsEthernet  :: Eth.EthernetHandle
   , nsIp4       :: IP4.IP4Handle
   , nsIcmp4     :: Icmp4.Icmp4Handle
-  , nsTimers    :: Timer.TimerHandle
   , nsUdp       :: Udp.UdpHandle
   , nsTcp       :: Tcp.TcpHandle
   , nsDns       :: Dns.DnsHandle
@@ -71,7 +69,6 @@ instance HasArp      NetworkStack where arpHandle      = nsArp
 instance HasEthernet NetworkStack where ethernetHandle = nsEthernet
 instance HasIP4      NetworkStack where ip4Handle      = nsIp4
 instance HasIcmp4    NetworkStack where icmp4Handle    = nsIcmp4
-instance HasTimer    NetworkStack where timerHandle    = nsTimers
 instance HasTcp      NetworkStack where tcpHandle      = nsTcp
 instance HasUdp      NetworkStack where udpHandle      = nsUdp
 instance HasDns      NetworkStack where dnsHandle      = nsDns
@@ -82,14 +79,12 @@ newNetworkStack  = do
   nsArp      <- newChannel
   nsIp4      <- newChannel
   nsIcmp4    <- newChannel
-  nsTimers   <- newChannel
   nsUdp      <- newChannel
   nsTcp      <- newChannel
   nsDns      <- newChannel
 
   let ns = NetworkStack { .. }
 
-  startTimerLayer    ns
   startEthernetLayer ns
   startArpLayer      ns
   startIcmp4Layer    ns
@@ -106,8 +101,6 @@ newNetworkStack  = do
 
 class HasEthernet stack where
   ethernetHandle :: stack -> Eth.EthernetHandle
-
-instance HasEthernet Eth.EthernetHandle where ethernetHandle = id
 
 -- | Start the ethernet layer in a network stack.
 startEthernetLayer :: HasEthernet stack => stack -> IO ()
@@ -136,21 +129,16 @@ deviceDown stack = Eth.stopEthernetDevice (ethernetHandle stack)
 class HasArp stack where
   arpHandle :: stack -> Arp.ArpHandle
 
-instance HasArp Arp.ArpHandle where arpHandle = id
-
 -- | Start the arp layer in a network stack.
-startArpLayer :: (HasEthernet stack, HasTimer stack, HasArp stack)
-              => stack -> IO ()
+startArpLayer :: (HasEthernet stack, HasArp stack) => stack -> IO ()
 startArpLayer stack =
-  Arp.runArpLayer (arpHandle stack) (ethernetHandle stack) (timerHandle stack)
+  Arp.runArpLayer (arpHandle stack) (ethernetHandle stack)
 
 
 -- Icmp4 Layer Interface -------------------------------------------------------
 
 class HasIcmp4 stack where
   icmp4Handle :: stack -> Icmp4.Icmp4Handle
-
-instance HasIcmp4 Icmp4.Icmp4Handle where icmp4Handle = id
 
 -- | Start the icmp4 layer in a network stack..
 startIcmp4Layer :: (HasIcmp4 stack, HasIP4 stack) => stack -> IO ()
@@ -162,8 +150,6 @@ startIcmp4Layer stack =
 
 class HasIP4 stack where
   ip4Handle :: stack -> IP4.IP4Handle
-
-instance HasIP4 IP4.IP4Handle where ip4Handle = id
 
 -- | Start the IP4 layer in a network stack.
 startIP4Layer :: (HasArp stack, HasEthernet stack, HasIP4 stack)
@@ -201,8 +187,6 @@ ignoreIP4Protocol stack = IP4.removeIP4Handler (ip4Handle stack)
 class HasUdp stack where
   udpHandle :: stack -> Udp.UdpHandle
 
-instance HasUdp Udp.UdpHandle where udpHandle = id
-
 -- | Start the UDP layer of a network stack.
 startUdpLayer :: (HasIP4 stack, HasIcmp4 stack, HasUdp stack) => stack -> IO ()
 startUdpLayer stack =
@@ -228,15 +212,13 @@ sendUdp stack = Udp.sendUdp (udpHandle stack)
 
 -- Tcp Layer Interface ---------------------------------------------------------
 
-class HasTcp stack where
+class HasIP4 stack => HasTcp stack where
   tcpHandle :: stack -> Tcp.TcpHandle
 
-instance HasTcp Tcp.TcpHandle where tcpHandle = id
-
 -- | Start the TCP layer of a network stack.
-startTcpLayer :: (HasIP4 stack, HasTimer stack, HasTcp stack) => stack -> IO ()
+startTcpLayer :: HasTcp stack => stack -> IO ()
 startTcpLayer stack =
-  Tcp.runTcpLayer (tcpHandle stack) (ip4Handle stack) (timerHandle stack)
+  Tcp.runTcpLayer (tcpHandle stack) (ip4Handle stack)
 
 -- | Listen for incoming connections.
 listen :: HasTcp stack => stack -> IP4 -> TcpPort -> IO Tcp.Socket
@@ -247,25 +229,14 @@ connect :: HasTcp stack => stack -> IP4 -> TcpPort -> Maybe TcpPort -> IO Tcp.So
 connect stack = Tcp.connect (tcpHandle stack)
 
 
--- Timer Layer Interface -------------------------------------------------------
-
-class HasTimer stack where
-  timerHandle :: stack -> Timer.TimerHandle
-
-instance HasTimer Timer.TimerHandle where timerHandle = id
-
--- | Start the Timer layer in a network stack.
-startTimerLayer :: HasTimer stack => stack -> IO ()
-startTimerLayer stack = Timer.runTimerLayer (timerHandle stack)
-
-
 -- Dns Layer Interface ---------------------------------------------------------
 
 class HasUdp stack => HasDns stack where
   dnsHandle :: stack -> Dns.DnsHandle
 
 startDnsLayer :: HasDns stack => stack -> IO ()
-startDnsLayer stack = Dns.runDnsLayer (dnsHandle stack) (udpHandle stack)
+startDnsLayer stack =
+  Dns.runDnsLayer (dnsHandle stack) (udpHandle stack)
 
 addNameServer :: HasDns stack => stack -> IP4 -> IO ()
 addNameServer stack = Dns.addNameServer (dnsHandle stack)

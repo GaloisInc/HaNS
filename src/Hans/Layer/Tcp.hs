@@ -13,7 +13,6 @@ import Hans.Layer.Tcp.Handlers
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Timers
 import Hans.Layer.Tcp.Types
-import Hans.Layer.Timer
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 import Hans.Utils
@@ -23,10 +22,10 @@ import Data.Time.Clock.POSIX (getPOSIXTime,POSIXTime)
 import qualified Data.ByteString as S
 
 
-runTcpLayer :: TcpHandle -> IP4Handle -> TimerHandle -> IO ()
-runTcpLayer tcp ip4 t = do
+runTcpLayer :: TcpHandle -> IP4Handle -> IO ()
+runTcpLayer tcp ip4 = do
   start <- getPOSIXTime
-  let s0 = emptyTcpState tcp ip4 t start
+  let s0 = emptyTcpState tcp ip4 start
   void (forkIO (loopLayer "tcp" s0 (receive tcp) stepTcp))
   addIP4Handler ip4 tcpProtocol (queueTcp tcp)
 

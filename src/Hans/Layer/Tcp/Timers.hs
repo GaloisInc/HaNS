@@ -18,9 +18,10 @@ import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
-import Hans.Layer.Timer
+import Hans.Timers (Milliseconds)
 
-import Control.Monad (when,guard)
+import Control.Concurrent (forkIO,threadDelay)
+import Control.Monad (when,guard,forever,void)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Foldable as F
 
@@ -33,12 +34,10 @@ import qualified Data.Foldable as F
 -- the decision about how long to delay based on that.
 every :: Milliseconds -> Tcp () -> Tcp ()
 every len body = do
-  tcp    <- self
-  timers <- timerHandle
-  let loop = output $ delay timers len $ send tcp $ do
-        body
-        loop
-  loop
+  tcp <- self
+  output $ void $ forkIO $ forever $
+    do threadDelay len
+       send tcp body
 
 -- | Schedule the timers to run on the fast and slow intervals.
 initTimers :: Tcp ()

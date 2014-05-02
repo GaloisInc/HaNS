@@ -23,6 +23,7 @@ import Hans.Layer
 import Hans.Layer.Udp as Udp
 import Hans.Message.Dns
 import Hans.Message.Udp
+import Hans.Timers
 
 import Control.Concurrent ( forkIO, MVar, newEmptyMVar, takeMVar, putMVar )
 import Control.Monad ( mzero, guard, when )
@@ -107,6 +108,7 @@ data DnsState = DnsState { dnsSelf        :: DnsHandle
                          , dnsNameServers :: [IP4]
                          , dnsReqId       :: !Word16
                          , dnsQueries     :: Map.Map Word16 DnsQuery
+                         , dnsTimeout     :: Milliseconds
                          }
 
 emptyDnsState :: DnsHandle -> UdpHandle -> DnsState
@@ -114,7 +116,9 @@ emptyDnsState h udp = DnsState { dnsSelf        = h
                                , dnsUdpHandle   = udp
                                , dnsNameServers = []
                                , dnsReqId       = 1
-                               , dnsQueries     = Map.empty }
+                               , dnsQueries     = Map.empty
+                               , dnsTimeout     = 180000 -- 3 minutes
+                               }
 
 -- LFSR: x^16 + x^14 + x^13 + x^11 + 1
 --
@@ -122,6 +126,8 @@ emptyDnsState h udp = DnsState { dnsSelf        = h
 stepReqId :: Word16 -> Word16
 stepReqId w = (w `shiftR` 1) .|. (negate (w .&. 0x1) .&. 0xB400)
 
+-- | Register a fresh request, along with a timer to reap the request after
+-- 'dnsTimeout'.
 registerRequest :: (Word16 -> DnsQuery) -> Dns Word16
 registerRequest mk =
   do state <- get
@@ -180,6 +186,7 @@ getHostEntry res src =
      -- order
      output $
        do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf src)
+          putStrLn ("dns request on port: " ++ show port)
           send dnsSelf (createRequest res dnsNameServers src port)
 
 
@@ -196,6 +203,8 @@ createRequest res nss src port =
 sendRequest :: Word16 -> Dns ()
 sendRequest reqId =
   do query <- lookupRequest reqId
+
+     output (putStrLn "sending query")
 
      case qServers query of
 

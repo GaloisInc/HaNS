@@ -93,7 +93,6 @@ library
                                 Hans.Layer.Tcp.Types,
                                 Hans.Layer.Tcp.WaitBuffer,
                                 Hans.Layer.Tcp.Window,
-                                Hans.Layer.Timer,
                                 Hans.Layer.Udp,
                                 Hans.Message.Arp,
                                 Hans.Message.Dhcp4,
@@ -109,6 +108,7 @@ library
                                 Hans.NetworkStack,
                                 Hans.Ports,
                                 Hans.Simple,
+                                Hans.Timers,
                                 Hans.Utils,
                                 Hans.Utils.Checksum
 

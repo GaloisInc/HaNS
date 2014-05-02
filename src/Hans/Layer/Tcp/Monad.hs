@@ -8,7 +8,6 @@ import Hans.Layer
 import Hans.Layer.IP4
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
-import Hans.Layer.Timer
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
@@ -31,15 +30,13 @@ type Tcp = Layer TcpState
 data TcpState = TcpState
   { tcpSelf  :: TcpHandle
   , tcpIP4   :: IP4Handle
-  , tcpTimer :: TimerHandle
   , tcpHost  :: Host
   }
 
-emptyTcpState :: TcpHandle -> IP4Handle -> TimerHandle -> POSIXTime -> TcpState
-emptyTcpState tcp ip4 timer start = TcpState
+emptyTcpState :: TcpHandle -> IP4Handle -> POSIXTime -> TcpState
+emptyTcpState tcp ip4 start = TcpState
   { tcpSelf  = tcp
   , tcpIP4   = ip4
-  , tcpTimer = timer
   , tcpHost  = emptyHost start
   }
 
@@ -50,10 +47,6 @@ self  = tcpSelf `fmap` get
 -- | Get the handle to the IP4 layer.
 ip4Handle :: Tcp IP4Handle
 ip4Handle  = tcpIP4 `fmap` get
-
--- | Get the handle to the Timer layer.
-timerHandle :: Tcp TimerHandle
-timerHandle  = tcpTimer `fmap` get
 
 
 -- Host Operations -------------------------------------------------------------

@@ -17,10 +17,10 @@ import Hans.Channel
 import Hans.Layer
 import Hans.Layer.Arp.Table
 import Hans.Layer.Ethernet
-import Hans.Layer.Timer
 import Hans.Message.Arp
     (ArpPacket(..),parseArpPacket,renderArpPacket,ArpOper(..))
 import Hans.Message.EthernetFrame
+import Hans.Timers (delay_)
 import Hans.Utils
 
 import Control.Concurrent (forkIO,takeMVar,putMVar,newEmptyMVar)
@@ -38,10 +38,10 @@ type ArpHandle = Channel (Arp ())
 
 
 -- | Start an arp layer.
-runArpLayer :: ArpHandle -> EthernetHandle -> TimerHandle -> IO ()
-runArpLayer h eth th = do
+runArpLayer :: ArpHandle -> EthernetHandle -> IO ()
+runArpLayer h eth = do
   addEthernetHandler eth (EtherType 0x0806) (send h . handleIncoming)
-  let i = emptyArpState h eth th
+  let i = emptyArpState h eth
   void (forkIO (loopLayer "arp" i (receive h) id))
 
 
@@ -73,25 +73,20 @@ data ArpState = ArpState
   , arpAddrs    :: Map.Map IP4 Mac -- this layer's addresses
   , arpWaiting  :: Map.Map IP4 [Maybe Mac -> IO ()]
   , arpEthernet :: EthernetHandle
-  , arpTimers   :: TimerHandle
   , arpSelf     :: ArpHandle
   }
 
-emptyArpState :: ArpHandle -> EthernetHandle -> TimerHandle -> ArpState
-emptyArpState h eth ts = ArpState
+emptyArpState :: ArpHandle -> EthernetHandle -> ArpState
+emptyArpState h eth = ArpState
   { arpTable    = Map.empty
   , arpAddrs    = Map.empty
   , arpWaiting  = Map.empty
   , arpEthernet = eth
-  , arpTimers   = ts
   , arpSelf     = h
   }
 
 ethernetHandle :: Arp EthernetHandle
 ethernetHandle  = arpEthernet `fmap` get
-
-timerHandle :: Arp TimerHandle
-timerHandle  = arpTimers `fmap` get
 
 addEntry :: IP4 -> Mac -> Arp ()
 addEntry spa sha = do
@@ -180,8 +175,7 @@ whoHas ip k = (k' =<< localHwAddress ip) `mplus` query
         set state { arpTable = table' }
         addWaiter ip k
         mapM_ (sendArpPacket . msg) addrs
-        th <- timerHandle
-        output (delay th 10000 (send (arpSelf state) advanceArpTable))
+        output (delay_ 10000 (send (arpSelf state) advanceArpTable))
 
 -- | Process an incoming arp packet
 handleIncoming :: S.ByteString -> Arp ()
