@@ -4,19 +4,29 @@ module Hans.Timers (
   , delay
   , delay_
   , cancel
+  , isCancelled
   ) where
 
-import Control.Concurrent (forkIO,ThreadId,threadDelay,killThread)
+import Control.Concurrent (forkIO,ThreadId,threadDelay,killThread
+                          ,mkWeakThreadId)
+import GHC.Conc (threadStatus,ThreadStatus(..))
+import System.Mem.Weak (Weak,deRefWeak)
 
 
 type Milliseconds = Int
 
-newtype Timer = Timer ThreadId
-                deriving (Show,Eq)
+-- | A handle to a scheduled timer.
+--
+-- NOTE: This keeps a weak reference to the thread containing the timer, to
+-- allow it to still receive exceptions (see mkWeakThreadId).
+newtype Timer = Timer (Weak ThreadId)
 
 -- | Delay an action, giving back a handle to allow the timer to be cancelled.
 delay :: Milliseconds -> IO () -> IO Timer
-delay n body = Timer `fmap` forkIO (threadDelay (n * 1000) >> body)
+delay n body =
+  do tid <- forkIO (threadDelay (n * 1000) >> body)
+     wid <- mkWeakThreadId tid
+     return (Timer wid)
 
 -- | Delay an action.
 delay_ :: Milliseconds -> IO () -> IO ()
@@ -26,4 +36,20 @@ delay_ n body =
 
 -- | Cancel a delayed action.
 cancel :: Timer -> IO ()
-cancel (Timer tid) = killThread tid
+cancel (Timer wid) =
+  do mb <- deRefWeak wid
+     case mb of
+       Just tid -> killThread tid
+       Nothing  -> return ()
+
+isCancelled :: Timer -> IO Bool
+isCancelled (Timer wid) =
+  do mb <- deRefWeak wid
+     case mb of
+       Just tid -> do status <- threadStatus tid
+                      case status of
+                        ThreadRunning   -> return False
+                        ThreadBlocked _ -> return False
+                        _               -> return True
+
+       Nothing  -> return True
