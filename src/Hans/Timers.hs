@@ -16,12 +16,12 @@ newtype Timer = Timer ThreadId
 
 -- | Delay an action, giving back a handle to allow the timer to be cancelled.
 delay :: Milliseconds -> IO () -> IO Timer
-delay n body = Timer `fmap` forkIO (threadDelay n >> body)
+delay n body = Timer `fmap` forkIO (threadDelay (n * 1000) >> body)
 
 -- | Delay an action.
 delay_ :: Milliseconds -> IO () -> IO ()
 delay_ n body =
-  do _ <- forkIO (threadDelay n >> body)
+  do _ <- forkIO (threadDelay (n * 1000) >> body)
      return ()
 
 -- | Cancel a delayed action.
