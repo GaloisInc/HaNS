@@ -186,7 +186,6 @@ getHostEntry res src =
      -- order
      output $
        do port <- addUdpHandlerAnyPort dnsUdpHandle (serverResponse dnsSelf src)
-          putStrLn ("dns request on port: " ++ show port)
           send dnsSelf (createRequest res dnsNameServers src port)
 
 
@@ -203,8 +202,6 @@ createRequest res nss src port =
 sendRequest :: Word16 -> Dns ()
 sendRequest reqId =
   do query <- lookupRequest reqId
-
-     output (putStrLn "sending query")
 
      case qServers query of
 
