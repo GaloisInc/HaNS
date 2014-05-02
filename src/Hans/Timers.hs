@@ -4,7 +4,7 @@ module Hans.Timers (
   , delay
   , delay_
   , cancel
-  , isCancelled
+  , expired
   ) where
 
 import Control.Concurrent (forkIO,ThreadId,threadDelay,killThread
@@ -42,8 +42,8 @@ cancel (Timer wid) =
        Just tid -> killThread tid
        Nothing  -> return ()
 
-isCancelled :: Timer -> IO Bool
-isCancelled (Timer wid) =
+expired :: Timer -> IO Bool
+expired (Timer wid) =
   do mb <- deRefWeak wid
      case mb of
        Just tid -> do status <- threadStatus tid
