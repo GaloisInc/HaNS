@@ -137,6 +137,13 @@ registerRequest mk =
                }
      return reqId
 
+registerTimeout :: Word16 -> Timer -> Dns ()
+registerTimeout reqId timer =
+  do DnsState { .. } <- get
+     case Map.lookup reqId dnsQueries of
+       Just query -> updateRequest reqId query { qTimeout = Just timer }
+       Nothing    -> output (cancel timer)
+
 updateRequest :: Word16 -> DnsQuery -> Dns ()
 updateRequest reqId query =
   do state <- get
@@ -208,12 +215,17 @@ sendRequest reqId =
        n:rest -> do updateRequest reqId query { qServers    = rest
                                               , qLastServer = Just n
                                               }
-                    sendQuery n (qUdpPort query) (qRequest query)
+                    sendQuery n (qUdpPort query) reqId (qRequest query)
 
        -- out of servers to try
        [] -> do removeRequest reqId
                 output (putError (qResult query) OutOfServers)
 
+expireRequest :: Word16 -> Dns ()
+expireRequest reqId =
+  do DnsQuery { .. } <- lookupRequest reqId
+     removeRequest reqId
+     output (putError qResult OutOfServers)
 
 -- | Handle the response from the server.
 handleResponse :: Source -> IP4 -> UdpPort -> S.ByteString -> Dns ()
@@ -222,19 +234,22 @@ handleResponse src srcIp srcPort bytes =
 
      DNSPacket { .. } <- liftRight (parseDNSPacket bytes)
      let DNSHeader { .. } = dnsHeader
-     req <- lookupRequest dnsId
+     DnsQuery { .. } <- lookupRequest dnsId
 
      -- require that the last name server we sent to was the one that responded,
      -- and that it responded with a response, not a request.
-     guard (Just srcIp == qLastServer req && not dnsQuery)
+     guard (Just srcIp == qLastServer && not dnsQuery)
 
      if dnsRC == RespNoError
-        then output (putResult (qResult req) (parseHostEntry src dnsAnswers))
-        else output (putError  (qResult req) DnsRequestFailed)
+        then output (putResult qResult (parseHostEntry src dnsAnswers))
+        else output (putError  qResult DnsRequestFailed)
 
      removeRequest dnsId
      DnsState { .. } <- get
-     output (removeUdpHandler dnsUdpHandle (qUdpPort req))
+     output $ do removeUdpHandler dnsUdpHandle qUdpPort
+                 case qTimeout of
+                   Just timeout -> cancel timeout
+                   Nothing      -> return ()
 
 parseHostEntry :: Source -> [RR] -> HostEntry
 parseHostEntry (FromHost host) = parseAddr host
@@ -287,6 +302,9 @@ data DnsQuery = DnsQuery { qResult     :: DnsResult
                          , qServers    :: [IP4]
                            -- ^ Name servers left to try
                          , qLastServer :: Maybe IP4
+                           -- ^ The last server queried
+                         , qTimeout    :: Maybe Timer
+                           -- ^ The timer for the current request
                          }
 
 mkDnsQuery :: DnsResult -> [IP4] -> UdpPort -> Source -> Word16 -> DnsQuery
@@ -296,6 +314,7 @@ mkDnsQuery res nss port src reqId =
            , qRequest    = renderDNSPacket (mkDNSPacket host qs reqId)
            , qServers    = nss
            , qLastServer = Nothing
+           , qTimeout    = Nothing
            }
   where
   host = sourceHost src
@@ -330,10 +349,12 @@ mkDNSPacket name qs reqId =
 -- UDP Interaction -------------------------------------------------------------
 
 -- | Send a UDP query to the server given
-sendQuery :: IP4 -> UdpPort -> L.ByteString -> Dns ()
-sendQuery nameServer sp bytes =
+sendQuery :: IP4 -> UdpPort -> Word16 -> L.ByteString -> Dns ()
+sendQuery nameServer sp reqId bytes =
   do DnsState { .. } <- get
-     output (sendUdp dnsUdpHandle nameServer (Just sp) 53 bytes)
+     output $ do sendUdp dnsUdpHandle nameServer (Just sp) 53 bytes
+                 expire <- delay dnsTimeout (send dnsSelf (expireRequest reqId) `X.finally` putStrLn "KILLED")
+                 send dnsSelf (registerTimeout reqId expire)
 
 -- | Queue the packet into the DNS layer for processing.
 serverResponse :: DnsHandle -> Source -> UdpPort -> Udp.Handler
