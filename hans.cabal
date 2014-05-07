@@ -30,7 +30,6 @@ flag example
         description:    Build the example program
 
 flag halvm
-        default:        False
         description:    Build for the HaLVM
 
 flag word32-in-random
