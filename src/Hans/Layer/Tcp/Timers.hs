@@ -35,8 +35,9 @@ import qualified Data.Foldable as F
 every :: Milliseconds -> Tcp () -> Tcp ()
 every len body = do
   tcp <- self
+  let timeout = len * 1000
   output $ void $ forkIO $ forever $
-    do threadDelay len
+    do threadDelay timeout
        send tcp body
 
 -- | Schedule the timers to run on the fast and slow intervals.
