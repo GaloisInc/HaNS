@@ -62,20 +62,22 @@ addWindowScale sock
 
 -- | Given a tcp header, generate the next header in the sequence that
 -- corresponds to the RST ACK response.
-mkRstAck :: TcpHeader -> TcpHeader
-mkRstAck hdr = emptyTcpHeader
-  -- XXX need a story for what to set the SN to here
+mkRstAck :: TcpHeader -> Int -> TcpHeader
+mkRstAck hdr len = emptyTcpHeader
   { tcpSeqNum     = 0
-  , tcpAckNum     = tcpSeqNum hdr + 1
-  , tcpSourcePort = tcpDestPort hdr
-  , tcpDestPort   = tcpSourcePort hdr
-  , tcpAck        = True
+  , tcpAckNum     = tcpSeqNum hdr + fromIntegral len
   , tcpRst        = True
+  , tcpDestPort   = tcpSourcePort hdr
+  , tcpSourcePort = tcpDestPort hdr
   }
 
-mkRst :: TcpSocket -> TcpHeader
-mkRst tcp = (mkSegment tcp)
-  { tcpRst = True }
+mkRst :: TcpHeader -> TcpHeader
+mkRst hdr = emptyTcpHeader
+  { tcpSeqNum = tcpAckNum hdr
+  , tcpRst    = True
+  , tcpDestPort   = tcpSourcePort hdr
+  , tcpSourcePort = tcpDestPort hdr
+  }
 
 
 -- Connection Establishment ----------------------------------------------------
@@ -161,12 +163,11 @@ finAck  = do
   advanceSndNxt 1
   clearDelayedAck
 
-rst :: Sock ()
-rst  = do
-  tcp <- getTcpSocket
-  tcpOutput (mkRst tcp) L.empty
-  advanceSndNxt 1
-  clearDelayedAck
+rstAck :: TcpHeader -> Int -> Sock ()
+rstAck hdr len = tcpOutput (mkRstAck hdr len) L.empty
+
+rst :: TcpHeader -> Sock ()
+rst hdr = tcpOutput (mkRst hdr) L.empty
 
 -- | Send a segment.
 outputSegment :: OutSegment -> Sock ()

@@ -145,7 +145,9 @@ handleFinWait2  = whenState FinWait2
 -- | Update segments in the outgoing window, decrementing their RTO timers, and
 -- retransmitting them if it expires.
 handleRTO :: Sock ()
-handleRTO  = F.mapM_ outputSegment =<< modifyTcpSocket update
+handleRTO  = do
+  s <- getState
+  when (s /= Closed) (F.mapM_ outputSegment =<< modifyTcpSocket update)
   where
   update tcp = (segs,tcp { tcpOut = win' })
     where

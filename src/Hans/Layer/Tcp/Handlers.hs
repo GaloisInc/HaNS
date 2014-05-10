@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Hans.Layer.Tcp.Handlers where
 
 import Hans.Address.IP4
@@ -30,9 +32,7 @@ handleIncomingTcp ip4 bytes = do
       dst = ip4DestAddr ip4
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (parseTcpPacket bytes)
-  established src dst hdr body
-    `mplus` listening ip4 hdr
-    `mplus` sendSegment src (mkRstAck hdr) L.empty
+  established src dst hdr body `mplus` listening ip4 hdr
 
 
 -- Established Connections -----------------------------------------------------
@@ -46,14 +46,15 @@ established remote _local hdr body = do
     resetIdle
 
     -- keep their timestamp up to date
-    shouldDrop <- modifyTcpSocket (updateTimestamp hdr)
-    guard (not shouldDrop)
+    timestampInvalid <- modifyTcpSocket (updateTimestamp hdr)
+    guard (not timestampInvalid)
 
     case state of
 
       Established
         | isFinAck hdr -> remoteGracefulTeardown
-        | tcpRst hdr   -> closeSocket
+        | tcpRst hdr   -> do rst hdr
+                             closeSocket
         | otherwise    -> deliverSegment hdr body
 
       SynReceived
@@ -61,6 +62,10 @@ established remote _local hdr body = do
           setState Established
           k <- inParent popAcceptor
           outputS (k sid)
+
+        | tcpAck hdr && tcpPsh hdr -> do
+          rst hdr
+          closeSocket
 
           -- close this child socket
         | tcpRst hdr -> closeSocket
@@ -70,7 +75,7 @@ established remote _local hdr body = do
 
       SynSent
           -- connection rejected
-        | isRstAck hdr -> do
+        | tcpRst hdr -> do
           setState Closed
           notify False
           closeSocket
@@ -94,20 +99,13 @@ established remote _local hdr body = do
 
       FinWait1
           -- simultaneous close
-        | isFin hdr -> do
-          advanceRcvNxt 1
+        | tcpFin hdr -> do
           ack
           setState Closing
 
-          -- 3-way close
-        | isFinAck hdr -> do
+        | tcpAck hdr -> do
           advanceRcvNxt 1
           ack
-          enterTimeWait
-
-          -- 4-way close
-        | isAck hdr -> do
-          advanceRcvNxt 1
           setState FinWait2
 
       FinWait2
@@ -115,18 +113,47 @@ established remote _local hdr body = do
           ack
           enterTimeWait
 
+        | tcpRst hdr -> do
+          rst hdr
+          closeSocket
+
+        | tcpAck hdr ->
+          return ()
+
       Closing
         | isAck hdr -> do
           advanceRcvNxt 1
           enterTimeWait
 
       LastAck
-        | isAck hdr -> closeSocket
+        | isAck hdr -> setState Closed
 
-      _ -> do
-        outputS (putStrLn ("Unexpected packet for state " ++ show state))
-        rst
-        closeSocket
+      Closed
+        | tcpRst hdr -> mzero
+        | tcpAck hdr -> rst hdr
+        | otherwise  -> rstAck hdr (S.length body)
+
+      TimeWait
+        | tcpRst hdr -> do
+          setState Closed
+          closeSocket
+
+        | tcpAck hdr -> do
+          ack
+          set2MSL mslTimeout
+
+      _ | tcpSyn hdr -> do
+          rst hdr
+          closeSocket
+
+        | not (tcpAck hdr) ->
+          return()
+
+        | otherwise -> do
+          outputS $ do putStrLn ("Unexpected packet for state " ++ show state)
+                       print hdr
+          rst hdr
+          closeSocket
 
 
 -- | Update the currently held timestamp for both sides, and return a boolean
@@ -220,6 +247,10 @@ remoteGracefulTeardown :: Sock ()
 remoteGracefulTeardown  = do
   advanceRcvNxt 1
   ack
+
+  shutdown
+  -- setState CloseWait
+
   -- technically, we go to CloseWait now, but we'll transition out as
   -- soon as we go to LastAck
   finAck
@@ -237,29 +268,36 @@ enterTimeWait  = do
 -- | Handle an attempt to create a connection on a listening port.
 listening :: IP4Header -> TcpHeader -> Tcp ()
 listening ip4 hdr = do
-  guard (isSyn hdr)
   let parent = listenSocketId (tcpDestPort hdr)
   isn <- initialSeqNum
-  listeningConnection parent $ do
-    tcp <- getTcpSocket
-    let childSock = (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
-          { tcpParent      = Just parent
-          , tcpSocketId    = incomingSocketId (ip4SourceAddr ip4) hdr
-          , tcpState       = SynReceived
-          , tcpSndNxt      = isn
-          , tcpSndUna      = isn
-          , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
-          , tcpOutMSS      = fromMaybe defaultMSS (getMSS hdr)
-          , tcpTimestamp   = do
-              -- require that the parent had a timestamp
-              ts <- tcpTimestamp tcp
-              -- require that they have sent us a timestamp, before using them
-              OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
-              return ts { tsLastTimestamp = val }
-          , tcpSack        = sackSupported hdr
-          , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
-          }
-    withChild childSock synAck
+  listeningConnection parent $ if
+    | tcpRst hdr -> return ()
+
+    | tcpAck hdr -> rst hdr
+
+    | tcpSyn hdr -> do
+      tcp <- getTcpSocket
+      let childSock = (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
+            { tcpParent      = Just parent
+            , tcpSocketId    = incomingSocketId (ip4SourceAddr ip4) hdr
+            , tcpState       = SynReceived
+            , tcpSndNxt      = isn
+            , tcpSndUna      = isn
+            , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+            , tcpOutMSS      = fromMaybe defaultMSS (getMSS hdr)
+            , tcpTimestamp   = do
+                -- require that the parent had a timestamp
+                ts <- tcpTimestamp tcp
+                -- require that they have sent us a timestamp, before using them
+                OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
+                return ts { tsLastTimestamp = val }
+            , tcpSack        = sackSupported hdr
+            , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
+            }
+      withChild childSock synAck
+
+    | otherwise -> return ()
+
 
 
 -- Buffer Delivery -------------------------------------------------------------

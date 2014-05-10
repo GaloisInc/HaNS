@@ -153,7 +153,9 @@ accept sock = blockResult (sockHandle sock) $ \ res ->
   establishedConnection (sockId sock) $ do
     state <- getState
     case state of
-      Listen -> pushAcceptor $ \ sid -> putMVar res $ SocketResult $ Socket
+      Listen -> pushAcceptor $ \ sid -> do
+       putStrLn ("Accepted: " ++ show sid)
+       putMVar res $ SocketResult $ Socket
         { sockHandle = sockHandle sock
         , sockId     = sid
         }
@@ -204,7 +206,8 @@ canSend sock =
   blockResult           (sockHandle sock) $ \ res ->
   establishedConnection (sockId sock)     $
     do tcp <- getTcpSocket
-       outputS (putMVar res (SocketResult (not (isFull (tcpOutBuffer tcp)))))
+       let avail = tcpState tcp == Established && not (isFull (tcpOutBuffer tcp))
+       outputS (putMVar res (SocketResult avail))
 
 -- | Send bytes over a socket.  The number of bytes delivered will be returned,
 -- with 0 representing the other side having closed the connection.
@@ -240,7 +243,8 @@ canRecv sock =
   blockResult           (sockHandle sock) $ \ res ->
   establishedConnection (sockId sock)     $
     do tcp <- getTcpSocket
-       outputS (putMVar res (SocketResult (not (isEmpty (tcpInBuffer tcp)))))
+       let avail = tcpState tcp == Established && not (isEmpty (tcpInBuffer tcp))
+       outputS (putMVar res (SocketResult avail))
 
 -- | Receive bytes from a socket.  A null ByteString represents the other end
 -- closing the socket.
