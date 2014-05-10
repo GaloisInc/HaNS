@@ -73,6 +73,10 @@ mkRstAck hdr = emptyTcpHeader
   , tcpRst        = True
   }
 
+mkRst :: TcpSocket -> TcpHeader
+mkRst tcp = (mkSegment tcp)
+  { tcpRst = True }
+
 
 -- Connection Establishment ----------------------------------------------------
 
@@ -154,6 +158,13 @@ finAck :: Sock ()
 finAck  = do
   tcp <- getTcpSocket
   tcpOutput (mkFinAck tcp) L.empty
+  advanceSndNxt 1
+  clearDelayedAck
+
+rst :: Sock ()
+rst  = do
+  tcp <- getTcpSocket
+  tcpOutput (mkRst tcp) L.empty
   advanceSndNxt 1
   clearDelayedAck
 

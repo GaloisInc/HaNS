@@ -53,6 +53,7 @@ established remote _local hdr body = do
 
       Established
         | isFinAck hdr -> remoteGracefulTeardown
+        | tcpRst hdr   -> closeSocket
         | otherwise    -> deliverSegment hdr body
 
       SynReceived
@@ -64,6 +65,11 @@ established remote _local hdr body = do
         | tcpRst hdr -> closeSocket
           -- retransmitted syn
         | isSyn hdr -> synAck
+
+          -- non-synchronized state
+        | otherwise -> do
+          rst
+          closeSocket
 
       SynSent
           -- connection rejected
@@ -89,19 +95,34 @@ established remote _local hdr body = do
           notify True
 
       FinWait1
+          -- simultaneous close
+        | isFin hdr -> do
+          advanceRcvNxt 1
+          ack
+          setState Closing
+
           -- 3-way close
         | isFinAck hdr -> do
           advanceRcvNxt 1
           ack
           enterTimeWait
+
           -- 4-way close
         | isAck hdr -> do
           advanceRcvNxt 1
           setState FinWait2
 
       FinWait2
-        | isFinAck hdr -> do
+        | isFin hdr || isFinAck hdr -> do
           ack
+          enterTimeWait
+
+        | otherwise ->
+          return ()
+
+      Closing
+        | isAck hdr -> do
+          advanceRcvNxt 1
           enterTimeWait
 
       LastAck
