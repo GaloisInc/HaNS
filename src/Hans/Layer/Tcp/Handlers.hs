@@ -97,8 +97,7 @@ segmentArrives src hdr body =
           when (tcpSyn hdr) $
             do advanceRcvNxt 1
                modifyTcpSocket_ $ \ tcp -> tcp
-                 { tcpState       = Established
-                 , tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
+                 { tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
 
                    -- clear out, and configure the retransmit buffer
                  , tcpOut         = setSndWind (tcpWindow hdr)
@@ -116,10 +115,8 @@ segmentArrives src hdr body =
                  do handleAck hdr -- update SND.UNA
                     TcpSocket { .. } <- getTcpSocket
                     if tcpSndUna > tcpIss
-                       then do setState Established
-                               ack
-
-                               notify True
+                       then do ack
+                               establishConnection
 
                                -- continue at step 6
                                when (tcpUrg hdr) (proceedFromStep6 hdr body)
@@ -215,8 +212,7 @@ checkAckBit hdr body
     do whenState SynReceived $
          do tcp <- getTcpSocket
             if tcpSndUna tcp <= tcpAckNum hdr && tcpAckNum hdr < tcpRcvNxt tcp
-               then do setState Established
-                       notify True
+               then establishConnection
                else rst hdr
 
        whenState FinWait1 $
@@ -394,14 +390,17 @@ createConnection ip4 hdr =
 
 establishConnection :: Sock ()
 establishConnection  =
-  do mb <- popAcceptor
+  do mb <- inParent popAcceptor
      case mb of
        Just k  -> do sid <- tcpSocketId `fmap` getTcpSocket
                      outputS (k sid)
+                     setState Established
+                     notify True
 
        -- no one available to accept the connection, close it
        Nothing -> do finAck
                      setState FinWait1
+                     outputS (putStrLn "no one accepting...")
                      done
 
 
