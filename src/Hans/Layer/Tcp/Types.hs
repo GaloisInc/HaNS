@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hans.Layer.Tcp.Types where
 
@@ -166,6 +167,7 @@ data TcpSocket = TcpSocket
   , tcpState       :: !ConnState
   , tcpAcceptors   :: Seq.Seq Acceptor
   , tcpNotify      :: Maybe Notify
+  , tcpIss         :: !TcpSeqNum
   , tcpSndNxt      :: !TcpSeqNum
   , tcpSndUna      :: !TcpSeqNum
 
@@ -191,6 +193,7 @@ emptyTcpSocket sendWindow sendScale = TcpSocket
   , tcpState       = Closed
   , tcpAcceptors   = Seq.empty
   , tcpNotify      = Nothing
+  , tcpIss         = 0
   , tcpSndNxt      = 0
   , tcpSndUna      = 0
 
@@ -212,8 +215,17 @@ emptyTcpSocket sendWindow sendScale = TcpSocket
 defaultMSS :: Int64
 defaultMSS  = 1460
 
+nothingOutstanding :: TcpSocket -> Bool
+nothingOutstanding TcpSocket { .. } = tcpSndUna == tcpSndNxt
+
 tcpRcvNxt :: TcpSocket -> TcpSeqNum
 tcpRcvNxt = lwRcvNxt . tcpIn
+
+inRcvWnd :: TcpSeqNum -> TcpSocket -> Bool
+inRcvWnd (TcpSeqNum sn) TcpSocket { .. } =
+  rcvNxt <= sn && sn < rcvNxt + fromIntegral (lwRcvWind tcpIn)
+  where
+  TcpSeqNum rcvNxt = lwRcvNxt tcpIn
 
 nextSegSize :: TcpSocket -> Int64
 nextSegSize tcp =

@@ -36,7 +36,11 @@ runAction (Action m) = m `X.catch` \ se -> print (se :: X.SomeException)
 
 data Result i a
   = Error Action
+  | Exit (LayerState i) Action
   | Result (LayerState i) a Action
+
+-- | Early exit continuation
+type Exit i r = LayerState i -> Action -> Result i r
 
 -- | Failure continuation
 type Failure i r = Action -> Result i r
@@ -45,12 +49,15 @@ type Failure i r = Action -> Result i r
 type Success a i r = a -> LayerState i -> Action -> Result i r
 
 newtype Layer i a = Layer
-  { getLayer :: forall r. LayerState i -> Action
-                       -> Failure i r -> Success a i r
+  { getLayer :: forall r. LayerState i
+                       -> Action
+                       -> Exit i r
+                       -> Failure i r
+                       -> Success a i r
                        -> Result i r }
 
 runLayer :: LayerState i -> Layer i a -> Result i a
-runLayer i0 m = getLayer m i0 mempty Error success
+runLayer i0 m = getLayer m i0 mempty Exit Error success
   where success a i o = Result i a o
 
 loopLayer :: String -> i -> IO msg -> (msg -> Layer i ()) -> IO ()
@@ -66,31 +73,33 @@ loopLayer name i0 msg k =
            return res
     case res of
       Error        m -> runAction m >> loop i
+      Exit i' m      -> runAction m >> loop i'
       Result i' () m -> runAction m >> loop i'
 
 instance Functor (Layer i) where
-  fmap g m = Layer (\i0 o0 f k -> getLayer m i0 o0 f (\a i o -> k (g a) i o))
+  fmap g m = Layer $ \i0 o0 x f k ->
+                     getLayer m i0 o0 x f (\a i o -> k (g a) i o)
 
 instance Applicative (Layer i) where
   pure  = return
   (<*>) = ap
 
 instance Alternative (Layer i) where
-  empty   = Layer (\_ o0 f _ -> f o0)
-  a <|> b = Layer (\i o f k -> getLayer a i o (\_ -> getLayer b i o f k) k)
+  empty   = Layer (\_ o0 _ f _ -> f o0)
+  a <|> b = Layer (\i o x f k -> getLayer a i o x (\_ -> getLayer b i o x f k) k)
 
 instance Monad (Layer i) where
-  return x = Layer (\i o _ k -> k x i o)
-  m >>= g = Layer $ \i0 o0 f k -> getLayer m i0 o0 f $ \a i o ->
-                                  getLayer (g a) i o f k
+  return a = Layer (\i o _ _ k -> k a i o)
+  m >>= g = Layer $ \i0 o0 x f k -> getLayer m i0 o0 x f $ \a i o ->
+                                    getLayer (g a) i o x f k
 
 instance MonadPlus (Layer i) where
   mzero = empty
   mplus = (<|>)
 
 instance StateM (Layer i) i where
-  get   = Layer (\i0 o0 _ k -> k (lsState i0) i0 o0)
-  set i = Layer (\i0 o0 _ k -> k () (i0 { lsState = i }) o0)
+  get   = Layer (\i0 o0 _ _ k -> k (lsState i0) i0 o0)
+  set i = Layer (\i0 o0 _ _ k -> k () (i0 { lsState = i }) o0)
 
 instance BaseM (Layer i) (Layer i) where
   inBase = id
@@ -98,14 +107,21 @@ instance BaseM (Layer i) (Layer i) where
 
 -- Utilities -------------------------------------------------------------------
 
-dropPacket :: Layer i a
-dropPacket  = empty
+-- | Finish early, successfully, with no further processing.
+finish :: Layer i a
+finish  = Layer (\i o x _ _ -> x i o)
+{-# INLINE finish #-}
 
+{-# INLINE dropPacket #-}
+dropPacket :: Layer i a
+dropPacket  = finish
+
+{-# INLINE time #-}
 time :: Layer i POSIXTime
-time  = Layer $ \i0 o0 _ k -> k (lsNow i0) i0 o0
+time  = Layer (\i o _ _ k -> k (lsNow i) i o)
 
 output :: IO () -> Layer i ()
-output m = Layer $ \i0 o0 _ k -> k () i0 (o0 `mappend` Action m)
+output m = Layer $ \i0 o0 _ _ k -> k () i0 (o0 `mappend` Action m)
 
 liftRight :: Either String b -> Layer i b
 liftRight (Right b)  = return b

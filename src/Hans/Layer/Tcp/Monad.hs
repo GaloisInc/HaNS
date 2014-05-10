@@ -171,7 +171,7 @@ eachConnection (Sock body) =
   sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
 
 withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp a
-withConnection remote hdr body = do
+withConnection remote hdr m = do
   cs <- getConnections
   case Map.lookup estId cs `mplus` Map.lookup listenId cs of
     Just con -> runSock con m
@@ -256,20 +256,24 @@ whenState state body = do
   curState <- getState
   when (state == curState) body
 
+whenStates :: [ConnState] -> Sock () -> Sock ()
+whenStates states body = do
+  curState <- getState
+  when (curState `elem` states) body
+
 pushAcceptor :: Acceptor -> Sock ()
 pushAcceptor k = modifyTcpSocket_ $ \ tcp -> tcp
   { tcpAcceptors = tcpAcceptors tcp Seq.|> k
   }
 
--- | Pop off an acceptor, failing if none exist.
-popAcceptor :: Sock Acceptor
+-- | Pop off an acceptor.
+popAcceptor :: Sock (Maybe Acceptor)
 popAcceptor  = do
   tcp <- getTcpSocket
   case Seq.viewl (tcpAcceptors tcp) of
-    a Seq.:< as -> do
-      setTcpSocket $! tcp { tcpAcceptors = as }
-      return a
-    Seq.EmptyL -> mzero
+    a Seq.:< as -> do setTcpSocket $! tcp { tcpAcceptors = as }
+                      return (Just a)
+    Seq.EmptyL  -> return Nothing
 
 -- | Send a notification back to a waiting process that the socket has been
 -- established, or that it has failed.  It's assumed that this will only be

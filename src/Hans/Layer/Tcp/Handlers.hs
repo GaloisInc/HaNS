@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hans.Layer.Tcp.Handlers where
 
@@ -12,7 +13,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Monad (mzero,mplus,guard,when)
+import Control.Monad (mzero,mplus,guard,when,unless)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
@@ -21,6 +22,8 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
+
+import Debug.Trace
 
 
 -- Incoming Packets ------------------------------------------------------------
@@ -32,128 +35,228 @@ handleIncomingTcp ip4 bytes = do
       dst = ip4DestAddr ip4
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (parseTcpPacket bytes)
-  established src dst hdr body `mplus` listening ip4 hdr
+  withConnection src hdr (segmentArrives src hdr body)
 
 
--- Established Connections -----------------------------------------------------
+-- Segment Arrival -------------------------------------------------------------
 
--- | Handle a message for an already established connection.
-established :: IP4 -> IP4 -> TcpHeader -> S.ByteString -> Tcp ()
-established remote _local hdr body = do
-  let sid = incomingSocketId remote hdr
-  establishedConnection sid $ do
-    state <- getState
-    resetIdle
+{-# INLINE discardAndReturn #-}
+discardAndReturn :: Sock a
+discardAndReturn  = do outputSegments
+                       inTcp finish
 
-    -- keep their timestamp up to date
-    timestampInvalid <- modifyTcpSocket (updateTimestamp hdr)
-    guard (not timestampInvalid)
+{-# INLINE done #-}
+done :: Sock a
+done  = do outputSegments
+           inTcp finish
 
-    case state of
+segmentArrives :: IP4 -> TcpHeader -> S.ByteString -> Sock ()
+segmentArrives src hdr body =
+  do whenState Closed $
+       do if tcpRst hdr
+             then rst    hdr
+             else rstAck hdr (S.length body)
+          discardAndReturn
 
-      Established
-        | isFinAck hdr -> remoteGracefulTeardown
-        | tcpRst hdr   -> do rst hdr
-                             closeSocket
-        | otherwise    -> deliverSegment hdr body
+     whenState Listen $
+       do when (tcpAck hdr) (rst hdr)
 
-      SynReceived
-        | isAck hdr -> do
-          setState Established
-          k <- inParent popAcceptor
-          outputS (k sid)
+          when (tcpSyn hdr) $ do child <- createConnection src hdr
+                                 withChild child synAck
 
-        | tcpAck hdr && tcpPsh hdr -> do
-          rst hdr
-          closeSocket
+          -- RST will be dropped at this point, as will anything else that
+          -- wasn't covered by the above two cases.
+          done
 
-          -- close this child socket
-        | tcpRst hdr -> closeSocket
+     whenState SynSent $
+       do tcp <- getTcpSocket
 
-          -- retransmitted syn
-        | isSyn hdr -> synAck
+          -- check the ACK
+          when (tcpAck hdr) $
+            do when (tcpAckNum hdr <= tcpIss tcp ||
+                     tcpAckNum hdr >  tcpSndNxt tcp) $
+                 do unless (tcpRst hdr) (rst hdr)
+                    discardAndReturn
 
-      SynSent
-          -- connection rejected
-        | tcpRst hdr -> do
-          setState Closed
-          notify False
-          closeSocket
+          -- one of these has to be set to continue processing in this state.
+          unless (tcpSyn hdr || tcpRst hdr) discardAndReturn
 
-          -- connection ack'd
-        | isSynAck hdr -> do
-          modifyTcpSocket_ $ \ tcp -> tcp
-            { tcpState       = Established
-            , tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
-            , tcpOut         = setSndWind (tcpWindow hdr)
-                             $ setSndWindScale (windowScale hdr)
-                             $ tcpOut tcp
-            , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
-            , tcpSack        = sackSupported hdr
-            , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
-            }
-          advanceRcvNxt 1
-          ack
+          -- check RST
+          let accAcceptable = tcpSndUna tcp <= tcpAckNum hdr &&
+                              tcpAckNum hdr <= tcpSndNxt tcp
 
-          notify True
+          when (tcpRst hdr) $
+            do when accAcceptable $ do notify False
+                                       closeSocket
+               discardAndReturn
 
-      FinWait1
-          -- simultaneous close
-        | tcpFin hdr -> do
-          ack
-          setState Closing
+          -- this is where a security/compartment check would be done
 
-        | tcpAck hdr -> do
-          advanceRcvNxt 1
-          ack
-          setState FinWait2
+          -- check SYN
 
-      FinWait2
-        | tcpFin hdr -> do
-          ack
-          enterTimeWait
+          when (tcpSyn hdr) $
+            do advanceRcvNxt 1
+               modifyTcpSocket_ $ \ tcp -> tcp
+                 { tcpState       = Established
+                 , tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
 
-        | tcpRst hdr -> do
-          rst hdr
-          closeSocket
+                   -- clear out, and configure the retransmit buffer
+                 , tcpOut         = setSndWind (tcpWindow hdr)
+                                  $ setSndWindScale (windowScale hdr)
+                                  $ clearRetransmit
+                                  $ tcpOut tcp
 
-        | tcpAck hdr ->
-          return ()
+                   -- this corresponds to setting IRS to SEQ.SEG
+                 , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+                 , tcpSack        = sackSupported hdr
+                 , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
+                 }
 
-      Closing
-        | isAck hdr -> do
-          advanceRcvNxt 1
-          enterTimeWait
+               when (tcpAck hdr) $
+                 do handleAck hdr -- update SND.UNA
+                    TcpSocket { .. } <- getTcpSocket
+                    if tcpSndUna > tcpIss
+                       then do setState Established
+                               ack
 
-      LastAck
-        | isAck hdr -> setState Closed
+                               notify True
 
-      Closed
-        | tcpRst hdr -> mzero
-        | tcpAck hdr -> rst hdr
-        | otherwise  -> rstAck hdr (S.length body)
+                               -- continue at step 6
+                               when (tcpUrg hdr) (proceedFromStep6 hdr body)
 
-      TimeWait
-        | tcpRst hdr -> do
-          setState Closed
-          closeSocket
+                       else do setState SynReceived
+                               synAck
+                               -- XXX queue any additional data for processing
+                               -- once Established has been reached
 
-        | tcpAck hdr -> do
-          ack
-          set2MSL mslTimeout
+                    done
 
-      _ | tcpSyn hdr -> do
-          rst hdr
-          closeSocket
+     -- make sure that the sequence numbers are valid
+     checkSequenceNumber hdr body
+     checkResetBit hdr body
+     -- skip security/precidence check
+     checkSynBit hdr body
+     deliverSegment hdr body
+     checkAckBit hdr body
+     proceedFromStep6 hdr body
 
-        | not (tcpAck hdr) ->
-          return()
+proceedFromStep6 :: TcpHeader -> S.ByteString -> Sock ()
+proceedFromStep6 hdr body =
+  do -- XXX skipping URG processing
+     -- XXX skipping segment text, as this is processed in deliverSegment
+     checkFinBit hdr body
+     outputSegments
 
-        | otherwise -> do
-          outputS $ do putStrLn ("Unexpected packet for state " ++ show state)
-                       print hdr
-          rst hdr
-          closeSocket
+
+-- | Make sure that there is space for the incoming segment
+checkSequenceNumber :: TcpHeader -> S.ByteString -> Sock ()
+checkSequenceNumber hdr body =
+  do TcpSocket { .. } <- getTcpSocket
+
+     -- RCV.NXT <= SEG.SEQ + off < RCV.NXT + RCV.WND
+     let canReceive off =
+           lwRcvNxt tcpIn <= segSeq &&
+           segSeq         <  lwRcvNxt tcpIn + fromIntegral (lwRcvWind tcpIn)
+           where
+           segSeq = tcpSeqNum hdr + off
+
+         len = fromIntegral (S.length body)
+
+         shouldDiscard
+           | len == 0  = if lwRcvWind tcpIn == 0
+                                   -- SEQ.SEG = RCV.NXT
+                            then tcpSeqNum hdr == lwRcvNxt tcpIn
+                            else canReceive 0
+           | otherwise = canReceive 0 || canReceive (len - 1)
+
+     when (shouldDiscard && not (or [tcpAck hdr, tcpUrg hdr, tcpRst hdr])) $
+       do unless (tcpRst hdr) ack
+          discardAndReturn
+
+-- | Process the presence of the RST bit
+checkResetBit :: TcpHeader -> S.ByteString -> Sock ()
+checkResetBit hdr body
+  | tcpRst hdr =
+    do TcpSocket { .. } <- getTcpSocket
+
+       whenState SynReceived $
+            -- from an active open
+         do when (isNothing tcpParent) $ do flushQueues
+                                            closeSocket
+            done
+
+       whenStates [Established,FinWait1,FinWait2,CloseWait] $
+         do flushQueues
+            closeSocket
+            done
+
+       whenStates [Closing,LastAck,TimeWait] $
+         do closeSocket
+            done
+
+  | otherwise  = return ()
+
+checkSynBit :: TcpHeader -> S.ByteString -> Sock ()
+checkSynBit hdr body
+  | tcpSyn hdr = whenStates [SynReceived,Established,FinWait1,FinWait2
+                            ,CloseWait,Closing,LastAck,TimeWait] $
+    do tcp <- getTcpSocket
+
+       when (tcpSeqNum hdr `inRcvWnd` tcp) $
+         do flushQueues
+            closeSocket
+            done
+
+  | otherwise  = return ()
+
+checkAckBit :: TcpHeader -> S.ByteString -> Sock ()
+checkAckBit hdr body
+  | tcpAck hdr =
+    do whenState SynReceived $
+         do tcp <- getTcpSocket
+            if tcpSndUna tcp <= tcpAckNum hdr && tcpAckNum hdr < tcpRcvNxt tcp
+               then do setState Established
+                       notify True
+               else rst hdr
+
+       whenState FinWait1 $
+         do tcp <- getTcpSocket
+            when (nothingOutstanding tcp) (setState FinWait2)
+
+       -- XXX no way to acknowledge the user's close request from FinWait2
+
+       whenState Closing $
+         do tcp <- getTcpSocket
+            when (nothingOutstanding tcp) (setState TimeWait)
+
+       whenState LastAck $
+         do tcp <- getTcpSocket
+            when (nothingOutstanding tcp) $ do closeSocket
+                                               done
+
+       whenState TimeWait $
+         do ack
+            set2MSL mslTimeout
+
+  | otherwise  = discardAndReturn
+
+
+checkFinBit :: TcpHeader -> S.ByteString -> Sock ()
+checkFinBit hdr body
+  | tcpFin hdr =
+    do whenStates [Closed,Listen,SynSent]
+         discardAndReturn
+
+       -- 
+
+  | otherwise  = return ()
+
+
+-- XXX flesh this out a bit more, as this doesn't cover everything.
+flushQueues :: Sock ()
+flushQueues  = modifyTcpSocket_ $ \ tcp -> tcp
+  { tcpOut = clearRetransmit (tcpOut tcp)
+  }
 
 
 -- | Update the currently held timestamp for both sides, and return a boolean
@@ -181,13 +284,17 @@ updateTimestamp hdr tcp = (shouldDrop,tcp { tcpTimestamp = ts' })
 
 -- | Deliver incoming bytes to the buffer in a user socket.  If there's no free
 -- space in the buffer, the bytes will be dropped.
---
--- XXX should this not ack if it's going to drop packets?
 deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
 deliverSegment hdr body = do
+  TcpSocket { .. } <- getTcpSocket
+
+  -- they ack'd something that we haven't sent yet
+  when (tcpAckNum hdr > tcpSndNxt) $ do ack
+                                        discardAndReturn
 
   -- handle data segment acknowledgments
-  when (isAck hdr) (handleAck hdr)
+  when (isAck hdr) $ do handleAck hdr
+                        outputSegments
 
   -- process a message, if there was data attached.  in the case that there is
   -- no room in the buffer, the original socket state will be returned,
@@ -195,11 +302,11 @@ deliverSegment hdr body = do
   when (S.length body > 0) $ do
     mb <- modifyTcpSocket (handleData hdr body)
     case mb of
-      Just wakeup -> outputS (tryAgain wakeup)
+      Just wakeup -> outputS (putStrLn "try again" >> tryAgain wakeup)
       Nothing     -> return ()
 
-  -- handle graceful teardown, initiated remotely
-  when (tcpFin hdr) remoteGracefulTeardown
+  -- XXX this doesn't check that the sequence numbers aren't being reused to
+  -- update the window
 
 -- | Enqueue a new packet in the local window, attempting to place the bytes
 -- received in the user buffer as they complete a part of the stream.  Bytes are
@@ -215,7 +322,7 @@ handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
           { ttDelayedAck = not (L.null bytes)
           }
         }
-  return (wakeup, tcp')
+  return $ trace ("bytes queued: " ++ show (isJust wakeup)) (wakeup, tcp')
   where
   (segs,win') = incomingPacket hdr body (tcpIn tcp0)
   tcp         = tcp0 { tcpIn = win' }
@@ -227,7 +334,6 @@ handleAck :: TcpHeader -> Sock ()
 handleAck hdr = do
   now <- inTcp time
   modifyTcpSocket_ (updateAck now)
-  outputSegments
   where
   -- using Karns algorithm, only calibrate the RTO if the packet that was ack'd
   -- is fresh.
@@ -262,42 +368,41 @@ enterTimeWait  = do
   set2MSL mslTimeout
   setState TimeWait
 
+createConnection :: IP4 -> TcpHeader -> Sock TcpSocket
+createConnection ip4 hdr =
+  do let parent = listenSocketId (tcpDestPort hdr)
+     isn <- inTcp initialSeqNum
+     tcp <- getTcpSocket
+     return (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
+       { tcpParent      = Just parent
+       , tcpSocketId    = incomingSocketId ip4 hdr
+       , tcpState       = SynReceived
+       , tcpIss         = isn
+       , tcpSndNxt      = isn
+       , tcpSndUna      = isn
+       , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+       , tcpOutMSS      = fromMaybe defaultMSS (getMSS hdr)
+       , tcpTimestamp   = do
+           -- require that the parent had a timestamp
+           ts <- tcpTimestamp tcp
+           -- require that they have sent us a timestamp, before using them
+           OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
+           return ts { tsLastTimestamp = val }
+       , tcpSack        = sackSupported hdr
+       , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
+       }
 
--- Listening Connections -------------------------------------------------------
+establishConnection :: Sock ()
+establishConnection  =
+  do mb <- popAcceptor
+     case mb of
+       Just k  -> do sid <- tcpSocketId `fmap` getTcpSocket
+                     outputS (k sid)
 
--- | Handle an attempt to create a connection on a listening port.
-listening :: IP4Header -> TcpHeader -> Tcp ()
-listening ip4 hdr = do
-  let parent = listenSocketId (tcpDestPort hdr)
-  isn <- initialSeqNum
-  listeningConnection parent $ if
-    | tcpRst hdr -> return ()
-
-    | tcpAck hdr -> rst hdr
-
-    | tcpSyn hdr -> do
-      tcp <- getTcpSocket
-      let childSock = (emptyTcpSocket (tcpWindow hdr) (windowScale hdr))
-            { tcpParent      = Just parent
-            , tcpSocketId    = incomingSocketId (ip4SourceAddr ip4) hdr
-            , tcpState       = SynReceived
-            , tcpSndNxt      = isn
-            , tcpSndUna      = isn
-            , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
-            , tcpOutMSS      = fromMaybe defaultMSS (getMSS hdr)
-            , tcpTimestamp   = do
-                -- require that the parent had a timestamp
-                ts <- tcpTimestamp tcp
-                -- require that they have sent us a timestamp, before using them
-                OptTimestamp val _ <- findTcpOption OptTagTimestamp hdr
-                return ts { tsLastTimestamp = val }
-            , tcpSack        = sackSupported hdr
-            , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
-            }
-      withChild childSock synAck
-
-    | otherwise -> return ()
-
+       -- no one available to accept the connection, close it
+       Nothing -> do finAck
+                     setState FinWait1
+                     done
 
 
 -- Buffer Delivery -------------------------------------------------------------
