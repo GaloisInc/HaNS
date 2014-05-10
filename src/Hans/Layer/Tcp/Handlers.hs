@@ -61,15 +61,12 @@ established remote _local hdr body = do
           setState Established
           k <- inParent popAcceptor
           outputS (k sid)
+
           -- close this child socket
         | tcpRst hdr -> closeSocket
+
           -- retransmitted syn
         | isSyn hdr -> synAck
-
-          -- non-synchronized state
-        | otherwise -> do
-          rst
-          closeSocket
 
       SynSent
           -- connection rejected
@@ -77,6 +74,7 @@ established remote _local hdr body = do
           setState Closed
           notify False
           closeSocket
+
           -- connection ack'd
         | isSynAck hdr -> do
           modifyTcpSocket_ $ \ tcp -> tcp
@@ -113,12 +111,9 @@ established remote _local hdr body = do
           setState FinWait2
 
       FinWait2
-        | isFin hdr || isFinAck hdr -> do
+        | tcpFin hdr -> do
           ack
           enterTimeWait
-
-        | otherwise ->
-          return ()
 
       Closing
         | isAck hdr -> do
@@ -128,11 +123,10 @@ established remote _local hdr body = do
       LastAck
         | isAck hdr -> closeSocket
 
-      -- avoid sending things to a closed socket; this socket might just be
-      -- waiting for a user signal to be gc'd
-      Closed -> mzero
-
-      _ -> outputS (putStrLn ("Unexpected packet for state " ++ show state))
+      _ -> do
+        outputS (putStrLn ("Unexpected packet for state " ++ show state))
+        rst
+        closeSocket
 
 
 -- | Update the currently held timestamp for both sides, and return a boolean
