@@ -304,6 +304,9 @@ closeSocket  = do
   fin <- modifyTcpSocket $ \ tcp -> 
       let (wOut,bufOut) = shutdownWaiting (tcpOutBuffer tcp)
           (wIn,bufIn)   = shutdownWaiting (tcpInBuffer tcp)
-       in (wOut >> wIn,tcp { tcpOutBuffer = bufOut, tcpInBuffer = bufIn })
+       in (wOut >> wIn,tcp { tcpOut       = clearRetransmit (tcpOut tcp)
+                           , tcpOutBuffer = bufOut
+                           , tcpInBuffer  = bufIn
+                           })
   outputS fin
   setState Closed

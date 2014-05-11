@@ -107,6 +107,9 @@ genRetransmitSegments win = (outSegs, win { rwSegments = segs' })
     rts' | outRTO seg' <= 0 = rts Seq.|> seg'
          | otherwise        = rts
 
+clearRetransmit :: RemoteWindow -> RemoteWindow
+clearRetransmit win = win { rwSegments = Seq.empty }
+
 
 type OutSegments = Seq.Seq OutSegment
 

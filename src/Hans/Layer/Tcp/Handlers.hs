@@ -10,7 +10,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Monad (mzero,mplus,guard,when)
+import Control.Monad (mzero,mplus,guard,when,unless)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
@@ -52,18 +52,19 @@ established remote _local hdr body = do
     case state of
 
       Established
-        | isFinAck hdr -> remoteGracefulTeardown
-        | tcpRst hdr   -> closeSocket
-        | otherwise    -> deliverSegment hdr body
+        | tcpRst hdr -> closeSocket
+        | otherwise  -> deliverSegment hdr body
 
       SynReceived
-        | isAck hdr -> do
+          -- close this child socket
+        | tcpRst hdr -> closeSocket
+
+        | tcpAck hdr -> do
           setState Established
           k <- inParent popAcceptor
           outputS (k sid)
 
-          -- close this child socket
-        | tcpRst hdr -> closeSocket
+          when (tcpPsh hdr) (deliverSegment hdr body)
 
           -- retransmitted syn
         | isSyn hdr -> synAck
@@ -94,19 +95,12 @@ established remote _local hdr body = do
 
       FinWait1
           -- simultaneous close
-        | isFin hdr -> do
+        | tcpFin hdr -> do
           advanceRcvNxt 1
           ack
           setState Closing
 
-          -- 3-way close
-        | isFinAck hdr -> do
-          advanceRcvNxt 1
-          ack
-          enterTimeWait
-
-          -- 4-way close
-        | isAck hdr -> do
+        | tcpAck hdr -> do
           advanceRcvNxt 1
           setState FinWait2
 
@@ -115,16 +109,36 @@ established remote _local hdr body = do
           ack
           enterTimeWait
 
-      Closing
-        | isAck hdr -> do
-          advanceRcvNxt 1
+        | tcpAck hdr ->
+          return ()
+
+      TimeWait
+        | tcpRst hdr ->
+          closeSocket
+
+        | tcpAck hdr -> do
+          ack
           enterTimeWait
 
+      Closing
+        | tcpAck hdr -> do
+          advanceRcvNxt 1
+          modifyTcpSocket_ $ \ tcp -> tcp
+            { tcpOut = clearRetransmit (tcpOut tcp) }
+          enterTimeWait
+
+        | tcpRst hdr ->
+          closeSocket
+
       LastAck
-        | isAck hdr -> closeSocket
+        | tcpAck hdr || tcpRst hdr -> closeSocket
+
+      -- ignore all packets when closed
+      Closed -> return ()
 
       _ -> do
-        outputS (putStrLn ("Unexpected packet for state " ++ show state))
+        outputS $ do putStrLn ("Unexpected packet for state " ++ show state)
+                     print hdr
         rst
         closeSocket
 
@@ -220,8 +234,8 @@ remoteGracefulTeardown :: Sock ()
 remoteGracefulTeardown  = do
   advanceRcvNxt 1
   ack
-  -- technically, we go to CloseWait now, but we'll transition out as
-  -- soon as we go to LastAck
+  -- technically, we go to CloseWait now, but we'll transition out immediately,
+  -- as we don't wait for user confirmation
   finAck
   setState LastAck
 
@@ -268,17 +282,17 @@ listening ip4 hdr = do
 outputSegments :: Sock ()
 outputSegments  = do
   now <- inTcp time
-  (mb,segs) <- modifyTcpSocket (genSegments now)
+  (ws,segs) <- modifyTcpSocket (genSegments now)
   F.mapM_ outputSegment segs
-  case mb of
-    Nothing     -> return ()
-    Just wakeup -> outputS (tryAgain wakeup)
+  unless (null ws) (outputS (mapM_ tryAgain ws))
 
--- | Take data from the output buffer, and turn it into segments.
-genSegments :: POSIXTime -> TcpSocket -> ((Maybe Wakeup,OutSegments),TcpSocket)
-genSegments now tcp0 = loop Nothing Seq.empty tcp0
+-- | Take data from the output buffer, and turn it into segments.  When no data
+-- was written, a wakeup action is returned to signal the user thread to try
+-- again.
+genSegments :: POSIXTime -> TcpSocket -> (([Wakeup],OutSegments),TcpSocket)
+genSegments now tcp0 = loop [] Seq.empty tcp0
   where
-  loop mb segs tcp
+  loop ws segs tcp
     | rwAvailable (tcpOut tcp) <= 0 = done
     | otherwise                     = fromMaybe done $ do
       let len = nextSegSize tcp
@@ -297,10 +311,14 @@ genSegments now tcp0 = loop Nothing Seq.empty tcp0
             , tcpOutBuffer = bufOut
             }
 
-      return (loop (mb `mplus` mbWakeup) (segs Seq.|> seg) tcp')
+      return (loop (addWakeup mbWakeup) (segs Seq.|> seg) tcp')
     where
-    done | not (Seq.null segs) = ((mb,segs),tcp)
-         | otherwise           = ((mb,segs),tcp)
+
+    addWakeup Nothing  =   ws
+    addWakeup (Just w) = w:ws
+
+    done | not (Seq.null segs) = ((ws,segs),tcp)
+         | otherwise           = ((ws,segs),tcp)
 
 
 -- Utilities -------------------------------------------------------------------
