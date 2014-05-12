@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Hans.Layer.Tcp.Handlers where
 
 import Hans.Address.IP4
@@ -53,7 +55,8 @@ established remote _local hdr body = do
 
       Established
         | tcpRst hdr -> closeSocket
-        | otherwise  -> deliverSegment hdr body
+        | otherwise  -> do deliverSegment hdr body
+                           when (tcpFin hdr) remoteGracefulTeardown
 
       SynReceived
           -- close this child socket
@@ -64,7 +67,8 @@ established remote _local hdr body = do
           k <- inParent popAcceptor
           outputS (k sid)
 
-          when (tcpPsh hdr) (deliverSegment hdr body)
+          when (tcpPsh hdr) $ do deliverSegment hdr body
+                                 when (tcpFin hdr) remoteGracefulTeardown
 
           -- retransmitted syn
         | isSyn hdr -> synAck
@@ -130,6 +134,16 @@ established remote _local hdr body = do
         | tcpRst hdr ->
           closeSocket
 
+      CloseWait
+        | tcpAck hdr -> do
+
+          deliverSegment hdr body
+
+          TcpSocket { .. } <- getTcpSocket
+          when (tcpSndUna == tcpSndNxt) $ do
+            finAck
+            setState LastAck
+
       LastAck
         | tcpAck hdr || tcpRst hdr -> closeSocket
 
@@ -185,9 +199,6 @@ deliverSegment hdr body = do
       Just wakeup -> outputS (tryAgain wakeup)
       Nothing     -> return ()
 
-  -- handle graceful teardown, initiated remotely
-  when (tcpFin hdr) remoteGracefulTeardown
-
 -- | Enqueue a new packet in the local window, attempting to place the bytes
 -- received in the user buffer as they complete a part of the stream.  Bytes are
 -- ack'd as they complete the stream, and bytes that would cause the local
@@ -234,10 +245,11 @@ remoteGracefulTeardown :: Sock ()
 remoteGracefulTeardown  = do
   advanceRcvNxt 1
   ack
+
+  setState CloseWait
+
   -- technically, we go to CloseWait now, but we'll transition out immediately,
   -- as we don't wait for user confirmation
-  finAck
-  setState LastAck
 
 -- | Setup the 2MSL timer, and enter the TIME_WAIT state.
 enterTimeWait :: Sock ()
