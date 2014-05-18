@@ -173,7 +173,7 @@ sourceQType FromIP4{}  = [QType PTR]
 sourceHost :: Source -> Name
 sourceHost (FromHost h)            = toLabels h
 sourceHost (FromIP4 (IP4 a b c d)) = let byte w = fromString (show w)
-                                      in map byte [a,b,c,d] ++ ["in-addr","arpa"]
+                                      in map byte [d,c,b,a] ++ ["in-addr","arpa"]
 
 toLabels :: String -> Name
 toLabels str = case break (== '.') str of
