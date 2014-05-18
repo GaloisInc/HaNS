@@ -100,6 +100,7 @@ data ReplyMessage   = AckMessage Ack
 data Request = Request
   { requestXid :: Xid -- ^ Transaction ID of offer
   , requestBroadcast :: Bool -- ^ Set 'True' to instruct server to send to broadcast hardware address
+  , requestServerAddr :: IP4
   , requestClientHardwareAddress :: Mac -- ^ Hardware address of the client
   , requestParameters :: [Dhcp4OptionTag] -- ^ Used to specify the information that client needs
   , requestAddress :: Maybe IP4 -- ^ Used to specify the address which was accepted
@@ -394,6 +395,7 @@ parseDhcpMessage msg = do
         return Request
           { requestXid                          = dhcp4Xid msg
           , requestBroadcast                    = dhcp4Broadcast msg
+          , requestServerAddr                   = dhcp4ServerAddr msg
           , requestClientHardwareAddress        = dhcp4ClientHardwareAddr msg
           , requestParameters                   = params'
           , requestAddress                      = addr
@@ -525,6 +527,7 @@ requestToMessage request = Dhcp4Message
   , dhcp4ServerHostname         = ""
   , dhcp4BootFilename           = ""
   , dhcp4Options                = [ OptMessageType Dhcp4Request
+                                  , OptServerIdentifier (requestServerAddr request)
                                   , OptParameterRequestList
                                        $ map KnownTag
                                        $ requestParameters request
@@ -558,6 +561,7 @@ offerToRequest :: Offer -- ^ The offer as received from the server
 offerToRequest offer = Request
   { requestXid                          = offerXid offer
   , requestBroadcast                    = False
+  , requestServerAddr                   = offerServerAddr offer
   , requestClientHardwareAddress        = offerClientHardwareAddr offer
   , requestParameters                   = [ OptTagSubnetMask
                                           , OptTagBroadcastAddress

@@ -43,9 +43,9 @@ main  = do
              ip  <- takeMVar res
              putStrLn ("Bound to address: " ++ show ip)
 
-             putStrLn "Looking up galois.com..."
-             HostEntry { .. } <- getHostByName ns "galois.com"
-             print hostAddresses
+             -- putStrLn "Looking up galois.com..."
+             -- HostEntry { .. } <- getHostByName ns "galois.com"
+             -- print hostAddresses
 
              server ns
 
