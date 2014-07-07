@@ -13,7 +13,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Monad (mzero,mplus,guard,when,unless)
+import Control.Monad (guard,when,unless,mplus)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
@@ -35,7 +35,16 @@ handleIncomingTcp ip4 bytes = do
       dst = ip4DestAddr ip4
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (parseTcpPacket bytes)
+
   withConnection src hdr (segmentArrives src hdr body)
+    `mplus` noConnection src hdr body
+
+noConnection :: IP4 -> TcpHeader -> S.ByteString -> Tcp ()
+noConnection src hdr @ TcpHeader { .. } body =
+  do if | tcpRst    -> return ()
+        | tcpAck    -> sendSegment src (mkRst hdr)                    L.empty
+        | otherwise -> sendSegment src (mkRstAck hdr (S.length body)) L.empty
+     finish
 
 
 -- Segment Arrival -------------------------------------------------------------
@@ -52,11 +61,7 @@ done  = do outputSegments
 
 segmentArrives :: IP4 -> TcpHeader -> S.ByteString -> Sock ()
 segmentArrives src hdr body =
-  do whenState Closed $
-       do if tcpRst hdr
-             then rst    hdr
-             else rstAck hdr (S.length body)
-          discardAndReturn
+  do whenState Closed (inTcp (noConnection src hdr body))
 
      whenState Listen $
        do when (tcpAck hdr) (rst hdr)
@@ -166,7 +171,7 @@ checkSequenceNumber hdr body =
                             else canReceive 0
            | otherwise = canReceive 0 || canReceive (len - 1)
 
-     when (shouldDiscard && not (or [tcpAck hdr, tcpUrg hdr, tcpRst hdr])) $
+     when (shouldDiscard && all not [tcpAck hdr, tcpUrg hdr, tcpRst hdr]) $
        do unless (tcpRst hdr) ack
           discardAndReturn
 
@@ -236,14 +241,11 @@ checkAckBit hdr body
 
   | otherwise  = discardAndReturn
 
-
 checkFinBit :: TcpHeader -> S.ByteString -> Sock ()
 checkFinBit hdr body
   | tcpFin hdr =
     do whenStates [Closed,Listen,SynSent]
          discardAndReturn
-
-       -- 
 
   | otherwise  = return ()
 
@@ -353,8 +355,10 @@ remoteGracefulTeardown  = do
   shutdown
   -- setState CloseWait
 
-  -- technically, we go to CloseWait now, but we'll transition out as
-  -- soon as we go to LastAck
+  -- technically, we go to CloseWait now, but we'll transition out immediately,
+  -- as we don't wait for user confirmation
+  setState CloseWait
+
   finAck
   setState LastAck
 
@@ -410,17 +414,17 @@ establishConnection  =
 outputSegments :: Sock ()
 outputSegments  = do
   now <- inTcp time
-  (mb,segs) <- modifyTcpSocket (genSegments now)
+  (ws,segs) <- modifyTcpSocket (genSegments now)
   F.mapM_ outputSegment segs
-  case mb of
-    Nothing     -> return ()
-    Just wakeup -> outputS (tryAgain wakeup)
+  unless (null ws) (outputS (mapM_ tryAgain ws))
 
--- | Take data from the output buffer, and turn it into segments.
-genSegments :: POSIXTime -> TcpSocket -> ((Maybe Wakeup,OutSegments),TcpSocket)
-genSegments now tcp0 = loop Nothing Seq.empty tcp0
+-- | Take data from the output buffer, and turn it into segments.  When no data
+-- was written, a wakeup action is returned to signal the user thread to try
+-- again.
+genSegments :: POSIXTime -> TcpSocket -> (([Wakeup],OutSegments),TcpSocket)
+genSegments now tcp0 = loop [] Seq.empty tcp0
   where
-  loop mb segs tcp
+  loop ws segs tcp
     | rwAvailable (tcpOut tcp) <= 0 = done
     | otherwise                     = fromMaybe done $ do
       let len = nextSegSize tcp
@@ -439,10 +443,14 @@ genSegments now tcp0 = loop Nothing Seq.empty tcp0
             , tcpOutBuffer = bufOut
             }
 
-      return (loop (mb `mplus` mbWakeup) (segs Seq.|> seg) tcp')
+      return (loop (addWakeup mbWakeup) (segs Seq.|> seg) tcp')
     where
-    done | not (Seq.null segs) = ((mb,segs),tcp)
-         | otherwise           = ((mb,segs),tcp)
+
+    addWakeup Nothing  =   ws
+    addWakeup (Just w) = w:ws
+
+    done | not (Seq.null segs) = ((ws,segs),tcp)
+         | otherwise           = ((ws,segs),tcp)
 
 
 -- Utilities -------------------------------------------------------------------
