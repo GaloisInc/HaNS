@@ -28,7 +28,6 @@ module Hans.Layer.Tcp.WaitBuffer (
 
 import Control.Monad (guard)
 import Data.Int (Int64)
-import Data.Maybe (fromMaybe)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
@@ -36,16 +35,16 @@ import qualified Data.Sequence as Seq
 
 -- Chunk Buffering -------------------------------------------------------------
 
--- | The boolean parameter indicates whether or not the continuation is being
--- called in the event of a shutdown, or if the computation should be re-run,
--- allowing for more data to flow.
+-- | The boolean parameter indicates whether or not the wakeup is happening in
+-- the event of a shutdown, or if the original request should be re-run,
+-- allowing more data to flow.
 type Wakeup = Bool -> IO ()
 
 -- | Indicate that the action should be retried.
 tryAgain :: Wakeup -> IO ()
 tryAgain f = f True
 
--- | Indicate that the action should not be retried.
+-- | Indicate that the original action will never succeed.
 abort :: Wakeup -> IO ()
 abort f = f False
 
@@ -103,7 +102,9 @@ queueBytes bytes buf
     , bufAvailable = bufAvailable buf - qlen
     }
 
--- | Take bytes off of a buffer, if there are any available.
+-- | Take bytes off of a buffer.  When the buffer is empty, this returns
+-- Nothing, otherwise it returns (<= len) bytes and the buffer with that number
+-- of bytes removed.
 removeBytes :: Int64 -> Buffer d -> Maybe (L.ByteString, Buffer d)
 removeBytes len buf = do
   guard (not (L.null (bufBytes buf)))
@@ -146,11 +147,10 @@ takeBytes len buf = do
 -- | Read bytes from an incoming buffer, queueing if there are no bytes to read.
 readBytes :: Int64 -> Wakeup -> Buffer Incoming
           -> (Maybe L.ByteString, Buffer Incoming)
-readBytes len wakeup buf = fromMaybe (Nothing,waitBuf) $ do
-  (bytes,buf') <- removeBytes len buf
-  return (Just bytes,buf')
-  where
-  waitBuf = queueWaiting wakeup buf
+readBytes len wakeup buf =
+  case removeBytes len buf of
+    Just (bytes,buf') -> (Just bytes, buf')
+    Nothing           -> (Nothing,    queueWaiting wakeup buf)
 
 -- | Place bytes on the incoming buffer, provided that there is enough space for
 -- all of the bytes.
