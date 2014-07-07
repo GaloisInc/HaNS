@@ -122,6 +122,7 @@ segmentArrives src hdr body =
                     if tcpSndUna > tcpIss
                        then do ack
                                establishConnection
+                               notify True
 
                                -- continue at step 6
                                when (tcpUrg hdr) (proceedFromStep6 hdr body)
@@ -399,7 +400,6 @@ establishConnection  =
        Just k  -> do sid <- tcpSocketId `fmap` getTcpSocket
                      outputS (k sid)
                      setState Established
-                     notify True
 
        -- no one available to accept the connection, close it
        Nothing -> do finAck
