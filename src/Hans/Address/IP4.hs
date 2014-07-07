@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Hans.Address.IP4 where
@@ -15,6 +16,7 @@ import Data.Data (Data)
 import Data.List (intersperse)
 import Data.Typeable (Typeable)
 import Data.Word (Word8,Word32)
+import GHC.Generics (Generic)
 import Numeric (readDec)
 
 
@@ -23,7 +25,7 @@ data IP4 = IP4
   {-# UNPACK #-} !Word8
   {-# UNPACK #-} !Word8
   {-# UNPACK #-} !Word8
-  deriving (Ord,Eq,Typeable,Data)
+  deriving (Ord,Eq,Typeable,Data,Generic)
 
 broadcastIP4 :: IP4
 broadcastIP4  = IP4 255 255 255 255

@@ -61,20 +61,23 @@ addWindowScale sock
 -- Connection Refusal ----------------------------------------------------------
 
 -- | Given a tcp header, generate the next header in the sequence that
--- corresponds to the RST ACK response.
+-- corresponds to the RST ACK response.  As this should only be used in
+-- situations in which an ACK was not received, this adds one plus the body
+-- length to the ack number.
 mkRstAck :: TcpHeader -> Int -> TcpHeader
 mkRstAck hdr len = emptyTcpHeader
   { tcpSeqNum     = 0
-  , tcpAckNum     = tcpSeqNum hdr + fromIntegral len
+  , tcpAckNum     = tcpSeqNum hdr + fromIntegral len + 1 -- to ack their message
   , tcpRst        = True
+  , tcpAck        = True
   , tcpDestPort   = tcpSourcePort hdr
   , tcpSourcePort = tcpDestPort hdr
   }
 
 mkRst :: TcpHeader -> TcpHeader
 mkRst hdr = emptyTcpHeader
-  { tcpSeqNum = tcpAckNum hdr
-  , tcpRst    = True
+  { tcpSeqNum     = tcpAckNum hdr
+  , tcpRst        = True
   , tcpDestPort   = tcpSourcePort hdr
   , tcpSourcePort = tcpDestPort hdr
   }

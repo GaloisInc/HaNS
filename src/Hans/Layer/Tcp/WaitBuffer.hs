@@ -88,7 +88,9 @@ flushWaiting buf = buf { bufWaiting = Seq.empty }
 queueWaiting :: Wakeup -> Buffer d -> Buffer d
 queueWaiting wakeup buf = buf { bufWaiting = bufWaiting buf Seq.|> wakeup }
 
--- | Queue bytes into a buffer that has some available size.
+-- | Queue bytes into a buffer that has some available space.  The first result
+-- is the number of bytes written (0, in the Nothing case), and the second is
+-- the new buffer.
 queueBytes :: L.ByteString -> Buffer d -> (Maybe Int64, Buffer d)
 queueBytes bytes buf
   | bufAvailable buf <= 0 = (Nothing,buf)
@@ -121,8 +123,8 @@ shutdownWaiting buf = (m,buf { bufWaiting = Seq.empty })
 
 -- Sending Buffer --------------------------------------------------------------
 
--- | Queue bytes in an outgoing buffer.  When the number of bytes written is
--- @Nothing@, the wakeup action has been queued.
+-- | Queue bytes in an outgoing buffer.  When there's no space available in the
+-- buffer, the wakeup action is queued.
 writeBytes :: L.ByteString -> Wakeup -> Buffer Outgoing
            -> (Maybe Int64,Buffer Outgoing)
 writeBytes bytes wakeup buf = case queueBytes bytes buf of

@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 
 module Hans.Address.Mac (
     Mac(..)
@@ -18,6 +19,7 @@ import Data.Serialize.Put (Putter,putByteString)
 import Data.Bits (Bits(testBit,complement))
 import Data.List (intersperse)
 import Data.Word (Word8)
+import GHC.Generics ( Generic )
 import Numeric (readHex)
 import qualified Data.ByteString as S
 
@@ -30,7 +32,7 @@ data Mac = Mac
   {-# UNPACK #-} !Word8
   {-# UNPACK #-} !Word8
   {-# UNPACK #-} !Word8
-  deriving ( Eq, Ord )
+  deriving ( Eq, Ord, Generic )
 
 
 -- | Show a Mac address.

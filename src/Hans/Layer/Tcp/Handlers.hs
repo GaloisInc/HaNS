@@ -36,8 +36,8 @@ handleIncomingTcp ip4 bytes = do
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (parseTcpPacket bytes)
 
-  withConnection src hdr (segmentArrives src hdr body)
-    `mplus` noConnection src hdr body
+  withConnection' src hdr (segmentArrives src hdr body)
+                          (noConnection src hdr body)
 
 noConnection :: IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 noConnection src hdr @ TcpHeader { .. } body =

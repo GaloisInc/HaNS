@@ -170,12 +170,16 @@ eachConnection (Sock body) =
   where
   sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
 
+
 withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp a
-withConnection remote hdr m = do
+withConnection remote hdr m = withConnection' remote hdr m mzero
+
+withConnection' :: IP4 -> TcpHeader -> Sock a -> Tcp a -> Tcp a
+withConnection' remote hdr m noConn = do
   cs <- getConnections
   case Map.lookup estId cs `mplus` Map.lookup listenId cs of
     Just con -> runSock con m
-    Nothing  -> mzero
+    Nothing  -> noConn
   where
   estId    = incomingSocketId remote hdr
   listenId = listenSocketId (tcpDestPort hdr)
@@ -319,7 +323,10 @@ shutdown  = do
   fin <- modifyTcpSocket $ \ tcp -> 
       let (wOut,bufOut) = shutdownWaiting (tcpOutBuffer tcp)
           (wIn,bufIn)   = shutdownWaiting (tcpInBuffer tcp)
-       in (wOut >> wIn,tcp { tcpOutBuffer = bufOut, tcpInBuffer = bufIn })
+       in (wOut >> wIn,tcp { tcpOut       = clearRetransmit (tcpOut tcp)
+                           , tcpOutBuffer = bufOut
+                           , tcpInBuffer  = bufIn
+                           })
   outputS fin
 
 -- | Set the socket state to closed, and unblock any waiting processes.
