@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE Rank2Types #-}
 
 module Hans.Layer.Tcp.Monad where
 
@@ -11,10 +12,10 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Applicative(Applicative,Alternative)
+import Control.Applicative(Applicative(..))
 import Control.Monad (MonadPlus(..),guard,when)
 import Data.Time.Clock.POSIX (POSIXTime)
-import MonadLib (get,set,StateT,runStateT,inBase)
+import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
@@ -146,95 +147,147 @@ closePort port = modifyHost (releasePort port)
 
 -- Socket Monad ----------------------------------------------------------------
 
+-- | Tcp operations in the context of a socket.
+--
+-- This implementation is a bit ridiculous, and when the eventual rewrite comes
+-- this should be one of the first things to be reconsidered.  The basic problem
+-- is that if you rely on the `finished` implementation for the Layer monad, you
+-- exit from the socket context as well, losing any changes that have been made
+-- locally.  This gives the ability to simulate `finished`, with the benefit of
+-- only yielding from the Sock context, not the whole Tcp context.
 newtype Sock a = Sock
-  { unSock :: StateT TcpSocket Tcp a
-  } deriving (Alternative,Applicative,Functor,Monad,MonadPlus)
+  { unSock :: forall r. TcpSocket -> Escape r -> Next a r
+           -> Tcp (TcpSocket,Maybe r)
+  }
+
+type Escape r = TcpSocket -> Tcp (TcpSocket,Maybe r)
+
+type Next a r = TcpSocket -> a -> Tcp (TcpSocket, Maybe r)
+
+instance Functor Sock where
+  fmap f m = Sock $ \s  x k -> unSock m s x
+                  $ \s' a   -> k s' (f a)
+
+instance Applicative Sock where
+  {-# INLINE pure #-}
+  pure x = Sock $ \ s _ k -> k s x
+
+  {-# INLINE (<*>) #-}
+  f <*> a = Sock $ \ s   x k -> unSock f s  x
+                 $ \ s'  g   -> unSock a s' x
+                 $ \ s'' b   -> k s'' (g b)
+
+instance Monad Sock where
+  {-# INLINE return #-}
+  return = pure
+
+  m >>= f = Sock $ \ s  x k -> unSock m s x
+                 $ \ s' a   -> unSock (f a) s' x k
 
 inTcp :: Tcp a -> Sock a
-inTcp  = Sock . inBase
+inTcp m = Sock $ \ s _ k -> do a <- m
+                               k s a
+
+
+-- | Finish early, with no result.
+escape :: Sock a
+escape  = Sock $ \ s x _ -> x s
+
+runSock_ :: TcpSocket -> Sock a -> Tcp ()
+runSock_ tcp sm =
+  do _ <- runSock tcp sm
+     return ()
+
+runSock' :: TcpSocket -> Sock a -> Tcp TcpSocket
+runSock' tcp sm =
+  do (tcp',_) <- runSock tcp sm
+     return tcp'
 
 -- | Run the socket action, and increment its internal timestamp value.
-runSock :: TcpSocket -> Sock a -> Tcp a
-runSock tcp (Sock m) = do
+runSock :: TcpSocket -> Sock a -> Tcp (TcpSocket,Maybe a)
+runSock tcp sm = do
   now      <- time
   let steppedTcp = tcp { tcpTimestamp = stepTimestamp now `fmap` tcpTimestamp tcp }
-  (a,tcp') <- runStateT steppedTcp m
+  r@(tcp',_) <- unSock sm steppedTcp escapeK nextK
   addConnection (tcpSocketId tcp') tcp'
-  return a
+  return r
+  where
+  escapeK s = return (s,Nothing)
+  nextK s a = return (s,Just a)
 
 -- | Iterate for each connection, rolling back to its previous state if the
 -- computation fails.
 eachConnection :: Sock () -> Tcp ()
-eachConnection (Sock body) =
+eachConnection m =
   setConnections . removeClosed =<< T.mapM sandbox =<< getConnections
   where
-  sandbox tcp = (snd `fmap` runStateT tcp body) `mplus` return tcp
+
+  -- Prevent failure in the socket action from leaking out of this scope.  When
+  -- failure is detected, just return the old TCB
+  sandbox tcp = runSock' tcp m `mplus` return tcp
 
 
-withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp a
+withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp ()
 withConnection remote hdr m = withConnection' remote hdr m mzero
 
-withConnection' :: IP4 -> TcpHeader -> Sock a -> Tcp a -> Tcp a
+withConnection' :: IP4 -> TcpHeader -> Sock a -> Tcp () -> Tcp ()
 withConnection' remote hdr m noConn = do
   cs <- getConnections
   case Map.lookup estId cs `mplus` Map.lookup listenId cs of
-    Just con -> runSock con m
+    Just con -> runSock_ con m
     Nothing  -> noConn
   where
   estId    = incomingSocketId remote hdr
   listenId = listenSocketId (tcpDestPort hdr)
 
-listeningConnection :: SocketId -> Sock a -> Tcp a
+listeningConnection :: SocketId -> Sock a -> Tcp (Maybe a)
 listeningConnection sid m = do
   tcp <- getConnection sid
   guard (tcpState tcp == Listen && isAccepting tcp)
-  runSock tcp m
+  (_,mb) <- runSock tcp m
+  return mb
 
 -- | Run a socket operation in the context of the socket identified by the
 -- socket id.
 --
 -- XXX this should really be renamed, as it's not guarding on the state of the
 -- socket
-establishedConnection :: SocketId -> Sock a -> Tcp a
+establishedConnection :: SocketId -> Sock a -> Tcp ()
 establishedConnection sid m = do
   tcp <- getConnection sid
-  runSock tcp m
+  runSock_ tcp m
 
 -- | Get the parent id of the current socket, and fail if it doesn't exist.
-getParent :: Sock SocketId
-getParent  = do
-  tcp <- getTcpSocket
-  case tcpParent tcp of
-    Just sid -> return sid
-    Nothing  -> mzero
+getParent :: Sock (Maybe SocketId)
+getParent  = tcpParent `fmap` getTcpSocket
 
--- | Run an action in the context of the socket's parent.  Fail the whole
--- computation if no parent exists.
-inParent :: Sock a -> Sock a
+-- | Run an action in the context of the socket's parent.  Returns `Nothing` if
+-- the connection has no parent.
+inParent :: Sock a -> Sock (Maybe a)
 inParent m = do
-  pid <- getParent
-  inTcp $ do
-    p <- getConnection pid
-    runSock p m
+  mbPid <- getParent
+  case mbPid of
+    Just pid -> inTcp $ do p      <- getConnection pid
+                           (_,mb) <- runSock p m
+                           return mb
+    Nothing  -> return Nothing
 
-withChild :: TcpSocket -> Sock a -> Sock a
-withChild tcp m = inTcp (runSock tcp m)
+withChild :: TcpSocket -> Sock a -> Sock (Maybe a)
+withChild tcp m = inTcp $ do (_,mb) <- runSock tcp m
+                             return mb
 
 getTcpSocket :: Sock TcpSocket
-getTcpSocket  = Sock get
+getTcpSocket  = Sock (\s _ k -> k s s)
 
 setTcpSocket :: TcpSocket -> Sock ()
-setTcpSocket tcp = Sock (set tcp)
+setTcpSocket tcp = Sock (\ _ _ k -> k tcp ())
 
 getTcpTimers :: Sock TcpTimers
 getTcpTimers  = tcpTimers `fmap` getTcpSocket
 
 modifyTcpSocket :: (TcpSocket -> (a,TcpSocket)) -> Sock a
-modifyTcpSocket k = Sock $ do
-  tcp <- get
-  let (a,tcp') = k tcp
-  set $! tcp'
-  return a
+modifyTcpSocket f = Sock $ \ s _ k -> let (a,s') = f s
+                                       in k s' a
 
 modifyTcpSocket_ :: (TcpSocket -> TcpSocket) -> Sock ()
 modifyTcpSocket_ k = modifyTcpSocket (\tcp -> ((), k tcp))
@@ -293,7 +346,7 @@ notify success = do
 
   case mbNotify of
     Just f  -> outputS (f success)
-    Nothing -> mzero
+    Nothing -> return ()
 
 -- | Output some IO to the Tcp layer.
 outputS :: IO () -> Sock ()
@@ -320,17 +373,19 @@ tcpOutput hdr body = do
 -- | Unblock any waiting processes, in preparation to close.
 shutdown :: Sock ()
 shutdown  = do
-  fin <- modifyTcpSocket $ \ tcp -> 
+  finalize <- modifyTcpSocket $ \ tcp -> 
       let (wOut,bufOut) = shutdownWaiting (tcpOutBuffer tcp)
           (wIn,bufIn)   = shutdownWaiting (tcpInBuffer tcp)
        in (wOut >> wIn,tcp { tcpOut       = clearRetransmit (tcpOut tcp)
                            , tcpOutBuffer = bufOut
                            , tcpInBuffer  = bufIn
                            })
-  outputS fin
+  outputS (finalize >> putStrLn "finalized!")
 
 -- | Set the socket state to closed, and unblock any waiting processes.
 closeSocket :: Sock ()
 closeSocket  = do
+  sock <- getTcpSocket
+  outputS (putStrLn ("Closing in state: " ++ show (tcpState sock)))
   shutdown
   setState Closed

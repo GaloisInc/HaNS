@@ -57,20 +57,23 @@ server ns = do
   sock <- listen ns localAddr 9001
 
   forever $ do
-    putStrLn "accepting"
+    putStrLn "Waiting..."
     conn <- accept sock
-    putStrLn "accepted"
-    _ <- forkIO $ do
-      putStrLn ("Got one: " ++ show (sockRemoteHost conn))
-      forever $ do
-        buf <- recvBytes conn 512
-        when (L.null buf) $ do
-          putStrLn "Client closed connection"
-          close conn
-          killThread =<< myThreadId
-        _ <- sendBytes conn buf
-        return ()
+    _    <- forkIO (handleClient conn)
     return ()
+
+handleClient :: Socket -> IO ()
+handleClient conn =
+  do putStrLn ("Got one: " ++ show (sockRemoteHost conn))
+     loop
+  where
+  loop =
+    do buf <- recvBytes conn 512
+       if L.null buf
+          then do putStrLn "Client closed connection"
+                  close conn
+          else do _ <- sendBytes conn buf
+                  loop
 
 message :: L.ByteString
 message  = "Hello, world\n"

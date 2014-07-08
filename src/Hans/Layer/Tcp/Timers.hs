@@ -61,8 +61,7 @@ resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
 fastTimer :: Tcp ()
 fastTimer  = eachConnection $ do
   tcp <- getTcpSocket
-  guard (needsDelayedAck tcp)
-  ack
+  when (needsDelayedAck tcp) ack
 
 
 -- Timer Interaction -----------------------------------------------------------

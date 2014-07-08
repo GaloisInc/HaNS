@@ -13,7 +13,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Monad (guard,when,unless,mplus)
+import Control.Monad (guard,when,unless,mplus,join)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
@@ -31,8 +31,10 @@ import Debug.Trace
 -- | Process a single incoming tcp packet.
 handleIncomingTcp :: IP4Header -> S.ByteString -> Tcp ()
 handleIncomingTcp ip4 bytes = do
+
   let src = ip4SourceAddr ip4
       dst = ip4DestAddr ip4
+
   guard (validateTcpChecksumIP4 src dst bytes)
   (hdr,body) <- liftRight (parseTcpPacket bytes)
 
@@ -41,7 +43,8 @@ handleIncomingTcp ip4 bytes = do
 
 noConnection :: IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 noConnection src hdr @ TcpHeader { .. } body =
-  do if | tcpRst    -> return ()
+  do output (putStrLn "no connection")
+     if | tcpRst    -> return ()
         | tcpAck    -> sendSegment src (mkRst hdr)                    L.empty
         | otherwise -> sendSegment src (mkRstAck hdr (S.length body)) L.empty
      finish
@@ -52,22 +55,26 @@ noConnection src hdr @ TcpHeader { .. } body =
 {-# INLINE discardAndReturn #-}
 discardAndReturn :: Sock a
 discardAndReturn  = do outputSegments
-                       inTcp finish
+                       escape
 
 {-# INLINE done #-}
 done :: Sock a
 done  = do outputSegments
-           inTcp finish
+           escape
 
 segmentArrives :: IP4 -> TcpHeader -> S.ByteString -> Sock ()
 segmentArrives src hdr body =
-  do whenState Closed (inTcp (noConnection src hdr body))
+  do tcp <- getTcpSocket
+     traceShow (tcpSocketId tcp, tcpSyn hdr) (return ())
+
+     whenState Closed (inTcp (noConnection src hdr body))
 
      whenState Listen $
        do when (tcpAck hdr) (rst hdr)
 
           when (tcpSyn hdr) $ do child <- createConnection src hdr
-                                 withChild child synAck
+                                 _     <- withChild child synAck
+                                 return ()
 
           -- RST will be dropped at this point, as will anything else that
           -- wasn't covered by the above two cases.
@@ -148,7 +155,6 @@ proceedFromStep6 hdr body =
   do -- XXX skipping URG processing
      -- XXX skipping segment text, as this is processed in deliverSegment
      checkFinBit hdr body
-     outputSegments
 
 
 -- | Make sure that there is space for the incoming segment
@@ -245,8 +251,32 @@ checkAckBit hdr body
 checkFinBit :: TcpHeader -> S.ByteString -> Sock ()
 checkFinBit hdr body
   | tcpFin hdr =
-    do whenStates [Closed,Listen,SynSent]
+    do -- do not process the FIN
+       whenStates [Closed,Listen,SynSent]
          discardAndReturn
+
+       -- advance RCV.NXT over the FIN
+       advanceRcvNxt 1
+
+       flushQueues
+       ack
+       finAck
+       shutdown
+
+       whenStates [SynReceived,Established] (setState CloseWait)
+
+       whenState TimeWait (set2MSL mslTimeout)
+
+       -- XXX this needs to check that the FIN was ACKed, instead of just
+       -- entering TimeWait
+       whenState FinWait1 enterTimeWait
+
+       whenState FinWait2 enterTimeWait
+
+       done
+
+
+       -- don't do anything else for the remaining states
 
   | otherwise  = return ()
 
@@ -301,7 +331,7 @@ deliverSegment hdr body = do
   when (S.length body > 0) $ do
     mb <- modifyTcpSocket (handleData hdr body)
     case mb of
-      Just wakeup -> outputS (putStrLn "try again" >> tryAgain wakeup)
+      Just wakeup -> outputS (tryAgain wakeup)
       Nothing     -> return ()
 
   -- XXX this doesn't check that the sequence numbers aren't being reused to
@@ -321,7 +351,7 @@ handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
           { ttDelayedAck = not (L.null bytes)
           }
         }
-  return $ trace ("bytes queued: " ++ show (isJust wakeup)) (wakeup, tcp')
+  return (wakeup, tcp')
   where
   (segs,win') = incomingPacket hdr body (tcpIn tcp0)
   tcp         = tcp0 { tcpIn = win' }
@@ -396,7 +426,7 @@ createConnection ip4 hdr =
 establishConnection :: Sock ()
 establishConnection  =
   do mb <- inParent popAcceptor
-     case mb of
+     case join mb of
        Just k  -> do sid <- tcpSocketId `fmap` getTcpSocket
                      outputS (k sid)
                      setState Established

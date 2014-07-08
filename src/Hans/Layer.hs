@@ -129,6 +129,7 @@ liftRight (Left err) = do
   output (putStrLn err)
   dropPacket
 
+
 -- Handler Generalization ------------------------------------------------------
 
 type Handlers k a = Map.Map k a

@@ -31,6 +31,8 @@ import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
+import Debug.Trace
+
 
 -- Socket Interface ------------------------------------------------------------
 
@@ -105,7 +107,7 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
         , tcpTimestamp = Just (emptyTimestamp now)
         }
   -- XXX how should the retry/backoff be implemented
-  runSock sock $ do
+  runSock_ sock $ do
     syn
     setState SynSent
 
@@ -153,9 +155,7 @@ accept sock = blockResult (sockHandle sock) $ \ res ->
   establishedConnection (sockId sock) $ do
     state <- getState
     case state of
-      Listen -> pushAcceptor $ \ sid -> do
-       putStrLn ("Accepted: " ++ show sid)
-       putMVar res $ SocketResult $ Socket
+      Listen -> pushAcceptor $ \ sid -> putMVar res $ SocketResult $ Socket
         { sockHandle = sockHandle sock
         , sockId     = sid
         }
@@ -174,7 +174,7 @@ instance Exception CloseError
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  let unblock   = output . putMVar res
+  let unblock r = output (putMVar res r)
       connected = establishedConnection (sockId sock) $ do
         userClose
         state <- getState
@@ -190,10 +190,10 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
 
           _ -> return ()
 
-        return (SocketResult ())
+        inTcp (unblock (SocketResult ()))
 
   -- closing a connection that doesn't exist causes a CloseError
-  unblock =<< connected `mplus` return (socketError CloseError)
+  connected `mplus` unblock (socketError CloseError)
 
 userClose :: Sock ()
 userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
@@ -264,7 +264,7 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
 inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
 inputBytes len wakeup tcp
   | tcpState tcp == Established = (mbRead,     tcp { tcpInBuffer = bufIn   })
-  | otherwise                   = (Just bytes, tcp { tcpInBuffer = flushed })
+  | otherwise                   = (tcpState tcp `traceShow` Just bytes, tcp { tcpInBuffer = flushed })
   where
   (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
   flushed        = flushWaiting bufIn
