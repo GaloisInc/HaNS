@@ -269,7 +269,10 @@ checkFinBit hdr body
 
        -- XXX this needs to check that the FIN was ACKed, instead of just
        -- entering TimeWait
-       whenState FinWait1 enterTimeWait
+       whenState FinWait1 $ do TcpSocket { .. } <- getTcpSocket
+                               if tcpSndNxt <= tcpSndUna
+                                  then enterTimeWait
+                                  else setState Closing
 
        whenState FinWait2 enterTimeWait
 

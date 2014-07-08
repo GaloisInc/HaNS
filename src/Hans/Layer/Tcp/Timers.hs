@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Hans.Layer.Tcp.Timers (
     initTimers
   , slowTimer
@@ -21,7 +23,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Timers (Milliseconds)
 
 import Control.Concurrent (forkIO,threadDelay)
-import Control.Monad (when,guard,forever,void)
+import Control.Monad (when,unless,guard,forever,void)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Foldable as F
 
@@ -50,9 +52,13 @@ initTimers  = do
 slowTimer :: Tcp ()
 slowTimer  = eachConnection $ do
   handle2MSL
-  handleRTO
-  handleFinWait2
-  updateTimers
+
+  -- the slow timer is valid for all states but TimeWait
+  TcpSocket { .. } <- getTcpSocket
+  unless (tcpState == TimeWait) $
+    do handleRTO
+       handleFinWait2
+       updateTimers
 
 resetIdle :: Sock ()
 resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
@@ -61,7 +67,7 @@ resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
 fastTimer :: Tcp ()
 fastTimer  = eachConnection $ do
   tcp <- getTcpSocket
-  when (needsDelayedAck tcp) ack
+  when (tcpState tcp /= TimeWait && needsDelayedAck tcp) ack
 
 
 -- Timer Interaction -----------------------------------------------------------
