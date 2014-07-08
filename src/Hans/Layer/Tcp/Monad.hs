@@ -380,7 +380,7 @@ shutdown  = do
                            , tcpOutBuffer = bufOut
                            , tcpInBuffer  = bufIn
                            })
-  outputS (finalize >> putStrLn "finalized!")
+  outputS finalize
 
 -- | Set the socket state to closed, and unblock any waiting processes.
 closeSocket :: Sock ()

@@ -23,7 +23,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Timers (Milliseconds)
 
 import Control.Concurrent (forkIO,threadDelay)
-import Control.Monad (when,unless,guard,forever,void)
+import Control.Monad (when,unless,forever,void)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Foldable as F
 

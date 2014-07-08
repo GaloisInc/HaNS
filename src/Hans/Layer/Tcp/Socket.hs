@@ -31,8 +31,6 @@ import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
-import Debug.Trace
-
 
 -- Socket Interface ------------------------------------------------------------
 
@@ -264,7 +262,7 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
 inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
 inputBytes len wakeup tcp
   | tcpState tcp == Established = (mbRead,     tcp { tcpInBuffer = bufIn   })
-  | otherwise                   = (tcpState tcp `traceShow` Just bytes, tcp { tcpInBuffer = flushed })
+  | otherwise                   = (Just bytes, tcp { tcpInBuffer = flushed })
   where
   (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
   flushed        = flushWaiting bufIn

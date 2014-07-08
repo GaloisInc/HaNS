@@ -1,7 +1,10 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Hans.Layer.Tcp.Handlers where
+module Hans.Layer.Tcp.Handlers (
+    handleIncomingTcp
+  , outputSegments
+  ) where
 
 import Hans.Address.IP4
 import Hans.Layer
@@ -13,7 +16,7 @@ import Hans.Layer.Tcp.Window
 import Hans.Message.Ip4
 import Hans.Message.Tcp
 
-import Control.Monad (guard,when,unless,mplus,join)
+import Control.Monad (guard,when,unless,join)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
@@ -22,8 +25,6 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
-
-import Debug.Trace
 
 
 -- Incoming Packets ------------------------------------------------------------
@@ -64,8 +65,8 @@ done  = do outputSegments
 
 segmentArrives :: IP4 -> TcpHeader -> S.ByteString -> Sock ()
 segmentArrives src hdr body =
-  do tcp <- getTcpSocket
-     traceShow (tcpSocketId tcp, tcpSyn hdr) (return ())
+  do shouldDrop <- modifyTcpSocket (updateTimestamp hdr)
+     when shouldDrop discardAndReturn
 
      whenState Closed (inTcp (noConnection src hdr body))
 
@@ -108,14 +109,14 @@ segmentArrives src hdr body =
 
           when (tcpSyn hdr) $
             do advanceRcvNxt 1
-               modifyTcpSocket_ $ \ tcp -> tcp
-                 { tcpOutMSS      = fromMaybe (tcpInMSS tcp) (getMSS hdr)
+               modifyTcpSocket_ $ \ sock -> sock
+                 { tcpOutMSS      = fromMaybe (tcpInMSS sock) (getMSS hdr)
 
                    -- clear out, and configure the retransmit buffer
                  , tcpOut         = setSndWind (tcpWindow hdr)
                                   $ setSndWindScale (windowScale hdr)
                                   $ clearRetransmit
-                                  $ tcpOut tcp
+                                  $ tcpOut sock
 
                    -- this corresponds to setting IRS to SEQ.SEG
                  , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
@@ -132,7 +133,7 @@ segmentArrives src hdr body =
                                notify True
 
                                -- continue at step 6
-                               when (tcpUrg hdr) (proceedFromStep6 hdr body)
+                               when (tcpUrg hdr) (proceedFromStep6 hdr)
 
                        else do setState SynReceived
                                synAck
@@ -143,18 +144,18 @@ segmentArrives src hdr body =
 
      -- make sure that the sequence numbers are valid
      checkSequenceNumber hdr body
-     checkResetBit hdr body
+     checkResetBit hdr
      -- skip security/precidence check
-     checkSynBit hdr body
+     checkSynBit hdr
      deliverSegment hdr body
-     checkAckBit hdr body
-     proceedFromStep6 hdr body
+     checkAckBit hdr
+     proceedFromStep6 hdr
 
-proceedFromStep6 :: TcpHeader -> S.ByteString -> Sock ()
-proceedFromStep6 hdr body =
+proceedFromStep6 :: TcpHeader -> Sock ()
+proceedFromStep6 hdr =
   do -- XXX skipping URG processing
      -- XXX skipping segment text, as this is processed in deliverSegment
-     checkFinBit hdr body
+     checkFinBit hdr
 
 
 -- | Make sure that there is space for the incoming segment
@@ -183,8 +184,8 @@ checkSequenceNumber hdr body =
           discardAndReturn
 
 -- | Process the presence of the RST bit
-checkResetBit :: TcpHeader -> S.ByteString -> Sock ()
-checkResetBit hdr body
+checkResetBit :: TcpHeader -> Sock ()
+checkResetBit hdr
   | tcpRst hdr =
     do TcpSocket { .. } <- getTcpSocket
 
@@ -205,8 +206,8 @@ checkResetBit hdr body
 
   | otherwise  = return ()
 
-checkSynBit :: TcpHeader -> S.ByteString -> Sock ()
-checkSynBit hdr body
+checkSynBit :: TcpHeader -> Sock ()
+checkSynBit hdr
   | tcpSyn hdr = whenStates [SynReceived,Established,FinWait1,FinWait2
                             ,CloseWait,Closing,LastAck,TimeWait] $
     do tcp <- getTcpSocket
@@ -218,8 +219,8 @@ checkSynBit hdr body
 
   | otherwise  = return ()
 
-checkAckBit :: TcpHeader -> S.ByteString -> Sock ()
-checkAckBit hdr body
+checkAckBit :: TcpHeader -> Sock ()
+checkAckBit hdr
   | tcpAck hdr =
     do whenState SynReceived $
          do tcp <- getTcpSocket
@@ -248,8 +249,8 @@ checkAckBit hdr body
 
   | otherwise  = discardAndReturn
 
-checkFinBit :: TcpHeader -> S.ByteString -> Sock ()
-checkFinBit hdr body
+checkFinBit :: TcpHeader -> Sock ()
+checkFinBit hdr
   | tcpFin hdr =
     do -- do not process the FIN
        whenStates [Closed,Listen,SynSent]
@@ -379,23 +380,6 @@ handleAck hdr = do
               }
     Nothing -> tcp
 
--- | The other end has sent a FIN packet, acknowledge it, and respond with a
--- FIN,ACK packet.
-remoteGracefulTeardown :: Sock ()
-remoteGracefulTeardown  = do
-  advanceRcvNxt 1
-  ack
-
-  shutdown
-  -- setState CloseWait
-
-  -- technically, we go to CloseWait now, but we'll transition out immediately,
-  -- as we don't wait for user confirmation
-  setState CloseWait
-
-  finAck
-  setState LastAck
-
 -- | Setup the 2MSL timer, and enter the TIME_WAIT state.
 enterTimeWait :: Sock ()
 enterTimeWait  = do
@@ -458,8 +442,8 @@ genSegments :: POSIXTime -> TcpSocket -> (([Wakeup],OutSegments),TcpSocket)
 genSegments now tcp0 = loop [] Seq.empty tcp0
   where
   loop ws segs tcp
-    | rwAvailable (tcpOut tcp) <= 0 = done
-    | otherwise                     = fromMaybe done $ do
+    | rwAvailable (tcpOut tcp) <= 0 = result
+    | otherwise                     = fromMaybe result $ do
       let len = nextSegSize tcp
       (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
       let seg  = OutSegment
@@ -482,8 +466,7 @@ genSegments now tcp0 = loop [] Seq.empty tcp0
     addWakeup Nothing  =   ws
     addWakeup (Just w) = w:ws
 
-    done | not (Seq.null segs) = ((ws,segs),tcp)
-         | otherwise           = ((ws,segs),tcp)
+    result = ((ws,segs),tcp)
 
 
 -- Utilities -------------------------------------------------------------------

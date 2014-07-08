@@ -32,8 +32,6 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import qualified Data.Sequence as Seq
 
-import Debug.Trace
-
 
 -- Chunk Buffering -------------------------------------------------------------
 
@@ -83,7 +81,7 @@ isFull buf = bufAvailable buf == 0
 
 -- | Flush the queue of blocked processes.
 flushWaiting :: Buffer d -> Buffer d
-flushWaiting buf = "flushing waiting queue" `trace` buf { bufWaiting = Seq.empty }
+flushWaiting buf = buf { bufWaiting = Seq.empty }
 
 -- | Queue a wakeup action into a buffer.
 queueWaiting :: Wakeup -> Buffer d -> Buffer d
