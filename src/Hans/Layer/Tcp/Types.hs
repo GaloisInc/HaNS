@@ -94,16 +94,15 @@ socketError  = SocketError . toException
 -- | The socket that's in TimeWait, plus its current 2MSL value.
 type TimeWaitConnections = Map.Map SocketId TimeWaitSock
 
-data TimeWaitSock = TimeWaitSock { tw2MSL     :: !SlowTicks
+data TimeWaitSock = TimeWaitSock { tw2MSL      :: !SlowTicks
                                    -- ^ The current 2MSL value
-                                 , twInit2MSL :: !SlowTicks
+                                 , twInit2MSL  :: !SlowTicks
                                    -- ^ The initial 2MSL value
-                                 , twSeqNum   :: !TcpSeqNum
+                                 , twSeqNum    :: !TcpSeqNum
                                    -- ^ The sequence number to use when
                                    -- responding to messages
-                                 , twRcvNxt   :: !TcpSeqNum
-                                   -- ^ The next expected sequence number from
-                                   -- the remote host
+                                 , twTimestamp :: Maybe Timestamp
+                                   -- ^ The last timestamp used
                                  } deriving (Show)
 
 twReset2MSL :: TimeWaitSock -> TimeWaitSock
@@ -111,10 +110,10 @@ twReset2MSL tw = tw { tw2MSL = twInit2MSL tw }
 
 mkTimeWait :: TcpSocket -> TimeWaitSock
 mkTimeWait TcpSocket { .. } =
-  TimeWaitSock { tw2MSL     = timeout
-               , twInit2MSL = timeout
-               , twSeqNum   = tcpSndNxt
-               , twRcvNxt   = lwRcvNxt tcpIn
+  TimeWaitSock { tw2MSL      = timeout
+               , twInit2MSL  = timeout
+               , twSeqNum    = tcpSndNxt
+               , twTimestamp = tcpTimestamp
                }
   where
   timeout | tt2MSL tcpTimers <= 0 = 2 * mslTimeout

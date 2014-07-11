@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternGuards #-}
 
 module Hans.Layer.Tcp.Handlers (
     handleIncomingTcp
@@ -57,16 +58,30 @@ timeWaitConnection :: IP4 -> TcpHeader -> Tcp () -> Tcp ()
 timeWaitConnection src hdr noTimeWait =
   do mb <- getTimeWait src hdr
      case mb of
-       Just (sid,_) -> handleTimeWait sid hdr
-       Nothing      -> noTimeWait
+       Just (sid,tcp) -> handleTimeWait sid tcp hdr
+       Nothing        -> noTimeWait
 
 
-handleTimeWait :: SocketId -> TcpHeader -> Tcp ()
-handleTimeWait sid TcpHeader { .. }
+handleTimeWait :: SocketId -> TimeWaitSock -> TcpHeader -> Tcp ()
+handleTimeWait sid TimeWaitSock { .. } TcpHeader { .. }
   | tcpRst || tcpSyn = removeTimeWait sid
-  | tcpAck           = resetTimeWait2MSL sid
-                       -- XXX need to send an ACK if this was a FIN
-  | tcpFin           = resetTimeWait2MSL sid
+  | tcpAck           = do resetTimeWait2MSL sid
+
+                          let addTimestamp
+                                | Just ts <- twTimestamp = setTcpOption (mkTimestamp ts)
+                                | otherwise              = id
+
+                              hdr = addTimestamp emptyTcpHeader
+                                        { tcpDestPort   = tcpSourcePort
+                                        , tcpSourcePort = tcpDestPort
+                                        , tcpSeqNum     = twSeqNum
+                                          -- advance RCV.NXT over the FIN
+                                        , tcpAckNum     = tcpSeqNum + 1
+                                        , tcpAck        = True
+                                        }
+
+                          -- ACK the retransmitted FIN,ACK
+                          when tcpFin (sendSegment (sidRemoteHost sid) hdr L.empty)
   | otherwise        = return ()
 
 
