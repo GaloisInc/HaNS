@@ -2,8 +2,6 @@
 
 module Hans.Layer.Tcp.Timers (
     initTimers
-  , slowTimer
-  , fastTimer
 
   , resetIdle
   , whenIdleFor
@@ -58,7 +56,8 @@ slowTimer  = eachConnection $ do
   unless (tcpState == TimeWait) $
     do handleRTO
        handleFinWait2
-       updateTimers
+
+  updateTimers
 
 resetIdle :: Sock ()
 resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
@@ -120,13 +119,13 @@ tcpKeepIntVal  = 150
 
 -- | The timer that handles the TIME_WAIT, as well as the idle timeout.
 handle2MSL :: Sock ()
-handle2MSL  = whenTimer tt2MSL $ do
-  tcp <- getTcpSocket
-  let tt = tcpTimers tcp
-  if tcpState tcp /= TimeWait && ttIdle tt <= ttMaxIdle tt
-     then set2MSL tcpKeepIntVal
-     else closeSocket
-
+handle2MSL  =
+  do whenTimer tt2MSL $
+       do TcpSocket { .. } <- getTcpSocket
+          let TcpTimers { .. } = tcpTimers
+          if tcpState /= TimeWait && ttIdle <= ttMaxIdle
+             then set2MSL tcpKeepIntVal
+             else closeSocket
 
 -- FIN_WAIT_2 ------------------------------------------------------------------
 

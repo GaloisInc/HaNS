@@ -172,23 +172,45 @@ instance Exception CloseError
 -- | Close an open socket.
 close :: Socket -> IO ()
 close sock = blockResult (sockHandle sock) $ \ res -> do
-  let unblock r = output (putMVar res r)
-      connected = establishedConnection (sockId sock) $ do
+  let unblock r  = output (putMVar res r)
+      ok         = inTcp (unblock (SocketResult ()))
+      closeError = inTcp (unblock (socketError CloseError))
+      connected  = establishedConnection (sockId sock) $ do
         userClose
         state <- getState
         case state of
 
-          Established -> do
-            finAck
-            setState FinWait1
+          Established ->
+            do finAck
+               setState FinWait1
+               ok
 
-          -- XXX how should we close a listening socket?
-          Listen -> do
-            setState Closed
+          CloseWait ->
+            do finAck
+               setState TimeWait
+               ok
 
-          _ -> return ()
+          SynSent ->
+            do closeSocket
+               ok
 
-        inTcp (unblock (SocketResult ()))
+          SynReceived ->
+            do finAck
+               setState FinWait1
+               ok
+
+          -- XXX how should we close a listening socket?  what should happen to
+          -- connections that are in-progress?
+          Listen ->
+            do setState Closed
+               closeSocket
+               ok
+
+          FinWait1 -> ok
+          FinWait2 -> ok
+
+          _ -> closeError
+
 
   -- closing a connection that doesn't exist causes a CloseError
   connected `mplus` unblock (socketError CloseError)
@@ -229,7 +251,7 @@ outputBytes bytes wakeup tcp
   | otherwise                   = (Just written, tcp { tcpOutBuffer = flushed })
   where
   (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
-  flushed            = flushWaiting bufOut
+  (fin,flushed)      = flushWaiting bufOut
   written            = fromMaybe 0 mbWritten
 
 
@@ -260,10 +282,6 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
    in performRecv
 
 inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
-inputBytes len wakeup tcp
-  | tcpState tcp == Established = (mbRead,     tcp { tcpInBuffer = bufIn   })
-  | otherwise                   = (Just bytes, tcp { tcpInBuffer = flushed })
+inputBytes len wakeup tcp = (mbRead, tcp { tcpInBuffer = bufIn })
   where
   (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
-  flushed        = flushWaiting bufIn
-  bytes          = fromMaybe L.empty mbRead

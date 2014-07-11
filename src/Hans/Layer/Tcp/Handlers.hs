@@ -20,11 +20,9 @@ import Control.Monad (guard,when,unless,join)
 import Data.Bits (bit)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe,isJust,isNothing)
-import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
-import qualified Data.Sequence as Seq
 
 
 -- Incoming Packets ------------------------------------------------------------
@@ -133,7 +131,7 @@ segmentArrives src hdr body =
                                notify True
 
                                -- continue at step 6
-                               when (tcpUrg hdr) (proceedFromStep6 hdr)
+                               when (tcpUrg hdr) (proceedFromStep6 hdr body)
 
                        else do setState SynReceived
                                synAck
@@ -147,14 +145,13 @@ segmentArrives src hdr body =
      checkResetBit hdr
      -- skip security/precidence check
      checkSynBit hdr
-     deliverSegment hdr body
      checkAckBit hdr
-     proceedFromStep6 hdr
+     proceedFromStep6 hdr body
 
-proceedFromStep6 :: TcpHeader -> Sock ()
-proceedFromStep6 hdr =
+proceedFromStep6 :: TcpHeader -> S.ByteString -> Sock ()
+proceedFromStep6 hdr body =
   do -- XXX skipping URG processing
-     -- XXX skipping segment text, as this is processed in deliverSegment
+     processSegmentText hdr body
      checkFinBit hdr
 
 
@@ -228,31 +225,68 @@ checkAckBit hdr
                then establishConnection
                else rst hdr
 
-       whenState FinWait1 $
-         do tcp <- getTcpSocket
-            when (nothingOutstanding tcp) (setState FinWait2)
+       whenStates [Established,FinWait1,FinWait2,CloseWait,Closing] $
+         do let TcpHeader { .. } = hdr
+            TcpSocket { .. } <- getTcpSocket
 
-       -- XXX no way to acknowledge the user's close request from FinWait2
+            -- if the ack was to something that is outstanding, update SND.UNA,
+            -- and filter things out of the retransmit queue
+            when (tcpSndUna < tcpAckNum && tcpAckNum <= tcpSndNxt) (handleAck hdr)
 
-       whenState Closing $
-         do tcp <- getTcpSocket
-            when (nothingOutstanding tcp) (setState TimeWait)
+            -- if the ack is to something that hasn't been sent yet, drop the
+            -- segment
+            when (tcpSndNxt < tcpAckNum) discardAndReturn
+
+            whenState FinWait1 $
+              do tcp <- getTcpSocket
+                 when (nothingOutstanding tcp) (setState FinWait2)
+
+            -- XXX no way to acknowledge the user's close request from FinWait2
+            -- whenState FinWait2 $ ...
+
+            whenState Closing $
+              do tcp <- getTcpSocket
+                 when (nothingOutstanding tcp) enterTimeWait
 
        whenState LastAck $
          do tcp <- getTcpSocket
             when (nothingOutstanding tcp) $ do closeSocket
                                                done
 
+       -- the only ack we should see at this point is a retransmission of the
+       -- remote FIN,ACK
        whenState TimeWait $
-         do ack
+         do when (tcpFin hdr) ack
             set2MSL mslTimeout
 
   | otherwise  = discardAndReturn
+
+processSegmentText :: TcpHeader -> S.ByteString -> Sock ()
+processSegmentText hdr body =
+  whenStates [Established,FinWait1,FinWait2] $
+    do if S.null body
+          -- make sure that the the delayed ack flag gets set
+          then when (tcpSyn hdr || tcpFin hdr) $ modifyTcpTimers_
+                                               $ \ tt -> tt { ttDelayedAck = True }
+
+          -- push the segment through the local window, if it was the next thing
+          -- expected, a wakeup action will be returned, notifying a waiting
+          -- thread that there's something to read in the input buffer.
+          else do mb <- modifyTcpSocket (handleData hdr body)
+
+                  -- notify any waiting threads that there is stuff to read
+                  case mb of
+                    Just wakeup -> outputS (tryAgain wakeup)
+                    Nothing     -> return ()
+
+
+  -- otherwise, ignore the segment text
 
 checkFinBit :: TcpHeader -> Sock ()
 checkFinBit hdr
   | tcpFin hdr =
     do -- do not process the FIN
+       TcpSocket { .. } <- getTcpSocket
        whenStates [Closed,Listen,SynSent]
          discardAndReturn
 
@@ -261,11 +295,13 @@ checkFinBit hdr
 
        flushQueues
        ack
-       finAck
-       shutdown
+
+       -- don't emit a FIN here, as that should be done by the user with an
+       -- explicit call to `close`
 
        whenStates [SynReceived,Established] (setState CloseWait)
 
+       -- already in TimeWait, reset the 2MSL timer
        whenState TimeWait (set2MSL mslTimeout)
 
        -- XXX this needs to check that the FIN was ACKed, instead of just
@@ -277,19 +313,31 @@ checkFinBit hdr
 
        whenState FinWait2 enterTimeWait
 
-       done
-
-
        -- don't do anything else for the remaining states
+       done
 
   | otherwise  = return ()
 
 
--- XXX flesh this out a bit more, as this doesn't cover everything.
+-- | Flush all pending outgoing state.
+--
+-- TODO:
+-- * Push all data out of the incoming queue to the incoming buffer
+-- * Mark the socket as not accepting any more user data
 flushQueues :: Sock ()
-flushQueues  = modifyTcpSocket_ $ \ tcp -> tcp
-  { tcpOut = clearRetransmit (tcpOut tcp)
-  }
+flushQueues  =
+  do finalizers <- modifyTcpSocket flush
+     outputS finalizers
+  where
+  flush tcp = (fins,tcp')
+    where
+
+    -- empty the outgoing buffer, notifying all waiting processes that the send
+    -- won't happen
+    (fins,out') = flushWaiting (tcpOutBuffer tcp)
+
+    tcp' = tcp { tcpOutBuffer = out'
+               }
 
 
 -- | Update the currently held timestamp for both sides, and return a boolean
@@ -315,32 +363,6 @@ updateTimestamp hdr tcp = (shouldDrop,tcp { tcpTimestamp = ts' })
     when (tcpAck hdr) (guard (tsTimestamp ts == echo || isGreater))
     return ts { tsLastTimestamp = them }
 
--- | Deliver incoming bytes to the buffer in a user socket.  If there's no free
--- space in the buffer, the bytes will be dropped.
-deliverSegment :: TcpHeader -> S.ByteString -> Sock ()
-deliverSegment hdr body = do
-  TcpSocket { .. } <- getTcpSocket
-
-  -- they ack'd something that we haven't sent yet
-  when (tcpAckNum hdr > tcpSndNxt) $ do ack
-                                        discardAndReturn
-
-  -- handle data segment acknowledgments
-  when (isAck hdr) $ do handleAck hdr
-                        outputSegments
-
-  -- process a message, if there was data attached.  in the case that there is
-  -- no room in the buffer, the original socket state will be returned,
-  -- preventing any ACK from being sent.
-  when (S.length body > 0) $ do
-    mb <- modifyTcpSocket (handleData hdr body)
-    case mb of
-      Just wakeup -> outputS (tryAgain wakeup)
-      Nothing     -> return ()
-
-  -- XXX this doesn't check that the sequence numbers aren't being reused to
-  -- update the window
-
 -- | Enqueue a new packet in the local window, attempting to place the bytes
 -- received in the user buffer as they complete a part of the stream.  Bytes are
 -- ack'd as they complete the stream, and bytes that would cause the local
@@ -352,7 +374,9 @@ handleData hdr body tcp0 = fromMaybe (Nothing,tcp) $ do
   let tcp' = tcp
         { tcpInBuffer = buf'
         , tcpTimers   = (tcpTimers tcp)
-          { ttDelayedAck = not (L.null bytes)
+          { ttDelayedAck = or [ not (L.null bytes)
+                              , tcpSyn hdr
+                              , tcpFin hdr ]
           }
         }
   return (wakeup, tcp')
@@ -369,7 +393,7 @@ handleAck hdr = do
   modifyTcpSocket_ (updateAck now)
   where
   -- using Karns algorithm, only calibrate the RTO if the packet that was ack'd
-  -- is fresh.
+  -- has not yet been retransmitted.
   updateAck now tcp = case receiveAck hdr (tcpOut tcp) of
     Just (seg,out') ->
       let calibrate | outFresh seg = calibrateRTO now (outTime seg)
@@ -380,9 +404,12 @@ handleAck hdr = do
               }
     Nothing -> tcp
 
--- | Setup the 2MSL timer, and enter the TIME_WAIT state.
+-- | Setup the 2MSL timer, and enter the TIME_WAIT state.  We only enter
+-- TimeWait if all of our sent data has been ACKed, so it's safe to clear out
+-- the retransmit queue here.
 enterTimeWait :: Sock ()
 enterTimeWait  = do
+  modifyTcpSocket_ $ \ tcp -> tcp { tcpOut = clearRetransmit (tcpOut tcp) }
   set2MSL mslTimeout
   setState TimeWait
 
@@ -421,7 +448,6 @@ establishConnection  =
        -- no one available to accept the connection, close it
        Nothing -> do finAck
                      setState FinWait1
-                     outputS (putStrLn "no one accepting...")
                      done
 
 
@@ -433,40 +459,7 @@ outputSegments  = do
   now <- inTcp time
   (ws,segs) <- modifyTcpSocket (genSegments now)
   F.mapM_ outputSegment segs
-  unless (null ws) (outputS (mapM_ tryAgain ws))
-
--- | Take data from the output buffer, and turn it into segments.  When no data
--- was written, a wakeup action is returned to signal the user thread to try
--- again.
-genSegments :: POSIXTime -> TcpSocket -> (([Wakeup],OutSegments),TcpSocket)
-genSegments now tcp0 = loop [] Seq.empty tcp0
-  where
-  loop ws segs tcp
-    | rwAvailable (tcpOut tcp) <= 0 = result
-    | otherwise                     = fromMaybe result $ do
-      let len = nextSegSize tcp
-      (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
-      let seg  = OutSegment
-            { outAckNum = tcpSndNxt tcp + fromIntegral (L.length body)
-            , outTime   = now
-            , outFresh  = True
-            , outHeader = mkData tcp
-            , outRTO    = ttRTO (tcpTimers tcp)
-            , outBody   = body
-            }
-          tcp' = tcp
-            { tcpSndNxt    = outAckNum seg
-            , tcpOut       = addSegment seg (tcpOut tcp)
-            , tcpOutBuffer = bufOut
-            }
-
-      return (loop (addWakeup mbWakeup) (segs Seq.|> seg) tcp')
-    where
-
-    addWakeup Nothing  =   ws
-    addWakeup (Just w) = w:ws
-
-    result = ((ws,segs),tcp)
+  unless (null ws) (outputS (F.traverse_ tryAgain ws))
 
 
 -- Utilities -------------------------------------------------------------------

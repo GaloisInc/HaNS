@@ -79,9 +79,10 @@ isEmpty buf = bufAvailable buf == bufSize buf
 isFull :: Buffer d -> Bool
 isFull buf = bufAvailable buf == 0
 
--- | Flush the queue of blocked processes.
-flushWaiting :: Buffer d -> Buffer d
-flushWaiting buf = buf { bufWaiting = Seq.empty }
+-- | Flush the queue of blocked processes, returning an IO action that
+-- negatively acks the waiting processes, and a buffer with an empty wait queue.
+flushWaiting :: Buffer d -> (IO (), Buffer d)
+flushWaiting buf = (F.traverse_ abort (bufWaiting buf), buf { bufWaiting = Seq.empty })
 
 -- | Queue a wakeup action into a buffer.
 queueWaiting :: Wakeup -> Buffer d -> Buffer d

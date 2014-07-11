@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hans.Layer.Tcp.Window (
     module Hans.Layer.Tcp.Window
@@ -82,7 +82,10 @@ addSegment seg win = win
 -- was a matching set of packets waiting for an ack.
 receiveAck :: TcpHeader -> RemoteWindow -> Maybe (OutSegment,RemoteWindow)
 receiveAck hdr win = do
-  let match seg   = outAckNum seg == tcpAckNum hdr
+
+  -- XXX this doesn't deal with partial acks
+  let match seg   = tcpSeqNum (outHeader seg) < tcpAckNum hdr
+                 && outAckNum seg <= tcpAckNum hdr
       (acks,rest) = Seq.spanl match (rwSegments win)
 
   -- require that there was something to ack.
@@ -94,6 +97,7 @@ receiveAck hdr win = do
                $ win { rwSegments = rest }
       return (seg, win')
     Seq.EmptyR -> mzero
+
 
 -- | Update the RTO timer on all segments waiting for an ack.  When the timer
 -- runs out, output the segment for retransmission.
@@ -126,9 +130,29 @@ data OutSegment = OutSegment
   , outBody   :: !L.ByteString
   } deriving (Show)
 
--- | The size of a segment body.
+mkOutSegment :: POSIXTime -> Int -> TcpHeader -> L.ByteString -> OutSegment
+mkOutSegment created rto hdr body =
+  OutSegment { outAckNum = tcpSeqNum hdr + outSize' hdr body
+             , outTime   = created
+             , outFresh  = True
+             , outRTO    = rto
+             , outHeader = hdr
+             , outBody   = body
+             }
+
+ctlLength :: Num len => Bool -> len
+ctlLength True  = 1
+ctlLength False = 0
+
 outSize :: Num a => OutSegment -> a
-outSize  = fromIntegral . L.length . outBody
+outSize OutSegment { .. } = outSize' outHeader outBody
+
+-- | The size of a segment body.
+outSize' :: Num a => TcpHeader -> L.ByteString -> a
+outSize' TcpHeader { .. } body = fromIntegral (L.length body)
+                               + ctlLength tcpSyn
+                               + ctlLength tcpFin
+
 
 -- | Decrement the RTO value on a segment by the timer granularity (500ms).
 -- Once the RTO value dips below 1, mark the segment as no longer fresh.
@@ -183,7 +207,7 @@ refreshLocalWindow lw = lw
   { lwSize = fromIntegral (lwRcvWind lw) `shiftL` lwRcvWindScale lw
   }
 
--- | Updat the size of the remote window.
+-- | Update the size of the remote window.
 setRcvNxt :: TcpSeqNum -> LocalWindow -> LocalWindow
 setRcvNxt sn lw = lw { lwRcvNxt = sn }
 

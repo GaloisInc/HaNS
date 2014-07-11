@@ -29,6 +29,9 @@ flag example
         default:        False
         description:    Build the example program
 
+flag web-server
+        description:    Build a simple web-server example
+
 flag halvm
         description:    Build for the HaLVM
 
@@ -140,6 +143,30 @@ executable test
                                     HALVMCore     >= 2.0.0 && < 3.0.0
         else
                 ghc-options: -threaded
+
+executable web-server
+        main-is:        Main.hs
+        hs-source-dirs: web-server
+        ghc-options:    -Wall -threaded -rtsopts -prof -auto-all
+
+        if flag(web-server)
+                build-depends:  base       >= 4.0.0.0,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                HTTP       >= 4000.2.17,
+                                blaze-html >= 0.7.0.2,
+                                blaze-markup,
+                                hans
+
+        else
+                buildable: False
+
+        if flag(halvm)
+                buildable: False
 
 executable tcp-test
         main-is:        Main.hs

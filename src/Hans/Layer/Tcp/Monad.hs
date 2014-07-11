@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Rank2Types #-}
 
@@ -385,7 +386,7 @@ shutdown  = do
 -- | Set the socket state to closed, and unblock any waiting processes.
 closeSocket :: Sock ()
 closeSocket  = do
+  conns <- inTcp getConnections
   sock <- getTcpSocket
-  outputS (putStrLn ("Closing in state: " ++ show (tcpState sock)))
   shutdown
   setState Closed

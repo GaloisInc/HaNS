@@ -1,11 +1,16 @@
 module Hans.Layer.Tcp.Messages where
 
+import Hans.Layer ( time )
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
 import Hans.Message.Tcp
+
+import Data.Maybe ( fromMaybe )
+import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
+import qualified Data.Sequence as Seq
 
 
 -- Generic Packets -------------------------------------------------------------
@@ -158,12 +163,29 @@ delayedAck  = modifyTcpTimers_ (\tt -> tt { ttDelayedAck = True })
 clearDelayedAck :: Sock ()
 clearDelayedAck  = modifyTcpTimers_ (\tt -> tt { ttDelayedAck = False })
 
--- | Send a FIN packet to begin closing a connection.
+-- | Queue an outgoing fin packet in the outgoing window, and send it.
+--
+-- NOTE:  This uses genSegments, which will pull data out of the waiti
 finAck :: Sock ()
 finAck  = do
-  tcp <- getTcpSocket
-  tcpOutput (mkFinAck tcp) L.empty
-  advanceSndNxt 1
+  now <- inTcp time
+
+  seg <- modifyTcpSocket $ \ tcp ->
+
+    let -- construct the outgoing FIN,ACK segment
+        hdr          = mkFinAck tcp
+        finAckOutSeg = mkOutSegment now (ttRTO (tcpTimers tcp)) hdr L.empty
+
+        -- push the FIN,ACK into the outgoing window
+        tcp' = tcp { tcpOut    = addSegment finAckOutSeg (tcpOut tcp)
+
+                     -- advance SND.NXT over the FIN
+                   , tcpSndNxt = tcpSndNxt tcp + 1
+                   }
+
+     in (finAckOutSeg, tcp')
+
+  outputSegment seg
   clearDelayedAck
 
 rstAck :: TcpHeader -> Int -> Sock ()
@@ -212,3 +234,31 @@ isFin  = testFlags [ tcpFin ]
 isFinAck :: TcpHeader -> Bool
 isFinAck  = testFlags [ tcpFin, tcpAck ]
                       [ tcpCwr, tcpEce, tcpUrg, tcpPsh, tcpRst, tcpSyn ]
+
+
+-- Packet Output ---------------------------------------------------------------
+
+-- | Take data from the output buffer, and turn it into segments.  When data was
+-- freed from the output buffer, the wakeup actions for any threads currently
+-- blocked on writing to the output buffer will be returned.
+genSegments :: POSIXTime -> TcpSocket -> (([Wakeup],OutSegments),TcpSocket)
+genSegments now tcp0 = loop [] Seq.empty tcp0
+  where
+  loop ws segs tcp
+    | rwAvailable (tcpOut tcp) <= 0 = result
+    | otherwise                     = fromMaybe result $ do
+      let len = nextSegSize tcp
+      (mbWakeup,body,bufOut) <- takeBytes len (tcpOutBuffer tcp)
+      let seg  = mkOutSegment now (ttRTO (tcpTimers tcp)) (mkData tcp) body
+          tcp' = tcp { tcpSndNxt    = outAckNum seg
+                     , tcpOut       = addSegment seg (tcpOut tcp)
+                     , tcpOutBuffer = bufOut
+                     }
+
+      return (loop (addWakeup mbWakeup) (segs Seq.|> seg) tcp')
+    where
+
+    addWakeup Nothing  =   ws
+    addWakeup (Just w) = w:ws
+
+    result = ((ws,segs),tcp)
