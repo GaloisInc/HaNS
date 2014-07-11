@@ -38,7 +38,8 @@ handleIncomingTcp ip4 bytes = do
   (hdr,body) <- liftRight (parseTcpPacket bytes)
 
   withConnection' src hdr (segmentArrives src hdr body)
-                          (noConnection src hdr body)
+    $ timeWaitConnection src hdr
+    $ noConnection src hdr body
 
 noConnection :: IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 noConnection src hdr @ TcpHeader { .. } body =
@@ -47,6 +48,27 @@ noConnection src hdr @ TcpHeader { .. } body =
         | tcpAck    -> sendSegment src (mkRst hdr)                    L.empty
         | otherwise -> sendSegment src (mkRstAck hdr (S.length body)) L.empty
      finish
+
+
+-- Arrival to a TIME_WAIT socket------------------------------------------------
+
+-- | Handle an incoming packet in the TimeWait state
+timeWaitConnection :: IP4 -> TcpHeader -> Tcp () -> Tcp ()
+timeWaitConnection src hdr noTimeWait =
+  do mb <- getTimeWait src hdr
+     case mb of
+       Just (sid,_) -> handleTimeWait sid hdr
+       Nothing      -> noTimeWait
+
+
+handleTimeWait :: SocketId -> TcpHeader -> Tcp ()
+handleTimeWait sid TcpHeader { .. }
+  | tcpRst || tcpSyn = removeTimeWait sid
+  | tcpAck           = resetTimeWait2MSL sid
+                       -- XXX need to send an ACK if this was a FIN
+  | tcpFin           = resetTimeWait2MSL sid
+  | otherwise        = return ()
+
 
 
 -- Segment Arrival -------------------------------------------------------------
@@ -197,7 +219,7 @@ checkResetBit hdr
             closeSocket
             done
 
-       whenStates [Closing,LastAck,TimeWait] $
+       whenStates [Closing,LastAck] $
          do closeSocket
             done
 
@@ -206,7 +228,7 @@ checkResetBit hdr
 checkSynBit :: TcpHeader -> Sock ()
 checkSynBit hdr
   | tcpSyn hdr = whenStates [SynReceived,Established,FinWait1,FinWait2
-                            ,CloseWait,Closing,LastAck,TimeWait] $
+                            ,CloseWait,Closing,LastAck] $
     do tcp <- getTcpSocket
 
        when (tcpSeqNum hdr `inRcvWnd` tcp) $
@@ -253,12 +275,6 @@ checkAckBit hdr
             when (nothingOutstanding tcp) $ do closeSocket
                                                done
 
-       -- the only ack we should see at this point is a retransmission of the
-       -- remote FIN,ACK
-       whenState TimeWait $
-         do when (tcpFin hdr) ack
-            set2MSL mslTimeout
-
   | otherwise  = discardAndReturn
 
 processSegmentText :: TcpHeader -> S.ByteString -> Sock ()
@@ -286,7 +302,6 @@ checkFinBit :: TcpHeader -> Sock ()
 checkFinBit hdr
   | tcpFin hdr =
     do -- do not process the FIN
-       TcpSocket { .. } <- getTcpSocket
        whenStates [Closed,Listen,SynSent]
          discardAndReturn
 
@@ -300,9 +315,6 @@ checkFinBit hdr
        -- explicit call to `close`
 
        whenStates [SynReceived,Established] (setState CloseWait)
-
-       -- already in TimeWait, reset the 2MSL timer
-       whenState TimeWait (set2MSL mslTimeout)
 
        -- XXX this needs to check that the FIN was ACKed, instead of just
        -- entering TimeWait

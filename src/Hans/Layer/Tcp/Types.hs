@@ -9,11 +9,12 @@ import Hans.Message.Tcp
 import Hans.Ports
 
 import Control.Exception (Exception,SomeException,toException)
+import Control.Monad ( guard )
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word16,Word32)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Sequence as Seq
 
 
@@ -21,6 +22,7 @@ import qualified Data.Sequence as Seq
 
 data Host = Host
   { hostConnections   :: Connections
+  , hostTimeWaits     :: TimeWaitConnections
   , hostInitialSeqNum :: !TcpSeqNum
   , hostPorts         :: !(PortManager TcpPort)
   , hostLastUpdate    :: POSIXTime
@@ -29,6 +31,7 @@ data Host = Host
 emptyHost :: POSIXTime -> Host
 emptyHost start = Host
   { hostConnections   = Map.empty
+  , hostTimeWaits     = Map.empty
     -- XXX what should we seed this with?
   , hostInitialSeqNum = 0
   , hostPorts         = emptyPortManager [32768 .. 61000]
@@ -86,9 +89,56 @@ socketError :: Exception e => e -> SocketResult a
 socketError  = SocketError . toException
 
 
+-- Connections in TimeWait -----------------------------------------------------
+
+-- | The socket that's in TimeWait, plus its current 2MSL value.
+type TimeWaitConnections = Map.Map SocketId TimeWaitSock
+
+data TimeWaitSock = TimeWaitSock { tw2MSL     :: !SlowTicks
+                                   -- ^ The current 2MSL value
+                                 , twInit2MSL :: !SlowTicks
+                                   -- ^ The initial 2MSL value
+                                 , twSeqNum   :: !TcpSeqNum
+                                   -- ^ The sequence number to use when
+                                   -- responding to messages
+                                 , twRcvNxt   :: !TcpSeqNum
+                                   -- ^ The next expected sequence number from
+                                   -- the remote host
+                                 } deriving (Show)
+
+twReset2MSL :: TimeWaitSock -> TimeWaitSock
+twReset2MSL tw = tw { tw2MSL = twInit2MSL tw }
+
+mkTimeWait :: TcpSocket -> TimeWaitSock
+mkTimeWait TcpSocket { .. } =
+  TimeWaitSock { tw2MSL     = timeout
+               , twInit2MSL = timeout
+               , twSeqNum   = tcpSndNxt
+               , twRcvNxt   = lwRcvNxt tcpIn
+               }
+  where
+  timeout | tt2MSL tcpTimers <= 0 = 2 * mslTimeout
+          | otherwise             = tt2MSL tcpTimers
+
+-- | Add a socket to the TimeWait map.
+addTimeWait :: TcpSocket -> TimeWaitConnections -> TimeWaitConnections
+addTimeWait tcp socks = Map.insert (tcpSocketId tcp) (mkTimeWait tcp) socks
+
+-- | Take one step, collecting any connections whose 2MSL timer goes to 0.
+stepTimeWaitConnections :: TimeWaitConnections -> TimeWaitConnections
+stepTimeWaitConnections  = Map.mapMaybe $ \ tw ->
+  do guard (tw2MSL tw > 0)
+     return tw { tw2MSL = tw2MSL tw - 1 }
+
+
 -- Timers ----------------------------------------------------------------------
 
 type SlowTicks = Int
+
+-- | MSL is 60 seconds, which is slightly more aggressive than the 2 minutes
+-- from the original RFC.
+mslTimeout :: SlowTicks
+mslTimeout = 2 * 60
 
 data TcpTimers = TcpTimers
   { ttDelayedAck :: !Bool

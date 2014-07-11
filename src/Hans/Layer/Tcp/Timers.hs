@@ -6,7 +6,6 @@ module Hans.Layer.Tcp.Timers (
   , resetIdle
   , whenIdleFor
 
-  , mslTimeout
   , set2MSL
 
   , calibrateRTO
@@ -48,16 +47,22 @@ initTimers  = do
 
 -- | Fires every 500ms.
 slowTimer :: Tcp ()
-slowTimer  = eachConnection $ do
-  handle2MSL
+slowTimer  =
+  do -- first, handle active connections
+     eachConnection $ do
+       -- the slow timer is valid for all states but TimeWait
+       do TcpSocket { .. } <- getTcpSocket
+          unless (tcpState == TimeWait) $
+            do handleRTO
+               handleFinWait2
 
-  -- the slow timer is valid for all states but TimeWait
-  TcpSocket { .. } <- getTcpSocket
-  unless (tcpState == TimeWait) $
-    do handleRTO
-       handleFinWait2
+          handle2MSL
 
-  updateTimers
+          updateTimers
+
+     -- second, decrement the 2MSL timer for sockets in the TimeWait state
+     modifyHost $ \ host ->
+       host { hostTimeWaits = stepTimeWaitConnections (hostTimeWaits host) }
 
 resetIdle :: Sock ()
 resetIdle  = modifyTcpTimers_ (\tt -> tt { ttIdle = 0 })
@@ -104,10 +109,6 @@ whenIdleFor timeout body = do
 
 
 -- 2MSL ------------------------------------------------------------------------
-
--- | Maximum segment lifetime, two minutes in this case.
-mslTimeout :: SlowTicks
-mslTimeout  = 2 * 60 * 2
 
 -- | Set the value of the 2MSL timer.
 set2MSL :: SlowTicks -> Sock ()

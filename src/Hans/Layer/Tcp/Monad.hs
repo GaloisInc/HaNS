@@ -18,7 +18,7 @@ import Control.Monad (MonadPlus(..),guard,when)
 import Data.Time.Clock.POSIX (POSIXTime)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Traversable as T
 
@@ -66,6 +66,23 @@ modifyHost f = do
   host <- getHost
   setHost $! f host
 
+-- | Reset the 2MSL timer on the socket in TimeWait.
+resetTimeWait2MSL :: SocketId -> Tcp ()
+resetTimeWait2MSL sid = modifyHost $ \ host ->
+  host { hostTimeWaits = Map.adjust twReset2MSL sid (hostTimeWaits host) }
+
+getTimeWait :: IP4 -> TcpHeader -> Tcp (Maybe (SocketId,TimeWaitSock))
+getTimeWait remote hdr =
+  do host <- getHost
+     let sid = incomingSocketId remote hdr
+     return $ do tw <- Map.lookup sid (hostTimeWaits host)
+                 return (sid,tw)
+
+removeTimeWait :: SocketId -> Tcp ()
+removeTimeWait sid =
+  modifyHost $ \ host ->
+    host { hostTimeWaits = Map.delete sid (hostTimeWaits host) }
+
 getConnections :: Tcp Connections
 getConnections  = hostConnections `fmap` getHost
 
@@ -87,11 +104,27 @@ getConnection sid = do
     Just tcp -> return tcp
     Nothing  -> mzero
 
--- | Assign a connection to a socket id.
+-- | Assign a connection to a socket id.  If the TcpSocket is in TimeWait, this
+-- will do two things:
+--
+--  1. Remove the corresponding key from the connections map
+--  2. Add the socket to the TimeWait map, using the current value of its 2MSL
+--     timer (which should be set when the TimeWait state is entered)
+--
+-- The purpose of this is to clean up the memory associated with the connection
+-- as soon as possible, and once it's in TimeWait, no data will flow on the
+-- socket.
 setConnection :: SocketId -> TcpSocket -> Tcp ()
-setConnection ident con = do
-  cons <- getConnections
-  setConnections (Map.insert ident con cons)
+setConnection ident con
+  | tcpState con == TimeWait =
+    modifyHost $ \ host ->
+      host { hostTimeWaits   = addTimeWait con (hostTimeWaits host)
+           , hostConnections = Map.delete ident (hostConnections host)
+           }
+
+  | otherwise =
+    do cons <- getConnections
+       setConnections (Map.insert ident con cons)
 
 -- | Add a new connection to the host.
 addConnection :: SocketId -> TcpSocket -> Tcp ()
@@ -226,7 +259,6 @@ eachConnection m =
   -- Prevent failure in the socket action from leaking out of this scope.  When
   -- failure is detected, just return the old TCB
   sandbox tcp = runSock' tcp m `mplus` return tcp
-
 
 withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp ()
 withConnection remote hdr m = withConnection' remote hdr m mzero
@@ -386,7 +418,5 @@ shutdown  = do
 -- | Set the socket state to closed, and unblock any waiting processes.
 closeSocket :: Sock ()
 closeSocket  = do
-  conns <- inTcp getConnections
-  sock <- getTcpSocket
   shutdown
   setState Closed
