@@ -147,7 +147,7 @@ executable test
 executable web-server
         main-is:        Main.hs
         hs-source-dirs: web-server
-        ghc-options:    -Wall -threaded -rtsopts -prof -auto-all
+        ghc-options:    -Wall -threaded -rtsopts
 
         if flag(web-server)
                 build-depends:  base       >= 4.0.0.0,
