@@ -258,7 +258,7 @@ checkAckBit hdr
   | tcpAck hdr =
     do whenState SynReceived $
          do tcp <- getTcpSocket
-            if tcpSndUna tcp <= tcpAckNum hdr && tcpAckNum hdr < tcpRcvNxt tcp
+            if tcpSndUna tcp <= tcpAckNum hdr && tcpAckNum hdr <= tcpSndNxt tcp
                then establishConnection
                else rst hdr
 
