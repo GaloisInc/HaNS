@@ -32,15 +32,12 @@ flag example
 flag web-server
         description:    Build a simple web-server example
 
-flag halvm
-        description:    Build for the HaLVM
-
 flag word32-in-random
         default:        False
         description:    Word32 in Random
 
 library
-        if(flag(halvm))
+        if(os(HaLVM))
                 build-depends:          XenDevice >= 2.0.0 && < 3.0.0,
                                         HALVMCore >= 2.0.0 && < 3.0.0
                 exposed-modules:        Hans.Device.Xen,
@@ -138,7 +135,7 @@ executable test
                         old-locale >= 1.0.0.0,
                         hans
 
-        if flag(halvm)
+        if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
                                     HALVMCore     >= 2.0.0 && < 3.0.0
         else
@@ -149,24 +146,24 @@ executable web-server
         hs-source-dirs: web-server
         ghc-options:    -Wall -threaded -rtsopts
 
-        if flag(web-server)
-                build-depends:  base       >= 4.0.0.0,
-                                cereal     >= 0.3.5.2,
-                                bytestring >= 0.9.1.0,
-                                containers >= 0.3.0.0,
-                                monadLib   >= 3.6.0,
-                                time       >= 1.1.0.0,
-                                old-locale >= 1.0.0.0,
-                                HTTP       >= 4000.2.17,
-                                blaze-html >= 0.7.0.2,
-                                blaze-markup,
-                                hans
-
+        if os(HaLVM)
+                buildable: False
         else
-                buildable: False
+          if flag(web-server)
+                  build-depends:  base       >= 4.0.0.0,
+                                  cereal     >= 0.3.5.2,
+                                  bytestring >= 0.9.1.0,
+                                  containers >= 0.3.0.0,
+                                  monadLib   >= 3.6.0,
+                                  time       >= 1.1.0.0,
+                                  old-locale >= 1.0.0.0,
+                                  HTTP       >= 4000.2.17,
+                                  blaze-html >= 0.7.0.2,
+                                  blaze-markup,
+                                  hans
 
-        if flag(halvm)
-                buildable: False
+          else
+                  buildable: False
 
 executable tcp-test
         main-is:        Main.hs
@@ -180,7 +177,7 @@ executable tcp-test
                         time       >= 1.1.0.0,
                         old-locale >= 1.0.0.0,
                         hans
-        if flag(halvm)
+        if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
                                     HALVMCore     >= 2.0.0 && < 3.0.0
 
