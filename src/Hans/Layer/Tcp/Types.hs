@@ -55,7 +55,7 @@ type Connections = Map.Map SocketId TcpSocket
 
 removeClosed :: Connections -> Connections
 removeClosed  =
-  Map.filter (\tcp -> tcpState tcp /= Closed || not (tcpUserClosed tcp))
+  Map.filter (\tcp -> tcpState tcp /= Closed) -- || not (tcpUserClosed tcp))
 
 data SocketId = SocketId
   { sidLocalPort  :: !TcpPort
