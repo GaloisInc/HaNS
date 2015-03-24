@@ -24,12 +24,15 @@ import Control.Monad (forever,when)
 import System.Environment (getArgs)
 import qualified Data.ByteString.Lazy as L
 
+import System.Exit (exitSuccess)
+
 
 localAddr :: IP4
 localAddr  = IP4 192 168 90 2
 
 main :: IO ()
 main  = do
+
   ns  <- newNetworkStack
   mac <- initEthernetDevice ns
   deviceUp ns mac
@@ -43,14 +46,14 @@ main  = do
              ip  <- takeMVar res
              putStrLn ("Bound to address: " ++ show ip)
 
-             putStrLn "Looking up galois.com..."
-             HostEntry { .. } <- getHostByName ns "galois.com"
-             print hostAddresses
+             -- putStrLn "Looking up galois.com..."
+             -- HostEntry { .. } <- getHostByName ns "galois.com"
+             -- print hostAddresses
 
-             server ns
 
      else do setAddress mac ns
-             server ns
+
+  server ns
 
 server :: NetworkStack -> IO ()
 server ns = do
