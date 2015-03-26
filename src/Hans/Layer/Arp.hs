@@ -27,7 +27,7 @@ import Control.Concurrent (forkIO,takeMVar,putMVar,newEmptyMVar)
 import Control.Monad (forM_,mplus,guard,unless,when)
 import MonadLib (BaseM(inBase),set,get)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Map             as Map
+import qualified Data.Map.Strict      as Map
 import qualified Data.ByteString      as S
 
 
@@ -69,11 +69,11 @@ addLocalAddress h !ip !mac = send h (handleAddAddress ip mac)
 type Arp = Layer ArpState
 
 data ArpState = ArpState
-  { arpTable    :: ArpTable
-  , arpAddrs    :: Map.Map IP4 Mac -- this layer's addresses
-  , arpWaiting  :: Map.Map IP4 [Maybe Mac -> IO ()]
-  , arpEthernet :: EthernetHandle
-  , arpSelf     :: ArpHandle
+  { arpTable    :: !ArpTable
+  , arpAddrs    :: !(Map.Map IP4 Mac) -- this layer's addresses
+  , arpWaiting  :: !(Map.Map IP4 [Maybe Mac -> IO ()])
+  , arpEthernet :: {-# UNPACK #-} !EthernetHandle
+  , arpSelf     :: {-# UNPACK #-} !ArpHandle
   }
 
 emptyArpState :: ArpHandle -> EthernetHandle -> ArpState

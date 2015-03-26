@@ -123,10 +123,10 @@ removeUdpHandler h !sp = send h $ do freePort sp
 type Udp = Layer UdpState
 
 data UdpState = UdpState
-  { udpPorts       :: PortManager UdpPort
-  , udpHandlers    :: Handlers UdpPort Handler
-  , udpIp4Handle   :: IP4.IP4Handle
-  , udpIcmp4Handle :: Icmp4.Icmp4Handle
+  { udpPorts       :: !(PortManager UdpPort)
+  , udpHandlers    :: !(Handlers UdpPort Handler)
+  , udpIp4Handle   :: {-# UNPACK #-} !IP4.IP4Handle
+  , udpIcmp4Handle :: {-# UNPACK #-} !Icmp4.Icmp4Handle
   }
 
 emptyUdp4State :: IP4.IP4Handle -> Icmp4.Icmp4Handle -> UdpState

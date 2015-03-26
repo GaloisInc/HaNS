@@ -31,7 +31,7 @@ import Control.Concurrent (forkIO,ThreadId,killThread)
 import Control.Monad (mplus)
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Map             as Map
+import qualified Data.Map.Strict      as Map
 import qualified Data.ByteString      as S
 
 
@@ -96,9 +96,9 @@ emptyDevice tx rx = EthernetDevice
 type Eth = Layer EthernetState
 
 data EthernetState = EthernetState
-  { ethHandlers :: Handlers EtherType Handler
-  , ethDevices  :: Map.Map Mac EthernetDevice
-  , ethHandle   :: EthernetHandle
+  { ethHandlers :: !(Handlers EtherType Handler)
+  , ethDevices  :: !(Map.Map Mac EthernetDevice)
+  , ethHandle   :: {-# UNPACK #-} !EthernetHandle
   }
 
 instance ProvidesHandlers EthernetState EtherType Handler where

@@ -18,6 +18,7 @@ import Hans.Utils
 import qualified Hans.Layer.IP4 as IP4
 
 import Control.Concurrent (forkIO)
+import Control.Monad (unless)
 import Data.Serialize (runPut,putByteString)
 import MonadLib (get,set)
 import qualified Data.ByteString as S
@@ -37,8 +38,8 @@ runIcmp4Layer h ip4 = do
   void (forkIO (loopLayer "icmp4" handles (receive h) id))
 
 data Icmp4Handles = Icmp4Handles
-  { icmpIp4      :: IP4.IP4Handle
-  , icmpHandlers :: [Handler]
+  { icmpIp4      :: {-# UNPACK #-} !IP4.IP4Handle
+  , icmpHandlers :: ![Handler]
   }
 
 type Icmp4 = Layer Icmp4Handles
@@ -106,4 +107,4 @@ handleEchoRequest hdr ident seqNum dat =
 matchHandlers :: Icmp4Packet -> Icmp4 ()
 matchHandlers pkt = do
   s <- get
-  output (mapM_ ($ pkt) (icmpHandlers s))
+  unless (null (icmpHandlers s)) (output (mapM_ ($ pkt) (icmpHandlers s)))

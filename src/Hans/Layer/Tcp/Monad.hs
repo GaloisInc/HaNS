@@ -30,9 +30,9 @@ type TcpHandle = Channel (Tcp ())
 type Tcp = Layer TcpState
 
 data TcpState = TcpState
-  { tcpSelf  :: TcpHandle
-  , tcpIP4   :: IP4Handle
-  , tcpHost  :: Host
+  { tcpSelf  :: !TcpHandle
+  , tcpIP4   :: !IP4Handle
+  , tcpHost  :: !Host
   }
 
 emptyTcpState :: TcpHandle -> IP4Handle -> POSIXTime -> TcpState
@@ -320,7 +320,7 @@ getTcpTimers  = tcpTimers `fmap` getTcpSocket
 
 modifyTcpSocket :: (TcpSocket -> (a,TcpSocket)) -> Sock a
 modifyTcpSocket f = Sock $ \ s _ k -> let (a,s') = f s
-                                       in k s' a
+                                       in (k $! s') a
 
 modifyTcpSocket_ :: (TcpSocket -> TcpSocket) -> Sock ()
 modifyTcpSocket_ k = modifyTcpSocket (\tcp -> ((), k tcp))

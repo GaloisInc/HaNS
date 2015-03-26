@@ -21,11 +21,11 @@ import qualified Data.Sequence as Seq
 -- Hosts Information -----------------------------------------------------------
 
 data Host = Host
-  { hostConnections   :: Connections
-  , hostTimeWaits     :: TimeWaitConnections
-  , hostInitialSeqNum :: !TcpSeqNum
+  { hostConnections   :: !Connections
+  , hostTimeWaits     :: !TimeWaitConnections
+  , hostInitialSeqNum :: {-# UNPACK #-} !TcpSeqNum
   , hostPorts         :: !(PortManager TcpPort)
-  , hostLastUpdate    :: POSIXTime
+  , hostLastUpdate    :: !POSIXTime
   }
 
 emptyHost :: POSIXTime -> Host
@@ -55,12 +55,12 @@ type Connections = Map.Map SocketId TcpSocket
 
 removeClosed :: Connections -> Connections
 removeClosed  =
-  Map.filter (\tcp -> tcpState tcp /= Closed) -- || not (tcpUserClosed tcp))
+  Map.filter (\tcp -> tcpState tcp /= Closed || not (tcpUserClosed tcp))
 
 data SocketId = SocketId
-  { sidLocalPort  :: !TcpPort
-  , sidRemotePort :: !TcpPort
-  , sidRemoteHost :: !IP4
+  { sidLocalPort  :: {-# UNPACK #-} !TcpPort
+  , sidRemotePort :: {-# UNPACK #-} !TcpPort
+  , sidRemoteHost :: {-# UNPACK #-} !IP4
   } deriving (Eq,Show,Ord)
 
 emptySocketId :: SocketId
@@ -94,14 +94,14 @@ socketError  = SocketError . toException
 -- | The socket that's in TimeWait, plus its current 2MSL value.
 type TimeWaitConnections = Map.Map SocketId TimeWaitSock
 
-data TimeWaitSock = TimeWaitSock { tw2MSL      :: !SlowTicks
+data TimeWaitSock = TimeWaitSock { tw2MSL      :: {-# UNPACK #-} !SlowTicks
                                    -- ^ The current 2MSL value
-                                 , twInit2MSL  :: !SlowTicks
+                                 , twInit2MSL  :: {-# UNPACK #-} !SlowTicks
                                    -- ^ The initial 2MSL value
-                                 , twSeqNum    :: !TcpSeqNum
+                                 , twSeqNum    :: {-# UNPACK #-} !TcpSeqNum
                                    -- ^ The sequence number to use when
                                    -- responding to messages
-                                 , twTimestamp :: Maybe Timestamp
+                                 , twTimestamp :: !(Maybe Timestamp)
                                    -- ^ The last timestamp used
                                  } deriving (Show)
 
@@ -143,16 +143,16 @@ data TcpTimers = TcpTimers
   { ttDelayedAck :: !Bool
 
     -- 2MSL
-  , tt2MSL       :: !SlowTicks
+  , tt2MSL       :: {-# UNPACK #-} !SlowTicks
 
     -- retransmit timer
-  , ttRTO        :: !SlowTicks
+  , ttRTO        :: {-# UNPACK #-} !SlowTicks
   , ttSRTT       :: !POSIXTime
   , ttRTTVar     :: !POSIXTime
 
     -- idle timer
-  , ttMaxIdle    :: !SlowTicks
-  , ttIdle       :: !SlowTicks
+  , ttMaxIdle    :: {-# UNPACK #-} !SlowTicks
+  , ttIdle       :: {-# UNPACK #-} !SlowTicks
   }
 
 emptyTcpTimers :: TcpTimers
@@ -171,8 +171,8 @@ emptyTcpTimers  = TcpTimers
 
 -- | Manage the timestamp values that are in flight between two hosts.
 data Timestamp = Timestamp
-  { tsTimestamp     :: !Word32
-  , tsLastTimestamp :: !Word32
+  { tsTimestamp     :: {-# UNPACK #-} !Word32
+  , tsLastTimestamp :: {-# UNPACK #-} !Word32
   , tsGranularity   :: !POSIXTime -- ^ Hz
   , tsLastUpdate    :: !POSIXTime
   } deriving (Show)
@@ -212,23 +212,23 @@ type Close = IO ()
 
 data TcpSocket = TcpSocket
   { tcpParent      :: Maybe SocketId
-  , tcpSocketId    :: !SocketId
+  , tcpSocketId    :: {-# UNPACK #-} !SocketId
   , tcpState       :: !ConnState
   , tcpAcceptors   :: Seq.Seq Acceptor
   , tcpNotify      :: Maybe Notify
-  , tcpIss         :: !TcpSeqNum
-  , tcpSndNxt      :: !TcpSeqNum
-  , tcpSndUna      :: !TcpSeqNum
+  , tcpIss         :: {-# UNPACK #-} !TcpSeqNum
+  , tcpSndNxt      :: {-# UNPACK #-} !TcpSeqNum
+  , tcpSndUna      :: {-# UNPACK #-} !TcpSeqNum
 
   , tcpUserClosed  :: Bool
-  , tcpOut         :: RemoteWindow
-  , tcpOutBuffer   :: Buffer Outgoing
-  , tcpOutMSS      :: !Int64
-  , tcpIn          :: LocalWindow
-  , tcpInBuffer    :: Buffer Incoming
-  , tcpInMSS       :: !Int64
+  , tcpOut         :: !RemoteWindow
+  , tcpOutBuffer   :: !(Buffer Outgoing)
+  , tcpOutMSS      :: {-# UNPACK #-} !Int64
+  , tcpIn          :: !LocalWindow
+  , tcpInBuffer    :: !(Buffer Incoming)
+  , tcpInMSS       :: {-# UNPACK #-} !Int64
 
-  , tcpTimers      :: !TcpTimers
+  , tcpTimers      :: {-# UNPACK #-} !TcpTimers
   , tcpTimestamp   :: Maybe Timestamp
 
   , tcpSack        :: Bool

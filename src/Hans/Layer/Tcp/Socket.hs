@@ -35,7 +35,7 @@ import qualified Data.ByteString.Lazy as L
 -- Socket Interface ------------------------------------------------------------
 
 data Socket = Socket
-  { sockHandle :: TcpHandle
+  { sockHandle :: !TcpHandle
   , sockId     :: !SocketId
   }
 
@@ -209,7 +209,7 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
           FinWait1 -> ok
           FinWait2 -> ok
 
-          _ -> closeError
+          _ -> inTcp (output (print ("close", state))) >> closeError
 
 
   -- closing a connection that doesn't exist causes a CloseError

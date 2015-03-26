@@ -9,7 +9,7 @@ import Hans.Utils (chunk)
 import Data.Ord (comparing)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Map             as Map
+import qualified Data.Map.Strict      as Map
 import qualified Data.ByteString      as S
 
 
@@ -21,14 +21,14 @@ emptyFragmentationTable  = Map.empty
 
 data Fragments = Fragments
   { startTime :: !POSIXTime
-  , totalSize :: !Int
-  , fragments :: [Fragment]
+  , totalSize :: {-# UNPACK #-} !Int
+  , fragments :: ![Fragment]
   } deriving Show
 
 data Fragment = Fragment
-  { fragmentOffset  :: !Int
-  , fragmentLength  :: !Int
-  , fragmentPayload :: L.ByteString
+  { fragmentOffset  :: {-# UNPACK #-} !Int
+  , fragmentLength  :: {-# UNPACK #-} !Int
+  , fragmentPayload :: !L.ByteString
   } deriving (Eq,Show)
 
 instance Ord Fragment where

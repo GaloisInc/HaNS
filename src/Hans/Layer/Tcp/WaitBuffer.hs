@@ -56,10 +56,10 @@ data Outgoing
 
 -- | Data Buffers, in a direction.
 data Buffer d = Buffer
-  { bufBytes     :: L.ByteString
-  , bufWaiting   :: Seq.Seq Wakeup
-  , bufSize      :: !Int64
-  , bufAvailable :: !Int64
+  { bufBytes     :: !L.ByteString
+  , bufWaiting   :: !(Seq.Seq Wakeup)
+  , bufSize      :: {-# UNPACK #-} !Int64
+  , bufAvailable :: {-# UNPACK #-} !Int64
   }
 
 -- | An empty buffer, with a limit.
@@ -116,7 +116,8 @@ removeBytes len buf = do
         }
   return (bytes,buf')
 
--- | Run all waiting continuations with a parameter of False, 
+-- | Run all waiting continuations with a parameter of False, indicating that
+-- they shouldn't retry.
 shutdownWaiting :: Buffer d -> (IO (), Buffer d)
 shutdownWaiting buf = (m,buf { bufWaiting = Seq.empty })
   where

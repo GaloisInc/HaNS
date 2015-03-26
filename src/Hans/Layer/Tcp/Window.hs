@@ -23,11 +23,11 @@ import qualified Data.Traversable as T
 
 -- | Remote window management.
 data RemoteWindow = RemoteWindow
-  { rwSegments     :: OutSegments
-  , rwAvailable    :: !Word32
-  , rwSize         :: !Word32
-  , rwSndWind      :: !Word16
-  , rwSndWindScale :: !Int
+  { rwSegments     :: !OutSegments
+  , rwAvailable    :: {-# UNPACK #-} !Word32
+  , rwSize         :: {-# UNPACK #-} !Word32
+  , rwSndWind      :: {-# UNPACK #-} !Word16
+  , rwSndWindScale :: {-# UNPACK #-} !Int
   } deriving (Show)
 
 -- | The empty window, seeded with an initial size.

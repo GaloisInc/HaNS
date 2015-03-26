@@ -5,7 +5,7 @@ import Hans.Address.IP4
 
 import Control.Arrow (second)
 import Data.Time.Clock.POSIX (POSIXTime)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 
 
 -- Arp Table -------------------------------------------------------------------
@@ -14,15 +14,15 @@ arpEntryTimeout :: POSIXTime
 arpEntryTimeout = 60
 
 data ArpEntry
-  = ArpEntry    { arpMac     :: Mac
-                , arpTimeout :: POSIXTime
+  = ArpEntry    { arpMac     :: {-# UNPACK #-} !Mac
+                , arpTimeout :: !POSIXTime
                 }
-  | ArpPending  { arpTimeout :: POSIXTime
+  | ArpPending  { arpTimeout :: !POSIXTime
                 }
  deriving Show
 
 data ArpResult
-  = KnownAddress Mac
+  = KnownAddress {-# UNPACK #-} !Mac
   | Pending
   | Unknown
 
@@ -43,8 +43,8 @@ addArpEntry now ip mac = Map.insert ip ent where
 -- | Assumption: there is not already a pending ARP query recorded in the
 -- ARP table for the given IP address.
 addPending :: POSIXTime -> IP4 -> ArpTable -> ArpTable
-addPending now ip = Map.insert ip ent where
-  ent = ArpPending
+addPending now ip =
+  Map.insert ip ArpPending
     { arpTimeout = now + arpEntryTimeout -- FIXME: should queries stay longer?
     }
 

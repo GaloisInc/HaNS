@@ -72,11 +72,11 @@ removeIP4Handler h !prot = send h (removeHandler prot)
 type IP = Layer IP4State
 
 data IP4State = IP4State
-  { ip4Fragments :: FragmentationTable IP4
-  , ip4Routes    :: RoutingTable IP4
-  , ip4Handlers  :: Handlers IP4Protocol Handler
-  , ip4NextIdent :: Ident
-  , ip4ArpHandle :: ArpHandle
+  { ip4Fragments :: !(FragmentationTable IP4)
+  , ip4Routes    :: !(RoutingTable IP4)
+  , ip4Handlers  :: !(Handlers IP4Protocol Handler)
+  , ip4NextIdent :: {-# UNPACK #-} !Ident
+  , ip4ArpHandle :: {-# UNPACK #-} !ArpHandle
   }
 
 instance ProvidesHandlers IP4State IP4Protocol Handler where

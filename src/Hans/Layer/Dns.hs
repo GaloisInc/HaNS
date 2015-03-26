@@ -38,7 +38,7 @@ import qualified Control.Exception as X
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 
 
 -- External Interface ----------------------------------------------------------
@@ -103,12 +103,12 @@ getHostByAddr h addr =
 
 type Dns = Layer DnsState
 
-data DnsState = DnsState { dnsSelf        :: DnsHandle
-                         , dnsUdpHandle   :: UdpHandle
-                         , dnsNameServers :: [IP4]
-                         , dnsReqId       :: !Word16
-                         , dnsQueries     :: Map.Map Word16 DnsQuery
-                         , dnsTimeout     :: Milliseconds
+data DnsState = DnsState { dnsSelf        :: {-# UNPACK #-} !DnsHandle
+                         , dnsUdpHandle   :: {-# UNPACK #-} !UdpHandle
+                         , dnsNameServers :: ![IP4]
+                         , dnsReqId       :: {-# UNPACK #-} !Word16
+                         , dnsQueries     :: !(Map.Map Word16 DnsQuery)
+                         , dnsTimeout     :: {-# UNPACK #-} !Milliseconds
                          }
 
 emptyDnsState :: DnsHandle -> UdpHandle -> DnsState

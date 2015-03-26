@@ -14,14 +14,14 @@ import Data.Monoid (Monoid(..))
 import Data.Time.Clock.POSIX
 import MonadLib (StateM(get,set),BaseM(inBase))
 import qualified Control.Exception as X
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 
 data LayerState i = LayerState
-  { lsNow     :: POSIXTime
-  , lsState   :: i
+  { lsNow     :: !POSIXTime
+  , lsState   :: !i
   }
 
-data Action = Nop | Action (IO ())
+data Action = Nop | Action !(IO ())
 
 instance Monoid Action where
   mempty = Nop
@@ -35,9 +35,9 @@ runAction Nop        = return ()
 runAction (Action m) = m `X.catch` \ se -> print (se :: X.SomeException)
 
 data Result i a
-  = Error Action
-  | Exit (LayerState i) Action
-  | Result (LayerState i) a Action
+  = Error !Action
+  | Exit !(LayerState i) !Action
+  | Result !(LayerState i) !a !Action
 
 -- | Early exit continuation
 type Exit i r = LayerState i -> Action -> Result i r
@@ -98,8 +98,8 @@ instance MonadPlus (Layer i) where
   mplus = (<|>)
 
 instance StateM (Layer i) i where
-  get   = Layer (\i0 o0 _ _ k -> k (lsState i0) i0 o0)
-  set i = Layer (\i0 o0 _ _ k -> k () (i0 { lsState = i }) o0)
+  get   = Layer (\i0 o0 _ _ k -> (k $! lsState i0) i0 o0)
+  set i = Layer (\i0 o0 _ _ k -> (k () $! i0 { lsState = i }) o0)
 
 instance BaseM (Layer i) (Layer i) where
   inBase = id
@@ -118,10 +118,10 @@ dropPacket  = finish
 
 {-# INLINE time #-}
 time :: Layer i POSIXTime
-time  = Layer (\i o _ _ k -> k (lsNow i) i o)
+time  = Layer (\i o _ _ k -> (k $! lsNow i) i o)
 
 output :: IO () -> Layer i ()
-output m = Layer $ \i0 o0 _ _ k -> k () i0 (o0 `mappend` Action m)
+output m = Layer $ \i0 o0 _ _ k -> k () i0 $! o0 `mappend` Action m
 
 liftRight :: Either String b -> Layer i b
 liftRight (Right b)  = return b
