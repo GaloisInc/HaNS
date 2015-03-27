@@ -211,16 +211,16 @@ type Notify = Bool -> IO ()
 type Close = IO ()
 
 data TcpSocket = TcpSocket
-  { tcpParent      :: Maybe SocketId
+  { tcpParent      :: !(Maybe SocketId)
   , tcpSocketId    :: {-# UNPACK #-} !SocketId
   , tcpState       :: !ConnState
-  , tcpAcceptors   :: Seq.Seq Acceptor
-  , tcpNotify      :: Maybe Notify
+  , tcpAcceptors   :: !(Seq.Seq Acceptor)
+  , tcpNotify      :: !(Maybe Notify)
   , tcpIss         :: {-# UNPACK #-} !TcpSeqNum
   , tcpSndNxt      :: {-# UNPACK #-} !TcpSeqNum
   , tcpSndUna      :: {-# UNPACK #-} !TcpSeqNum
 
-  , tcpUserClosed  :: Bool
+  , tcpUserClosed  :: !Bool
   , tcpOut         :: !RemoteWindow
   , tcpOutBuffer   :: !(Buffer Outgoing)
   , tcpOutMSS      :: {-# UNPACK #-} !Int64
@@ -229,10 +229,10 @@ data TcpSocket = TcpSocket
   , tcpInMSS       :: {-# UNPACK #-} !Int64
 
   , tcpTimers      :: {-# UNPACK #-} !TcpTimers
-  , tcpTimestamp   :: Maybe Timestamp
+  , tcpTimestamp   :: !(Maybe Timestamp)
 
-  , tcpSack        :: Bool
-  , tcpWindowScale :: Bool
+  , tcpSack        :: !Bool
+  , tcpWindowScale :: !Bool
   }
 
 emptyTcpSocket :: Word16 -> Int -> TcpSocket

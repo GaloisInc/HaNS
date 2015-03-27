@@ -12,12 +12,10 @@ module Hans.Layer.Tcp.Timers (
   ) where
 
 import Hans.Channel
-import Hans.Layer
 import Hans.Layer.Tcp.Messages
 import Hans.Layer.Tcp.Monad
 import Hans.Layer.Tcp.Types
 import Hans.Layer.Tcp.Window
-import Hans.Timers (Milliseconds)
 
 import Control.Concurrent (forkIO,threadDelay)
 import Control.Monad (when,unless,forever,void)
@@ -27,30 +25,30 @@ import qualified Data.Foldable as F
 
 -- Timer Handlers --------------------------------------------------------------
 
--- | Schedule a @Tcp@ action to run every n milliseconds.
---
--- XXX we should investigate timing the time that body takes to run, and making
--- the decision about how long to delay based on that.
-every :: Milliseconds -> Tcp () -> Tcp ()
-every len body = do
-  tcp <- self
-  let timeout = len * 1000
-  output $ void $ forkIO $ forever $
-    do threadDelay timeout
-       send tcp body
-
 -- | Schedule the timers to run on the fast and slow intervals.
-initTimers :: Tcp ()
-initTimers  = do
+initTimers :: TcpHandle -> IO ()
+initTimers tcp = do
   every 500 slowTimer
   every 200 fastTimer
+
+  where
+
+  -- XXX we should investigate timing the time that body takes to run, and
+  -- making the decision about how long to delay based on that.
+  every n body = void $ forkIO $ forever $
+    do threadDelay timeout
+       send tcp body
+    where
+    timeout = n * 1000
 
 -- | Fires every 500ms.
 slowTimer :: Tcp ()
 slowTimer  =
   do -- first, handle active connections
      eachConnection $ do
-       -- the slow timer is valid for all states but TimeWait
+       -- the slow timer is valid for all states but TimeWait; the check is done
+       -- here because the socket may have only just transitioned to TimeWait,
+       -- and hasn't been moved to hostTimeWaits yet.
        do TcpSocket { .. } <- getTcpSocket
           unless (tcpState == TimeWait) $
             do handleRTO
@@ -61,7 +59,7 @@ slowTimer  =
           updateTimers
 
      -- second, decrement the 2MSL timer for sockets in the TimeWait state
-     modifyHost $ \ host ->
+     modifyHost_ $ \ host ->
        host { hostTimeWaits = stepTimeWaitConnections (hostTimeWaits host) }
 
 resetIdle :: Sock ()

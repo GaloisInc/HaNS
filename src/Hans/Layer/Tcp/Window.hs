@@ -122,10 +122,10 @@ type OutSegments = Seq.Seq OutSegment
 
 -- | A delivered segment.
 data OutSegment = OutSegment
-  { outAckNum :: !TcpSeqNum
+  { outAckNum :: {-# UNPACK #-} !TcpSeqNum
   , outTime   :: !POSIXTime
-  , outFresh  :: Bool       -- ^ Whether or not this is a retransmission
-  , outRTO    :: !Int       -- ^ Retransmit timer for this segment
+  , outFresh  :: !Bool               -- ^ Whether or not this is a retransmission
+  , outRTO    :: {-# UNPACK #-} !Int -- ^ Retransmit timer for this segment
   , outHeader :: !TcpHeader
   , outBody   :: !L.ByteString
   } deriving (Show)

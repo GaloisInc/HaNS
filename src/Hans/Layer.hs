@@ -67,7 +67,7 @@ loopLayer name i0 msg k =
   loop i = do
     a   <- msg
     now <- getPOSIXTime
-    let res = runLayer (i {lsNow = now }) (k a)
+    let res = (runLayer $! i {lsNow = now }) (k a)
     _ <- X.evaluate res `X.catch` \ se -> do
            putStrLn (name ++ show (se :: X.SomeException))
            return res

@@ -20,7 +20,6 @@ import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Sequence as Seq
-import qualified Data.Traversable as T
 
 
 -- TCP Monad -------------------------------------------------------------------
@@ -30,8 +29,8 @@ type TcpHandle = Channel (Tcp ())
 type Tcp = Layer TcpState
 
 data TcpState = TcpState
-  { tcpSelf  :: !TcpHandle
-  , tcpIP4   :: !IP4Handle
+  { tcpSelf  :: {-# UNPACK #-} !TcpHandle
+  , tcpIP4   :: {-# UNPACK #-} !IP4Handle
   , tcpHost  :: !Host
   }
 
@@ -56,19 +55,29 @@ ip4Handle  = tcpIP4 `fmap` get
 getHost :: Tcp Host
 getHost  = tcpHost `fmap` get
 
+getLastUpdate :: Tcp POSIXTime
+getLastUpdate  = hostLastUpdate `fmap` getHost
+
 setHost :: Host -> Tcp ()
 setHost host = do
   rw <- get
-  set $! rw { tcpHost = host }
+  host `seq` set rw { tcpHost = host }
 
-modifyHost :: (Host -> Host) -> Tcp ()
+modifyHost_ :: (Host -> Host) -> Tcp ()
+modifyHost_ f = do
+  host <- getHost
+  setHost (f host)
+
+modifyHost :: (Host -> (a,Host)) -> Tcp a
 modifyHost f = do
   host <- getHost
-  setHost $! f host
+  let (a,host') = f host
+  setHost host'
+  return a
 
 -- | Reset the 2MSL timer on the socket in TimeWait.
 resetTimeWait2MSL :: SocketId -> Tcp ()
-resetTimeWait2MSL sid = modifyHost $ \ host ->
+resetTimeWait2MSL sid = modifyHost_ $ \ host ->
   host { hostTimeWaits = Map.adjust twReset2MSL sid (hostTimeWaits host) }
 
 getTimeWait :: IP4 -> TcpHeader -> Tcp (Maybe (SocketId,TimeWaitSock))
@@ -80,14 +89,19 @@ getTimeWait remote hdr =
 
 removeTimeWait :: SocketId -> Tcp ()
 removeTimeWait sid =
-  modifyHost $ \ host ->
+  modifyHost_ $ \ host ->
     host { hostTimeWaits = Map.delete sid (hostTimeWaits host) }
 
 getConnections :: Tcp Connections
 getConnections  = hostConnections `fmap` getHost
 
+takeConnections :: Tcp Connections
+takeConnections  =
+  modifyHost $ \ Host { .. } ->
+    (hostConnections, Host { hostConnections = Map.empty, .. })
+
 setConnections :: Connections -> Tcp ()
-setConnections cons = modifyHost (\host -> host { hostConnections = cons })
+setConnections cons = modifyHost_ (\host -> host { hostConnections = cons })
 
 -- | Lookup a connection, returning @Nothing@ if the connection doesn't exist.
 lookupConnection :: SocketId -> Tcp (Maybe TcpSocket)
@@ -117,7 +131,7 @@ getConnection sid = do
 setConnection :: SocketId -> TcpSocket -> Tcp ()
 setConnection ident con
   | tcpState con == TimeWait =
-    modifyHost $ \ host ->
+    modifyHost_ $ \ host ->
       host { hostTimeWaits   = addTimeWait con (hostTimeWaits host)
            , hostConnections = Map.delete ident (hostConnections host)
            }
@@ -162,7 +176,7 @@ initialSeqNum  = hostInitialSeqNum `fmap` getHost
 -- | Increment the initial sequence number by a value.
 addInitialSeqNum :: TcpSeqNum -> Tcp ()
 addInitialSeqNum sn =
-  modifyHost (\host -> host { hostInitialSeqNum = hostInitialSeqNum host + sn })
+  modifyHost_ (\host -> host { hostInitialSeqNum = hostInitialSeqNum host + sn })
 
 -- | Allocate a new port for use.
 allocatePort :: Tcp TcpPort
@@ -176,7 +190,7 @@ allocatePort  = do
 
 -- | Release a used port.
 closePort :: TcpPort -> Tcp ()
-closePort port = modifyHost (releasePort port)
+closePort port = modifyHost_ (releasePort port)
 
 
 -- Socket Monad ----------------------------------------------------------------
@@ -190,17 +204,16 @@ closePort port = modifyHost (releasePort port)
 -- locally.  This gives the ability to simulate `finished`, with the benefit of
 -- only yielding from the Sock context, not the whole Tcp context.
 newtype Sock a = Sock
-  { unSock :: forall r. TcpSocket -> Escape r -> Next a r
-           -> Tcp (TcpSocket,Maybe r)
+  { unSock :: forall r. TcpSocket -> Escape r -> Next a r -> Tcp r
   }
 
-type Escape r = TcpSocket -> Tcp (TcpSocket,Maybe r)
-
-type Next a r = TcpSocket -> a -> Tcp (TcpSocket, Maybe r)
+type Escape r = TcpSocket      -> Tcp r
+type Next a r = TcpSocket -> a -> Tcp r
 
 instance Functor Sock where
   fmap f m = Sock $ \s  x k -> unSock m s x
                   $ \s' a   -> k s' (f a)
+  {-# INLINE fmap #-}
 
 instance Applicative Sock where
   {-# INLINE pure #-}
@@ -217,10 +230,16 @@ instance Monad Sock where
 
   m >>= f = Sock $ \ s  x k -> unSock m s x
                  $ \ s' a   -> unSock (f a) s' x k
+  {-# INLINE (>>=) #-}
+
+  m >> n = Sock $ \ s  x k -> unSock m s  x
+                $ \ s' _   -> unSock n s' x k
+  {-# INLINE (>>) #-}
 
 inTcp :: Tcp a -> Sock a
 inTcp m = Sock $ \ s _ k -> do a <- m
                                k s a
+{-# INLINE inTcp #-}
 
 
 -- | Finish early, with no result.
@@ -232,19 +251,27 @@ runSock_ tcp sm =
   do _ <- runSock tcp sm
      return ()
 
-runSock' :: TcpSocket -> Sock a -> Tcp TcpSocket
-runSock' tcp sm =
-  do (tcp',_) <- runSock tcp sm
-     return tcp'
+runSock :: TcpSocket -> Sock a -> Tcp (Maybe a)
+runSock tcp sm =
+  do (tcp',mb) <- runSock' tcp sm
+     setConnection (tcpSocketId tcp') $! tcp'
+     return mb
 
--- | Run the socket action, and increment its internal timestamp value.
-runSock :: TcpSocket -> Sock a -> Tcp (TcpSocket,Maybe a)
-runSock tcp sm = do
+seqMaybe :: Maybe a -> ()
+seqMaybe (Just a) = a `seq` ()
+seqMaybe Nothing  = ()
+
+-- | Run the socket action, and increment its internal timestamp value.  Do not
+-- add it back to the connections map.
+runSock' :: TcpSocket -> Sock a -> Tcp (TcpSocket,Maybe a)
+runSock' tcp sm = do
   now      <- time
-  let steppedTcp = tcp { tcpTimestamp = stepTimestamp now `fmap` tcpTimestamp tcp }
-  r@(tcp',_) <- unSock sm steppedTcp escapeK nextK
-  addConnection (tcpSocketId tcp') tcp'
-  return r
+  let steppedTcp = tcp { tcpTimestamp =
+                           let ts' = stepTimestamp now `fmap` tcpTimestamp tcp
+                            in seqMaybe ts' `seq` ts'
+                       }
+  res@(tcp',_) <- (unSock sm $! steppedTcp) escapeK nextK
+  tcp' `seq` return res
   where
   escapeK s = return (s,Nothing)
   nextK s a = return (s,Just a)
@@ -253,12 +280,28 @@ runSock tcp sm = do
 -- computation fails.
 eachConnection :: Sock () -> Tcp ()
 eachConnection m =
-  setConnections . removeClosed =<< T.mapM sandbox =<< getConnections
+  do cs       <- takeConnections
+     (cs',ws) <- sandbox [] [] (Map.elems cs)
+
+     modifyHost_ $ \ Host { .. } ->
+       Host { hostConnections = cs'
+            , hostTimeWaits   = Map.union ws hostTimeWaits
+            , ..
+            }
+
   where
 
   -- Prevent failure in the socket action from leaking out of this scope.  When
   -- failure is detected, just return the old TCB
-  sandbox tcp = runSock' tcp m `mplus` return tcp
+  sandbox active timeWait (tcp:rest) =
+    do tcp' <- fmap fst (runSock' tcp m) `mplus` return tcp
+       if tcpState tcp' == TimeWait
+          then sandbox       active (tcp':timeWait) rest
+          else sandbox (tcp':active)      timeWait  rest
+
+  sandbox active timeWait [] =
+    return ( Map.fromList [ (tcpSocketId tcp, tcp)            | tcp <- active ]
+           , Map.fromList [ (tcpSocketId tcp, mkTimeWait tcp) | tcp <- timeWait ])
 
 withConnection :: IP4 -> TcpHeader -> Sock a -> Tcp ()
 withConnection remote hdr m = withConnection' remote hdr m mzero
@@ -277,7 +320,7 @@ listeningConnection :: SocketId -> Sock a -> Tcp (Maybe a)
 listeningConnection sid m = do
   tcp <- getConnection sid
   guard (tcpState tcp == Listen && isAccepting tcp)
-  (_,mb) <- runSock tcp m
+  mb <- runSock tcp m
   return mb
 
 -- | Run a socket operation in the context of the socket identified by the
@@ -300,20 +343,22 @@ inParent :: Sock a -> Sock (Maybe a)
 inParent m = do
   mbPid <- getParent
   case mbPid of
-    Just pid -> inTcp $ do p      <- getConnection pid
-                           (_,mb) <- runSock p m
+    Just pid -> inTcp $ do p  <- getConnection pid
+                           mb <- runSock p m
                            return mb
     Nothing  -> return Nothing
 
 withChild :: TcpSocket -> Sock a -> Sock (Maybe a)
-withChild tcp m = inTcp $ do (_,mb) <- runSock tcp m
+withChild tcp m = inTcp $ do mb <- runSock tcp m
                              return mb
 
 getTcpSocket :: Sock TcpSocket
-getTcpSocket  = Sock (\s _ k -> k s s)
+getTcpSocket  = Sock (\s _ k -> k s $! s)
+{-# INLINE getTcpSocket #-}
 
 setTcpSocket :: TcpSocket -> Sock ()
-setTcpSocket tcp = Sock (\ _ _ k -> k tcp ())
+setTcpSocket tcp = Sock (\ _ _ k -> (k $! tcp) ())
+{-# INLINE setTcpSocket #-}
 
 getTcpTimers :: Sock TcpTimers
 getTcpTimers  = tcpTimers `fmap` getTcpSocket

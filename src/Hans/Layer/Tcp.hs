@@ -18,6 +18,7 @@ import Hans.Message.Tcp
 import Hans.Utils
 
 import Control.Concurrent (forkIO)
+import Control.Monad (when)
 import Data.Time.Clock.POSIX (getPOSIXTime,POSIXTime)
 import qualified Data.ByteString as S
 
@@ -30,7 +31,7 @@ runTcpLayer tcp ip4 = do
   addIP4Handler ip4 tcpProtocol (queueTcp tcp)
 
   -- initialize the timers
-  send tcp initTimers
+  initTimers tcp
 
 -- | Queue a tcp packet.
 queueTcp :: TcpHandle -> IP4Header -> S.ByteString -> IO ()
@@ -43,15 +44,16 @@ isnRate  = 128000
 -- | Run the tcp action, after updating any internal state.
 stepTcp :: Tcp () -> Tcp ()
 stepTcp body = do
-  now <- time
-  modifyHost $ \ host ->
-    let diff = now - hostLastUpdate host
-        -- increment the ISN at 128KHz
-        inc  = round (isnRate * diff)
-     in if inc > 0
-           then host
-             { hostLastUpdate    = now
-             , hostInitialSeqNum = hostInitialSeqNum host + inc
-             }
-           else host
+  now        <- time
+  lastUpdate <- getLastUpdate
+  let diff = now - lastUpdate
+      -- increment the ISN at 128KHz
+      inc  = round (isnRate * diff)
+
+  when (inc > 0) $
+    modifyHost_ $ \ host ->
+      host { hostLastUpdate    = now
+           , hostInitialSeqNum = hostInitialSeqNum host + inc
+           }
+
   body
