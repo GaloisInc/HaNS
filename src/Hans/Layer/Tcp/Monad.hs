@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Hans.Layer.Tcp.Monad where
 
@@ -295,9 +296,11 @@ eachConnection m =
   -- failure is detected, just return the old TCB
   sandbox active timeWait (tcp:rest) =
     do tcp' <- fmap fst (runSock' tcp m) `mplus` return tcp
-       if tcpState tcp' == TimeWait
-          then sandbox       active (tcp':timeWait) rest
-          else sandbox (tcp':active)      timeWait  rest
+
+       if | tcpState tcp' == TimeWait -> sandbox       active (tcp':timeWait) rest
+          | tcpState tcp' == Closed
+            && tcpUserClosed tcp'     -> sandbox       active       timeWait  rest
+          | otherwise                 -> sandbox (tcp':active)      timeWait  rest
 
   sandbox active timeWait [] =
     return ( Map.fromList [ (tcpSocketId tcp, tcp)            | tcp <- active ]

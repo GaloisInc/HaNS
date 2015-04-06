@@ -23,6 +23,7 @@ import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO
 import Control.Monad (forever,when)
 import System.Environment (getArgs)
 import qualified Data.ByteString.Lazy as L
+import qualified Control.Exception as X
 
 import System.Exit (exitSuccess)
 
@@ -68,13 +69,13 @@ server ns = do
 handleClient :: Socket -> IO ()
 handleClient conn =
   do putStrLn ("Got one: " ++ show (sockRemoteHost conn))
-     loop
+     loop `X.catch` \se -> do print (se :: X.SomeException)
+                              close conn
   where
   loop =
     do buf <- recvBytes conn 512
        if L.null buf
-          then do putStrLn "Client closed connection"
-                  close conn
+          then    putStrLn "Client closed connection"
           else do _ <- sendBytes conn buf
                   loop
 

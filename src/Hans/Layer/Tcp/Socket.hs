@@ -27,7 +27,7 @@ import Control.Concurrent (MVar,newEmptyMVar,takeMVar,putMVar)
 import Control.Exception (Exception,throwIO)
 import Control.Monad (mplus)
 import Data.Int (Int64)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (isJust)
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy as L
 
@@ -187,7 +187,7 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
 
           CloseWait ->
             do finAck
-               setState TimeWait
+               setState LastAck
                ok
 
           SynSent ->
@@ -209,7 +209,7 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
           FinWait1 -> ok
           FinWait2 -> ok
 
-          _ -> inTcp (output (print ("close", state))) >> closeError
+          _ -> closeError
 
 
   -- closing a connection that doesn't exist causes a CloseError
@@ -247,12 +247,22 @@ sendBytes sock bytes = blockResult (sockHandle sock) $ \ res ->
 
 outputBytes :: L.ByteString -> Wakeup -> TcpSocket -> (Maybe Int64, TcpSocket)
 outputBytes bytes wakeup tcp
-  | tcpState tcp == Established = (mbWritten,    tcp { tcpOutBuffer = bufOut })
-  | otherwise                   = (Just written, tcp { tcpOutBuffer = flushed })
+  | tcpState tcp == Established              = ok
+  | tcpState tcp == CloseWait                = ok
+  | tcpState tcp `elem` [ Closing, LastAck
+                        , FinWait1, FinWait2
+                        , TimeWait ]         = bad
+  | otherwise                                = bad
   where
   (mbWritten,bufOut) = writeBytes bytes wakeup (tcpOutBuffer tcp)
-  (fin,flushed)      = flushWaiting bufOut
-  written            = fromMaybe 0 mbWritten
+
+  -- normal response (add the data to the output buffer, or queue if there's no
+  -- space available)
+  ok = (mbWritten, tcp { tcpOutBuffer = bufOut })
+
+  -- the connection is closed, so return that no data was written, and don't
+  -- queue a wakeup action
+  bad = (Just 0, tcp)
 
 
 -- Reading ---------------------------------------------------------------------
@@ -282,6 +292,19 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
    in performRecv
 
 inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
-inputBytes len wakeup tcp = (mbRead, tcp { tcpInBuffer = bufIn })
+inputBytes len wakeup tcp
+  | tcpState tcp == Established                        = ok
+  | tcpState tcp == CloseWait                          = if isJust mbRead
+                                                            then ok
+                                                            else bad
+  | tcpState tcp `elem` [ Closing, LastAck, TimeWait ] = bad
+  | otherwise                                          = ok
+
   where
   (mbRead,bufIn) = readBytes len wakeup (tcpInBuffer tcp)
+
+  -- normal behavior (read buffered data, or queue)
+  ok = (mbRead, tcp { tcpInBuffer = bufIn })
+
+  -- return that there's no data to read, and don't queue a wakeup action
+  bad = (Just L.empty, tcp)

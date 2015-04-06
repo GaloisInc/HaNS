@@ -44,8 +44,7 @@ handleIncomingTcp ip4 bytes = do
 
 noConnection :: IP4 -> TcpHeader -> S.ByteString -> Tcp ()
 noConnection src hdr @ TcpHeader { .. } body =
-  do output (putStrLn "no connection")
-     if | tcpRst    -> return ()
+  do if | tcpRst    -> return ()
         | tcpAck    -> sendSegment src (mkRst hdr)                    L.empty
         | otherwise -> sendSegment src (mkRstAck hdr (S.length body)) L.empty
      finish
@@ -225,13 +224,11 @@ checkResetBit hdr
 
        whenState SynReceived $
             -- from an active open
-         do when (isNothing tcpParent) $ do flushQueues
-                                            closeSocket
+         do when (isNothing tcpParent) closeSocket
             done
 
        whenStates [Established,FinWait1,FinWait2,CloseWait] $
-         do flushQueues
-            closeSocket
+         do closeSocket
             done
 
        whenStates [Closing,LastAck] $
@@ -247,8 +244,7 @@ checkSynBit hdr
     do tcp <- getTcpSocket
 
        when (tcpSeqNum hdr `inRcvWnd` tcp) $
-         do flushQueues
-            closeSocket
+         do closeSocket
             done
 
   | otherwise  = return ()
@@ -286,7 +282,8 @@ checkAckBit hdr
                  when (nothingOutstanding tcp) enterTimeWait
 
        whenState LastAck $
-         do tcp <- getTcpSocket
+         do handleAck hdr
+            tcp <- getTcpSocket
             when (nothingOutstanding tcp) $ do closeSocket
                                                done
 
