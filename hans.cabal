@@ -182,11 +182,11 @@ executable tcp-test
                                     HALVMCore     >= 2.0.0 && < 3.0.0
 
 executable tcp-test-client
+        main-is:        Main.hs
+        hs-source-dirs: tcp-test-client
         if os(HaLVM)
                 buildable:          False
         else
-                main-is:            Main.hs
-                hs-source-dirs:     tcp-test-client
                 build-depends:      base,
                                     bytestring,
                                     network
