@@ -12,7 +12,6 @@ module Hans.Layer.Tcp.WaitBuffer (
     -- * Directed Buffers
   , Buffer
   , emptyBuffer
-  , shutdownWaiting
   , isFull
   , isEmpty
   , flushWaiting
@@ -115,13 +114,6 @@ removeBytes len buf = do
         , bufAvailable = bufAvailable buf + L.length bytes
         }
   return (bytes,buf')
-
--- | Run all waiting continuations with a parameter of False, indicating that
--- they shouldn't retry.
-shutdownWaiting :: Buffer d -> (IO (), Buffer d)
-shutdownWaiting buf = (m,buf { bufWaiting = Seq.empty })
-  where
-  m = F.mapM_ abort (bufWaiting buf)
 
 
 -- Sending Buffer --------------------------------------------------------------

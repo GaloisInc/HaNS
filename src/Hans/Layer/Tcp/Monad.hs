@@ -452,8 +452,8 @@ tcpOutput hdr body = do
 shutdown :: Sock ()
 shutdown  = do
   finalize <- modifyTcpSocket $ \ tcp -> 
-      let (wOut,bufOut) = shutdownWaiting (tcpOutBuffer tcp)
-          (wIn,bufIn)   = shutdownWaiting (tcpInBuffer tcp)
+      let (wOut,bufOut) = flushWaiting (tcpOutBuffer tcp)
+          (wIn,bufIn)   = flushWaiting (tcpInBuffer tcp)
        in (wOut >> wIn,tcp { tcpOut       = clearRetransmit (tcpOut tcp)
                            , tcpOutBuffer = bufOut
                            , tcpInBuffer  = bufIn

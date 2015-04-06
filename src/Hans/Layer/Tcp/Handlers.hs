@@ -356,14 +356,18 @@ flushQueues  =
   do finalizers <- modifyTcpSocket flush
      outputS finalizers
   where
-  flush tcp = (fins,tcp')
+  flush tcp = (inFins >> outFins,tcp')
     where
 
     -- empty the outgoing buffer, notifying all waiting processes that the send
     -- won't happen
-    (fins,out') = flushWaiting (tcpOutBuffer tcp)
+    (outFins,out') = flushWaiting (tcpOutBuffer tcp)
+
+    -- empty the input buffer
+    (inFins, in')  = flushWaiting (tcpInBuffer tcp)
 
     tcp' = tcp { tcpOutBuffer = out'
+               , tcpInBuffer  = in'
                }
 
 
