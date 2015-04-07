@@ -99,10 +99,7 @@ done  = do outputSegments
 
 segmentArrives :: IP4 -> TcpHeader -> S.ByteString -> Sock ()
 segmentArrives src hdr body =
-  do shouldDrop <- modifyTcpSocket (updateTimestamp hdr)
-     when shouldDrop discardAndReturn
-
-     whenState Closed (inTcp (noConnection src hdr body))
+  do whenState Closed (inTcp (noConnection src hdr body))
 
      whenState Listen $
        do when (tcpAck hdr) (rst hdr)
@@ -114,6 +111,9 @@ segmentArrives src hdr body =
           -- RST will be dropped at this point, as will anything else that
           -- wasn't covered by the above two cases.
           done
+
+     shouldDrop <- modifyTcpSocket (updateTimestamp hdr)
+     when shouldDrop discardAndReturn
 
      whenState SynSent $
        do tcp <- getTcpSocket
@@ -373,13 +373,14 @@ flushQueues  =
 --
 -- RFC 1323
 updateTimestamp :: TcpHeader -> TcpSocket -> (Bool,TcpSocket)
-updateTimestamp hdr tcp = (shouldDrop,tcp { tcpTimestamp = ts' })
+updateTimestamp hdr tcp 
+  | shouldDrop = (True, tcp)
+  | otherwise  = (False,tcp { tcpTimestamp = ts' })
   where
   -- when the timestamp check fails from an ack, that's not a syn,ack, mark this
   -- packet as one to be dropped.
   shouldDrop = not (tcpSyn hdr || tcpRst hdr)
-            && isJust (tcpTimestamp tcp)
-            && isNothing ts'
+            && isJust (tcpTimestamp tcp) /= isJust ts'
   ts' = do
     ts                     <- tcpTimestamp tcp
     OptTimestamp them echo <- findTcpOption OptTagTimestamp hdr
