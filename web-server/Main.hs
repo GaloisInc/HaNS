@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE CPP #-}
 -- Copyright 2014 Galois, Inc.
 -- This software is distributed under a standard, three-clause BSD license.
 -- Please see the file LICENSE, distributed with this software, for specific
@@ -32,6 +33,10 @@ import Text.Blaze.Html5 as H hiding (map)
 import Text.Blaze.Html5.Attributes(href)
 import Text.Blaze.Html.Renderer.String
 import Text.Blaze.Internal(string)
+
+#if !MIN_VERSION_base(4,8,0)
+import           System.Locale
+#endif
 
 instance Stream Socket where
   readLine s = loop ""
