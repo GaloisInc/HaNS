@@ -28,7 +28,6 @@ import Network.HTTP.Stream
 import Network.Stream
 import System.Exit
 import System.Info
-import System.Locale
 import Text.Blaze.Html5 as H hiding (map)
 import Text.Blaze.Html5.Attributes(href)
 import Text.Blaze.Html.Renderer.String
