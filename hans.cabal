@@ -168,7 +168,23 @@ executable web-server
 executable tcp-test
         main-is:        Main.hs
         hs-source-dirs: tcp-test
-        ghc-options:    -Wall -threaded -rtsopts
+        ghc-options:    -Wall -rtsopts
+        build-depends:  base       >= 4.0.0.0 && < 5,
+                        cereal     >= 0.3.5.2,
+                        bytestring >= 0.9.1.0,
+                        containers >= 0.3.0.0,
+                        monadLib   >= 3.6.0,
+                        time       >= 1.1.0.0,
+                        old-locale >= 1.0.0.0,
+                        hans
+        if os(HaLVM)
+                build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
+                                    HALVMCore     >= 2.0.0 && < 3.0.0
+
+executable echo-client
+        main-is:        Main.hs
+        hs-source-dirs: echo-client
+        ghc-options:    -Wall -rtsopts
         build-depends:  base       >= 4.0.0.0 && < 5,
                         cereal     >= 0.3.5.2,
                         bytestring >= 0.9.1.0,
