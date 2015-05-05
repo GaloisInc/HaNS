@@ -16,7 +16,7 @@ import Control.Applicative ((<*>),(<$>))
 import Data.Serialize (Serialize(..))
 import Data.Serialize.Get (Get,getWord8)
 import Data.Serialize.Put (Putter,putByteString)
-import Data.Bits (Bits(testBit,complement))
+import Data.Bits (Bits(testBit,complement), shift)
 import Data.List (intersperse)
 import Data.Word (Word8)
 import GHC.Generics ( Generic )
@@ -51,9 +51,13 @@ macMask (Mac a b c d e f) =
       (complement e)
       (complement f)
 
--- | The broadcast mac address.
+-- | The broadcast MAC address.
 broadcastMac :: Mac
 broadcastMac  = Mac 0xff 0xff 0xff 0xff 0xff 0xff
+
+-- | Multicast MAC addresses will have an odd first octet
+multicastMac :: Mac -> Bool
+multicastMac (Mac a _ _ _ _ _) = (a `shift` 7) /= 0
 
 instance Show Mac where
   showsPrec _ = showsMac
