@@ -100,8 +100,9 @@ connect tcp remote remotePort mbLocal = blockResult tcp $ \ res -> do
               }
             else socketError ConnectionRefused
         , tcpState     = Listen
-        , tcpSndNxt    = isn
+        , tcpSndNxt    = isn + 1
         , tcpSndUna    = isn
+        , tcpIss       = isn
         , tcpTimestamp = Just (emptyTimestamp now)
         }
   -- XXX how should the retry/backoff be implemented

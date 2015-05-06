@@ -142,8 +142,7 @@ segmentArrives src hdr body =
           -- check SYN
 
           when (tcpSyn hdr) $
-            do advanceRcvNxt 1
-               modifyTcpSocket_ $ \ sock -> sock
+            do modifyTcpSocket_ $ \ sock -> sock
                  { tcpOutMSS      = fromMaybe (tcpInMSS sock) (getMSS hdr)
 
                    -- clear out, and configure the retransmit buffer
@@ -152,19 +151,24 @@ segmentArrives src hdr body =
                                   $ clearRetransmit
                                   $ tcpOut sock
 
-                   -- this corresponds to setting IRS to SEQ.SEG
-                 , tcpIn          = emptyLocalWindow (tcpSeqNum hdr) 14600 0
+                   -- this corresponds to setting IRS to SEQ.SEG, and advancing
+                   -- RCV.NXT by one
+                 , tcpIn          = emptyLocalWindow (tcpSeqNum hdr + 1) 14600 0
                  , tcpSack        = sackSupported hdr
                  , tcpWindowScale = isJust (findTcpOption OptTagWindowScaling hdr)
                  }
 
                when (tcpAck hdr) $
-                 do handleAck hdr -- update SND.UNA
+                 do -- advance SND.UNA
+                    modifyTcpSocket_ $ \ sock -> sock
+                      { tcpSndUna = tcpAckNum hdr }
+
                     TcpSocket { .. } <- getTcpSocket
                     if tcpSndUna > tcpIss
                        then do ack
-                               establishConnection
                                notify True
+
+                               setState Established
 
                                -- continue at step 6
                                when (tcpUrg hdr) (proceedFromStep6 hdr body)
@@ -175,6 +179,8 @@ segmentArrives src hdr body =
                                -- once Established has been reached
 
                     done
+
+          when (not (tcpSyn hdr || tcpRst hdr)) discardAndReturn
 
      -- make sure that the sequence numbers are valid
      checkSequenceNumber hdr body
@@ -293,7 +299,7 @@ processSegmentText :: TcpHeader -> S.ByteString -> Sock ()
 processSegmentText hdr body =
   whenStates [Established,FinWait1,FinWait2] $
     do if S.null body
-          -- make sure that the the delayed ack flag gets set
+          -- make sure that the delayed ack flag gets set
           then when (tcpSyn hdr || tcpFin hdr) $ modifyTcpTimers_
                                                $ \ tt -> tt { ttDelayedAck = True }
 
