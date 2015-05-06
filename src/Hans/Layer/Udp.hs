@@ -17,7 +17,6 @@ module Hans.Layer.Udp (
   , removeUdpHandler
   ) where
 
-import Hans.Address
 import Hans.Address.IP4
 import Hans.Channel
 import Hans.Layer
@@ -195,9 +194,6 @@ listening src hdr bytes = do
 -- | Deliver a destination unreachable mesasge, via the icmp layer.
 unreachable :: IP4Header -> S.ByteString -> Udp ()
 unreachable hdr orig = do
-  -- Don't respond to unhandled multicast packets
-  guard $ masksAddress multicastIP4 (ip4SourceAddr hdr)
-
   icmp4 <- icmp4Handle
   output (Icmp4.destUnreachable icmp4 PortUnreachable hdr (S.length orig) orig)
 

@@ -30,10 +30,6 @@ data IP4 = IP4
 broadcastIP4 :: IP4
 broadcastIP4  = IP4 255 255 255 255
 
--- | IANA-reserved multicast addresses
-multicastIP4 :: IP4Mask
-multicastIP4 = IP4 224 0 0 0 `withMask` 4
-
 instance Address IP4 where
   addrSize _ = 4
 
