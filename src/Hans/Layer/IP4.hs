@@ -154,7 +154,7 @@ broadcastDestination ip = do
 routeLocal :: IP4Header -> S.ByteString -> IP ()
 routeLocal hdr body = do
   let dest = ip4DestAddr hdr
-  localAddress dest `mplus` broadcastDestination dest
+  localAddress dest
   h  <- getHandler (ip4Protocol hdr)
   mb <- handleFragments hdr body
   case mb of
@@ -194,7 +194,9 @@ handleIncoming bs = do
 
   -- forward?
   let payload = S.take (plen - hlen) rest
-  routeLocal hdr payload `mplus` forward hdr (chunk payload)
+  routeLocal hdr payload
+    -- XXX Hide this old router functionality behind a setting
+    -- `mplus` forward hdr (chunk payload)
 
 
 handleAddRule :: Rule IP4Mask IP4 -> IP ()
