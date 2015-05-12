@@ -144,7 +144,8 @@ executable test
 executable web-server
         main-is:        Main.hs
         hs-source-dirs: web-server
-        ghc-options:    -Wall -threaded -rtsopts
+        ghc-options:    -Wall -threaded -rtsopts -fno-warn-unused-do-bind
+                        -fno-warn-orphans
 
         if os(HaLVM)
                 buildable: False

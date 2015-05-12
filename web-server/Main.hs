@@ -15,7 +15,6 @@ import Data.Char
 import Data.Time
 import Data.Version
 import Data.Word
-import GHC.Stats
 import Hans.Address.Mac
 import Hans.Address.IP4
 import Hans.Device.Tap
@@ -26,13 +25,11 @@ import qualified Hans.NetworkStack as Hans
 import Network.HTTP.Base
 import Network.HTTP.Headers
 import Network.HTTP.Stream
-import Network.Stream
 import System.Exit
 import System.Info
 import Text.Blaze.Html5 as H hiding (map)
 import Text.Blaze.Html5.Attributes(href)
 import Text.Blaze.Html.Renderer.String
-import Text.Blaze.Internal(string)
 
 #if !MIN_VERSION_base(4,8,0)
 import           System.Locale
@@ -46,7 +43,7 @@ instance Stream Socket where
                  | BS.head bstr == 10 -> return (Right (acc ++ "\n"))
                  | otherwise          -> loop (acc ++ BSC.unpack bstr)
 
-  readBlock s x = loop (fromIntegral x) BS.empty
+  readBlock s y = loop (fromIntegral y) BS.empty
     where loop 0 acc = return (Right (BSC.unpack acc))
           loop x acc =
             do bstr <- recvBytes s x
@@ -101,8 +98,8 @@ startServer state =
      forever $ do
        sock <- accept lsock
        putStrLn "Accepted socket."
-       forkIO (handleClient sock state)
-       forkIO (addHost ns (sockRemoteHost sock) (lastHosts state))
+       _ <- forkIO (handleClient sock state)
+       _ <- forkIO (addHost ns (sockRemoteHost sock) (lastHosts state))
        return ()
 
  where
@@ -117,9 +114,9 @@ handleClient sock state =
      case mreq of
        Left err  -> putStrLn ("ReqERROR: " ++ show err)
        Right req ->
-         do body <- buildBody req state
+         do bod <- buildBody req state
             putStrLn "Built response"
-            let lenstr = show (length body)
+            let lenstr = show (length bod)
                 keepAlive = [ mkHeader HdrConnection "keep-alive"
                             | hdr <- retrieveHeaders HdrConnection req
                             , map toLower (hdrValue hdr) == "keep-alive" ]
@@ -131,7 +128,7 @@ handleClient sock state =
                            , rspHeaders = mkHeader HdrContentLength lenstr
                                         : mkHeader HdrContentType   "text/html"
                                         : conn
-                           , rspBody = body
+                           , rspBody = bod
                            }
             respondHTTP sock resp
             if null keepAlive
@@ -139,7 +136,7 @@ handleClient sock state =
                else handleClient sock state
 
 buildBody :: Request String -> ServerState -> IO String
-buildBody req state =
+buildBody _req state =
   do numReqs <- modifyMVar (responseCount state) (\ x -> return (x + 1, x))
      prevHosts <- readMVar (lastHosts state)
      putStrLn ("prevHosts: " ++ show prevHosts ++ "\n")

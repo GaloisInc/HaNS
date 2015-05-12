@@ -33,7 +33,7 @@ import Hans.Utils
 import Hans.Utils.Checksum
 
 import Control.Concurrent (forkIO)
-import Control.Monad (guard,mplus,(<=<))
+import Control.Monad (guard, (<=<))
 import MonadLib (get,set)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString      as S
@@ -124,10 +124,10 @@ findRoute addr = do
   state <- get
   just (route addr (ip4Routes state))
 
-
--- | Route a packet that is forwardable
-forward :: IP4Header -> L.ByteString -> IP ()
-forward hdr body = do
+-- Route a packet that is forwardable.
+-- XXX Hide this facility behind configuration
+_forward :: IP4Header -> L.ByteString -> IP ()
+_forward hdr body = do
   rule@(src,_,_) <- findRoute (ip4DestAddr hdr)
   guard (src /= ip4SourceAddr hdr)
   sendPacket' hdr body rule
@@ -138,16 +138,14 @@ localAddress ip = do
   state <- get
   guard (ip `elem` localAddrs (ip4Routes state))
 
-
-findSourceMask :: IP4 -> IP IP4Mask
-findSourceMask ip = do
+_findSourceMask :: IP4 -> IP IP4Mask
+_findSourceMask ip = do
   state <- get
   just (sourceMask ip (ip4Routes state))
 
-
-broadcastDestination :: IP4 -> IP ()
-broadcastDestination ip = do
-  mask <- findSourceMask ip
+_broadcastDestination :: IP4 -> IP ()
+_broadcastDestination ip = do
+  mask <- _findSourceMask ip
   guard (isBroadcast mask ip)
 
 -- | Route a message to a local handler

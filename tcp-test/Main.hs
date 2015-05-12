@@ -18,15 +18,12 @@ import XenDevice.NIC
 import Hans.Device.Tap
 #endif
 
-import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO
-                          ,killThread,myThreadId)
-import Control.Monad (forever,when)
+import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO)
+
+import Control.Monad (forever)
 import System.Environment (getArgs)
 import qualified Data.ByteString.Lazy as L
 import qualified Control.Exception as X
-
-import System.Exit (exitSuccess)
-
 
 localAddr :: IP4
 localAddr  = IP4 192 168 90 2

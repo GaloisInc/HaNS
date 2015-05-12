@@ -20,7 +20,7 @@ import Hans.Message.Tcp
 import Control.Monad (guard,when,unless,join)
 import Data.Bits (bit)
 import Data.Int (Int64)
-import Data.Maybe (fromMaybe,isJust,isNothing)
+import Data.Maybe (fromMaybe,isJust)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
