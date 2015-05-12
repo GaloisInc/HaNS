@@ -216,8 +216,6 @@ close sock = blockResult (sockHandle sock) $ \ res -> do
   -- closing a connection that doesn't exist causes a CloseError
   connected `mplus` unblock (socketError CloseError)
 
-userClose :: Sock ()
-userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })
 
 
 -- Writing ---------------------------------------------------------------------

@@ -135,6 +135,7 @@ segmentArrives src hdr body =
           when (tcpRst hdr) $
             do when accAcceptable $ do notify False
                                        closeSocket
+                                       userClose
                discardAndReturn
 
           -- this is where a security/compartment check would be done
@@ -230,7 +231,7 @@ checkResetBit hdr
 
        whenState SynReceived $
             -- from an active open
-         do when (isNothing tcpParent) closeSocket
+         do closeSocket
             done
 
        whenStates [Established,FinWait1,FinWait2,CloseWait] $

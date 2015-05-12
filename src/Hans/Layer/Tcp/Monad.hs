@@ -468,3 +468,6 @@ closeSocket :: Sock ()
 closeSocket  = do
   shutdown
   setState Closed
+
+userClose :: Sock ()
+userClose  = modifyTcpSocket_ (\tcp -> tcp { tcpUserClosed = True })

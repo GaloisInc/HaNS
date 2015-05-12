@@ -49,14 +49,10 @@ slowTimer  =
        -- the slow timer is valid for all states but TimeWait; the check is done
        -- here because the socket may have only just transitioned to TimeWait,
        -- and hasn't been moved to hostTimeWaits yet.
-       do TcpSocket { .. } <- getTcpSocket
-          unless (tcpState == TimeWait) $
-            do handleRTO
-               handleFinWait2
-
-          handle2MSL
-
-          updateTimers
+       TcpSocket { .. } <- getTcpSocket
+       unless (tcpState == TimeWait) handleRTO
+       handle2MSL
+       updateTimers
 
      -- second, decrement the 2MSL timer for sockets in the TimeWait state
      modifyHost_ $ \ host ->
@@ -125,23 +121,6 @@ handle2MSL  =
           if tcpState /= TimeWait && ttIdle <= ttMaxIdle
              then set2MSL tcpKeepIntVal
              else closeSocket
-
--- FIN_WAIT_2 ------------------------------------------------------------------
-
--- | The FinWait2 10m timeout.
-finWait2Idle :: SlowTicks
-finWait2Idle  = 1200
-
--- | GC the connection if it's been open for a long time, in FIN_WAIT_2.
---
--- XXX not sure if this is the correct way to do this.  should this set a flag
--- to indicate that if the 2MSL timer goes off, the connection should be cleaned
--- up?
-handleFinWait2 :: Sock ()
-handleFinWait2  = whenState FinWait2
-                $ whenIdleFor finWait2Idle
-                $ set2MSL tcpKeepIntVal
-
 
 -- RTO -------------------------------------------------------------------------
 
