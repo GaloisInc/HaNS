@@ -135,7 +135,6 @@ segmentArrives src hdr body =
           when (tcpRst hdr) $
             do when accAcceptable $ do notify False
                                        closeSocket
-                                       userClose
                discardAndReturn
 
           -- this is where a security/compartment check would be done
@@ -226,21 +225,13 @@ checkSequenceNumber hdr body =
 -- | Process the presence of the RST bit
 checkResetBit :: TcpHeader -> Sock ()
 checkResetBit hdr
-  | tcpRst hdr =
-    do TcpSocket { .. } <- getTcpSocket
-
-       whenState SynReceived $
-            -- from an active open
-         do closeSocket
-            done
-
-       whenStates [Established,FinWait1,FinWait2,CloseWait] $
-         do closeSocket
-            done
-
-       whenStates [Closing,LastAck] $
-         do closeSocket
-            done
+  | tcpRst hdr = do
+      TcpSocket { .. } <- getTcpSocket
+      whenStates [ SynReceived, Established, FinWait1, FinWait2
+                 , CloseWait, Closing, LastAck] $
+        do notify False
+           closeSocket
+           done
 
   | otherwise  = return ()
 
