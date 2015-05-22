@@ -4,11 +4,18 @@ module Main where
 
 import Control.Concurrent (newEmptyMVar,takeMVar,putMVar,threadDelay)
 import Hans.Address.Mac
-import Hans.Device.Tap
 import Hans.DhcpClient
 import Hans.NetworkStack
 import System.Environment (getArgs)
 
+#ifdef HaLVM_HOST_OS
+import Hans.Device.Xen
+import Hypervisor.Console
+import Hypervisor.XenStore
+import XenDevice.NIC
+#else
+import Hans.Device.Tap
+#endif
 
 main :: IO ()
 main  = do
