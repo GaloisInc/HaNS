@@ -1,225 +1,39 @@
 name:           hans
-version:        2.5.0.0
-cabal-version:  >= 1.8
+version:        3.0.0.0
+cabal-version:  >= 1.22
 license:        BSD3
 license-file:   LICENSE
-author:         Galois Inc., Peng Li, Stephan Zdancewic
+author:         Galois Inc.
 maintainer:     halvm-devel@community.galois.com
 category:       Networking
-synopsis:       IPv4 Network Stack
+synopsis:       Network Stack
 build-type:     Simple
 description:
   HaNS is a lightweight, pure Haskell network stack that can be used for Haskell
-  networking in the context of the HaLVM, or with a Linux tap device. Currently,
-  HaNS supports 802.3, IPv4, ARP, DHCP (partially), ICMP, UDP, and TCP.
+  networking in the context of the HaLVM, or with a Linux tap device.
 
 source-repository head
         type:           git
         location:       git://github.com/GaloisInc/HaNS.git
 
-flag bounded-channels
-        default:        False
-        description:    Use bounded channels for message passing
-
-flag enable-tests
-        default:        False
-        description:    Enable building the test suite
-
-flag example
-        default:        False
-        description:    Build the example program
-
-flag web-server
-        description:    Build a simple web-server example
-
-flag word32-in-random
-        default:        False
-        description:    Word32 in Random
-
 library
-        if(os(HaLVM))
-                build-depends:          XenDevice >= 2.0.0 && < 3.0.0,
-                                        HALVMCore >= 2.0.0 && < 3.0.0
-                exposed-modules:        Hans.Device.Xen,
-                                        Hans.Device.Ivc
-        else
+        if os(HALVM)
+                cpp-options:            -DHANS_TARGET_XEN
+                build-depends:          XenDevice >= 2.0.0 && < 3,
+                                        HALVMCore >= 2.0.0 && < 3
+                other-modules:          Hans.Device.Xen
+
+        if os(darwin) || os(linux)
+                cpp-options:            -DHANS_TARGET_UNIX
                 build-depends:          unix
+                other-modules:          Hans.Device.Tap
                 include-dirs:           cbits
                 c-sources:              cbits/tapdevice.c
-                exposed-modules:        Hans.Device.Tap
 
-        if flag(bounded-channels)
-                build-depends:  BoundedChan
-                cpp-options:    -DBOUNDED_CHANNELS
-
-        ghc-options:            -Wall
+        ghc-options:            -Wall -threaded
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
-                                cereal     >= 0.3.5.2,
-                                bytestring >= 0.9.1.0,
-                                containers >= 0.3.0.0,
-                                monadLib   >= 3.6.0,
-                                time       >= 1.1.0.0,
-                                fingertree >= 0.0.1.0
+                                bytestring
 
-        if flag(word32-in-random)
-                build-depends:  random     >= 1.0.1.0
-                cpp-options:    -DWORD32_IN_RANDOM
-        else
-                build-depends:  random     >= 1.0.0.0
-
-        exposed-modules:        Data.PrefixTree,
-                                Hans.Address,
-                                Hans.Address.IP4,
-                                Hans.Address.Mac,
-                                Hans.Channel,
-                                Hans.DhcpClient,
-                                Hans.Layer,
-                                Hans.Layer.Arp,
-                                Hans.Layer.Arp.Table,
-                                Hans.Layer.Ethernet,
-                                Hans.Layer.Dns,
-                                Hans.Layer.IP4,
-                                Hans.Layer.IP4.Fragmentation,
-                                Hans.Layer.IP4.Routing,
-                                Hans.Layer.Icmp4,
-                                Hans.Layer.Tcp,
-                                Hans.Layer.Tcp.Handlers,
-                                Hans.Layer.Tcp.Messages,
-                                Hans.Layer.Tcp.Monad,
-                                Hans.Layer.Tcp.Socket,
-                                Hans.Layer.Tcp.Timers,
-                                Hans.Layer.Tcp.Types,
-                                Hans.Layer.Tcp.WaitBuffer,
-                                Hans.Layer.Tcp.Window,
-                                Hans.Layer.Udp,
-                                Hans.Message.Arp,
-                                Hans.Message.Dhcp4,
-                                Hans.Message.Dhcp4Codec,
-                                Hans.Message.Dhcp4Options,
-                                Hans.Message.Dns,
-                                Hans.Message.EthernetFrame,
-                                Hans.Message.Icmp4,
-                                Hans.Message.Ip4,
-                                Hans.Message.Tcp,
-                                Hans.Message.Types,
-                                Hans.Message.Udp,
-                                Hans.NetworkStack,
-                                Hans.Ports,
-                                Hans.Simple,
-                                Hans.Timers,
-                                Hans.Utils,
-                                Hans.Utils.Checksum
-
-
-executable test
-        if flag(example)
-                buildable:      True
-        else
-                buildable:      False
-
-        if(flag(bounded-channels))
-                build-depends:  BoundedChan
-                cpp-options:    -DBOUNDED_CHANNELS
-
-        main-is:        test.hs
-        other-modules:  WebServer
-        ghc-options:    -Wall
-        hs-source-dirs: example
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
-
-        if os(HaLVM)
-                build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
-                                    HALVMCore     >= 2.0.0 && < 3.0.0
-        else
-                ghc-options: -threaded
-
-executable web-server
-        main-is:        Main.hs
-        hs-source-dirs: web-server
-        ghc-options:    -Wall -threaded -rtsopts
-
-        if os(HaLVM)
-                buildable: False
-        else
-          if flag(web-server)
-                  build-depends:  base       >= 4.0.0.0 && < 5,
-                                  cereal     >= 0.3.5.2,
-                                  bytestring >= 0.9.1.0,
-                                  containers >= 0.3.0.0,
-                                  monadLib   >= 3.6.0,
-                                  time       >= 1.1.0.0,
-                                  old-locale >= 1.0.0.0,
-                                  HTTP       >= 4000.2.17,
-                                  blaze-html >= 0.7.0.2,
-                                  blaze-markup,
-                                  hans
-
-          else
-                  buildable: False
-
-executable tcp-test
-        main-is:        Main.hs
-        hs-source-dirs: tcp-test
-        ghc-options:    -Wall -threaded -rtsopts
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
-        if os(HaLVM)
-                build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
-                                    HALVMCore     >= 2.0.0 && < 3.0.0
-
-executable tcp-test-client
-        main-is:        Main.hs
-        hs-source-dirs: tcp-test-client
-        if os(HaLVM)
-                buildable:          False
-        else
-                build-depends:      base,
-                                    bytestring,
-                                    network
-
-
-executable test-suite
-        hs-source-dirs: tests
-        main-is:        Main.hs
-
-        if flag(enable-tests)
-                buildable:      True
-                other-modules:  Icmp4,
-                                Icmp4.Packet,
-                                IP4,
-                                IP4.Addr,
-                                IP4.Packet,
-                                Tcp,
-                                Tcp.Packet,
-                                Tcp.Window,
-                                Udp,
-                                Udp.Packet,
-                                Utils
-
-                build-depends:  base                       >= 4 && < 5,
-                                containers                 >= 0.3,
-                                bytestring                 >= 0.9.1,
-                                old-locale                 >= 1,
-                                test-framework-quickcheck2 >= 0.2.12.2,
-                                test-framework             >= 0.6,
-                                QuickCheck                 >= 2.4.2,
-                                random                     >= 1.0.1.1,
-                                cereal                     >= 0.3.5.2,
-                                hans
-
-        else
-                buildable:      False
+        exposed-modules:        Hans.Device
+        other-modules:          Hans.Device.Types

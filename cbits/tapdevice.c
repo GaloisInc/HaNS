@@ -55,7 +55,7 @@ int init_tap_device(char *name)
   snprintf(pathname, 32, "/dev/%s", name);
   fd = open(pathname, O_RDWR);
   if(fd < 0) {
-    printf("Open failed (%s)\n", pathname);
+    printf("Open failed (%s) (%d)\n", pathname, fd);
     return -2;
   }
   printf("fd = %d\n", fd);
