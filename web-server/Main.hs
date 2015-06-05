@@ -89,18 +89,19 @@ startServer state =
      deviceUp ns mac
      putStrLn ("Starting server on device " ++ show mac)
 
-     ipMV <- newEmptyMVar
-     dhcpDiscover ns mac (putMVar ipMV)
-     ipaddr <- takeMVar ipMV
-     putStrLn ("Device " ++ show mac ++ " has IP " ++ show ipaddr)
+     mbIP <- dhcpDiscover ns 10 mac
+     case mbIP of
+       Nothing -> putStrLn "Couldn't get an IP address."
+       Just ipaddr -> do
+         putStrLn ("Device " ++ show mac ++ " has IP " ++ show ipaddr)
 
-     lsock <- listen ns undefined 80 `catch` handler
-     forever $ do
-       sock <- accept lsock
-       putStrLn "Accepted socket."
-       _ <- forkIO (handleClient sock state)
-       _ <- forkIO (addHost ns (sockRemoteHost sock) (lastHosts state))
-       return ()
+         lsock <- listen ns undefined 80 `catch` handler
+         forever $ do
+           sock <- accept lsock
+           putStrLn "Accepted socket."
+           _ <- forkIO (handleClient sock state)
+           _ <- forkIO (addHost ns (sockRemoteHost sock) (lastHosts state))
+           return ()
 
  where
   handler ListenError{} =

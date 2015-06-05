@@ -60,7 +60,8 @@ library
                                 containers >= 0.3.0.0,
                                 monadLib   >= 3.6.0,
                                 time       >= 1.1.0.0,
-                                fingertree >= 0.0.1.0
+                                fingertree >= 0.0.1.0,
+                                stm        >= 2.4
 
         if flag(word32-in-random)
                 build-depends:  random     >= 1.0.1.0

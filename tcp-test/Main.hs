@@ -18,7 +18,7 @@ import XenDevice.NIC
 import Hans.Device.Tap
 #endif
 
-import Control.Concurrent (newEmptyMVar,putMVar,takeMVar,threadDelay,forkIO)
+import Control.Concurrent (threadDelay,forkIO)
 
 import Control.Monad (forever)
 import System.Environment (getArgs)
@@ -39,14 +39,15 @@ main  = do
   args <- getArgs
   if args == ["dhcp"]
      then do putStrLn "Discovering address"
-             res <- newEmptyMVar
-             dhcpDiscover ns mac (putMVar res)
-             ip  <- takeMVar res
-             putStrLn ("Bound to address: " ++ show ip)
+             mbIP <- dhcpDiscover ns 10 mac
+             case mbIP of
+               Nothing -> putStrLn "Couldn't get an IP address."
+               Just ip -> do
+                 putStrLn ("Bound to address: " ++ show ip)
 
-             -- putStrLn "Looking up galois.com..."
-             -- HostEntry { .. } <- getHostByName ns "galois.com"
-             -- print hostAddresses
+                 -- putStrLn "Looking up galois.com..."
+                 -- HostEntry { .. } <- getHostByName ns "galois.com"
+                 -- print hostAddresses
 
 
      else do setAddress mac ns
