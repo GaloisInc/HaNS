@@ -2,7 +2,7 @@
 {-# LANGUAGE CPP #-}
 module Main where
 
-import Control.Concurrent (newEmptyMVar,takeMVar,putMVar,threadDelay)
+import Control.Concurrent (threadDelay)
 import Hans.Address.Mac
 import Hans.DhcpClient
 import Hans.NetworkStack
@@ -30,24 +30,25 @@ main  = do
   putStrLn "Network stack running..."
 
   putStrLn "Discovering address"
-  res <- newEmptyMVar
 
-  dhcpDiscover ns mac (putMVar res)
-  self <- takeMVar res
-  putStrLn ("Bound to address: " ++ show self)
+  mbIP <- dhcpDiscover ns 10 mac
+  case mbIP of
+    Nothing -> putStrLn "Couldn't get an IP address."
+    Just self -> do
+      putStrLn ("Bound to address: " ++ show self)
 
-  sock <- connect ns addr 9001 Nothing
-  putStrLn ("Connected to: " ++ show addr)
+      sock <- connect ns addr 9001 Nothing
+      putStrLn ("Connected to: " ++ show addr)
 
-  putStrLn "Sending bytes..."
-  sent <- sendBytes sock "Hello"
+      putStrLn "Sending bytes..."
+      sent <- sendBytes sock "Hello"
 
-  putStrLn ("Sent " ++ show sent ++ " bytes")
-  print =<< recvBytes sock 512
+      putStrLn ("Sent " ++ show sent ++ " bytes")
+      print =<< recvBytes sock 512
 
-  threadDelay 1000000
+      threadDelay 1000000
 
-  close sock
+      close sock
 
 #ifdef HaLVM_HOST_OS
 initEthernetDevice :: NetworkStack -> IO Mac

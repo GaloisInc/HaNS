@@ -16,7 +16,8 @@ import Hans.Message.Udp
 import Hans.NetworkStack
 import Hans.Timers (delay_)
 
-import Control.Monad (guard)
+import Control.Monad (guard,unless)
+import Control.Concurrent.STM
 import Data.Maybe (fromMaybe,mapMaybe)
 import System.Random (randomIO)
 import qualified Data.ByteString as S
@@ -45,21 +46,60 @@ defaultRoute  = IP4 0 0 0 0 `withMask` 0
 
 -- DHCP ------------------------------------------------------------------------
 
-type AckHandler = IP4 -> IO ()
-
 -- | Discover a dhcp server, and request an address.
 dhcpDiscover :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
                 , HasDns stack )
-             => stack -> Mac -> AckHandler -> IO ()
-dhcpDiscover ns mac h = do
+             => stack -> Int -> Mac -> IO (Maybe IP4)
+dhcpDiscover ns retries mac = do
+  addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
+
+  offerTMV <- newEmptyTMVarIO
+  addUdpHandler ns bootpc (handleOffer ns offerTMV)
+
   w32 <- randomIO
   let xid = Xid (fromIntegral (w32 :: Int))
+      disc = discoverToMessage (mkDiscover xid mac)
 
-  addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
-  addUdpHandler ns bootpc (handleOffer ns (Just h))
+  --  waitResult sends our DHCP discover and waits for an offer.
+  mbOffer <- waitResult retries disc offerTMV
+  case mbOffer of
 
-  let disc = discoverToMessage (mkDiscover xid mac)
-  sendMessage ns disc currentNetwork broadcastIP4 broadcastMac
+    -- We exceeded our retries, give up.
+    Nothing    -> return Nothing
+
+    --  We got an offer
+    --  - Install an DHCP Ack handler.
+    --  - Send a DHCP Request via waitResult, and wait for an IP to appear in resp.
+    Just offer -> do
+      resp <- newEmptyTMVarIO
+      addUdpHandler ns bootpc (handleAck ns offer (Just (atomically . putTMVar resp)))
+      let req = requestToMessage (offerToRequest offer)
+      waitResult retries req resp
+
+  where
+    initialTimeout :: Int
+    initialTimeout = 10000000 -- 10 seconds in µs
+
+    -- Sends a message and waits for a response (indicated by a value appearing the TMVar)
+    -- until timeout. Retries a given number of times doubling the backoff each time.
+    waitResult :: Int -> Dhcp4Message -> TMVar a -> IO (Maybe a)
+    waitResult n msg result = go n initialTimeout
+      where
+        go 0 _to = return Nothing
+        go i  to =
+          do sendMessage ns msg currentNetwork broadcastIP4 broadcastMac
+             timeout <- registerDelay to
+             -- If there is a result, return Just it.
+             -- If not, and we aren't timed out, retry.
+             -- If we are timed out, return Nothing.
+             mb <- atomically $ orElse (fmap Just (takeTMVar result))
+                                       (do isTimedOut <- readTVar timeout
+                                           unless isTimedOut retry
+                                           return Nothing)
+             -- Exponential backoff on timeout, return result on success.
+             case mb of
+               Just _  -> return mb
+               Nothing -> go (i-1) (to * 2)
 
 -- | Restore the connection between the Ethernet and IP4 layers.
 restoreIp4 :: (HasEthernet stack, HasIP4 stack) => stack -> IO ()
@@ -83,21 +123,18 @@ dhcpIP4Handler ns bytes =
 -- | Handle a DHCP Offer message.
 --
 --  * Remove the current UDP handler
---  * Install an DHCP Ack handler
---  * Send a DHCP Request
+--  * Write offer to TMV for retrieval.
 handleOffer :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
                , HasDns stack )
-            => stack -> Maybe AckHandler -> IP4 -> UdpPort
+            => stack -> TMVar Offer -> IP4 -> UdpPort
             -> S.ByteString -> IO ()
-handleOffer ns mbh _src _srcPort bytes =
+handleOffer ns tmv _src _srcPort bytes =
   case getDhcp4Message bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (OfferMessage offer)) -> do
         removeUdpHandler ns bootpc
-        let req = requestToMessage (offerToRequest offer)
-        addUdpHandler ns bootpc (handleAck ns offer mbh)
-        sendMessage ns req currentNetwork broadcastIP4 broadcastMac
+        atomically $ putTMVar tmv offer
 
       msg1 -> do
         putStrLn (show msg)
@@ -107,6 +144,11 @@ handleOffer ns mbh _src _srcPort bytes =
 
 -- | Handle a DHCP Ack message.
 --
+--   The optional handler (mbh) is present only the first time handleAck is
+--   installed, so we can update the main thread on our IP assignment. After
+--   that (when dhcpRenew installs handleAck) it is Nothing, because we just
+--   have to update the network stack.
+--
 --  * Remove the custom IP4 handler
 --  * Restore the connection between the Ethernet and IP4 layers
 --  * Remove the bootpc UDP listener
@@ -115,7 +157,7 @@ handleOffer ns mbh _src _srcPort bytes =
 --    has passed
 handleAck :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
              , HasDns stack )
-          => stack -> Offer -> Maybe AckHandler -> IP4 -> UdpPort
+          => stack -> Offer -> Maybe (IP4 -> IO ()) -> IP4 -> UdpPort
           -> S.ByteString -> IO ()
 handleAck ns offer mbh _src _srcPort bytes =
   case getDhcp4Message bytes of
@@ -142,7 +184,7 @@ handleAck ns offer mbh _src _srcPort bytes =
 --
 --  * Re-install the DHCP IP4 handler
 --  * Add a UDP handler for an Ack message
---  * Re-send a renquest message, generated from the offer given.
+--  * Re-send a request message, generated from the offer given.
 dhcpRenew :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
              , HasDns stack )
           => stack -> Offer -> IO ()
