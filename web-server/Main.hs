@@ -89,7 +89,7 @@ startServer state =
      deviceUp ns mac
      putStrLn ("Starting server on device " ++ show mac)
 
-     mbIP <- dhcpDiscover ns 10 mac
+     mbIP <- dhcpDiscover ns mac
      case mbIP of
        Nothing -> putStrLn "Couldn't get an IP address."
        Just ipaddr -> do
@@ -158,7 +158,7 @@ buildBody _req state =
              li $    hans >> " to talk to you over TCP."
              li $ do http >> " (modified to use the " >> network_hans
                      " shim) to understand your request and respond to it."
-             li $ do blaze >> " (which built out of the box) to generate this " 
+             li $ do blaze >> " (which built out of the box) to generate this "
                      "pretty HTML."
              li $ do "... and a host of other libraries to do other, more "
                      "standard, things."

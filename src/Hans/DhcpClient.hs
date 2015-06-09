@@ -49,8 +49,8 @@ defaultRoute  = IP4 0 0 0 0 `withMask` 0
 -- | Discover a dhcp server, and request an address.
 dhcpDiscover :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
                 , HasDns stack )
-             => stack -> Int -> Mac -> IO (Maybe IP4)
-dhcpDiscover ns retries mac = do
+             => stack -> Mac -> IO (Maybe IP4)
+dhcpDiscover ns mac = do
   addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
 
   offerTMV <- newEmptyTMVarIO
@@ -77,8 +77,13 @@ dhcpDiscover ns retries mac = do
       waitResult retries req resp
 
   where
+    -- RFC 2131 says to do exponential backoff starting at 4s and going to 64s.
+    -- It also says to add random noise between -1s and +1s, but we're skipping that for now.
     initialTimeout :: Int
-    initialTimeout = 10000000 -- 10 seconds in µs
+    initialTimeout = 4000000 -- 4 seconds in µs
+
+    retries :: Int
+    retries = 6
 
     -- Sends a message and waits for a response (indicated by a value appearing the TMVar)
     -- until timeout. Retries a given number of times doubling the backoff each time.
