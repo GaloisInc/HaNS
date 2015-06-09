@@ -39,7 +39,7 @@ main  = do
   args <- getArgs
   if args == ["dhcp"]
      then do putStrLn "Discovering address"
-             mbIP <- dhcpDiscover ns 10 mac
+             mbIP <- dhcpDiscover ns mac
              case mbIP of
                Nothing -> putStrLn "Couldn't get an IP address."
                Just ip -> do
@@ -98,7 +98,7 @@ initEthernetDevice ns =
        [] -> fail "No NICs found to use!"
        (macstr:_) ->
          do let mac = read macstr
-            nic <- openNIC xs macstr 
+            nic <- openNIC xs macstr
             addDevice ns mac (xenSend nic) (xenReceiveLoop nic)
             return mac
 #else
