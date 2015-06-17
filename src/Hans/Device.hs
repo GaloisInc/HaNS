@@ -1,6 +1,7 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE CPP #-}
 
-module Hans.Device ( Device, openDevice ) where
+module Hans.Device ( Device, openDevice, closeDev ) where
 
 #if   defined(HANS_TARGET_UNIX)
 import           Hans.Device.Tap (openDevice)
