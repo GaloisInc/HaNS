@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 
-module Hans.Device.Tap (openDevice) where
+module Hans.Device.Tap (listDevices,openDevice) where
 
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -24,6 +24,12 @@ import           Foreign.Marshal.Alloc (allocaBytes)
 import           Foreign.Ptr (Ptr,plusPtr)
 import           Foreign.Storable (pokeByteOff)
 import           System.Posix.Types (Fd(..))
+
+
+-- | Not sure how this should work yet... Should it only ever show tap device
+-- names?
+listDevices :: IO [DeviceName]
+listDevices  = return []
 
 
 openDevice :: DeviceName -> IO Device
