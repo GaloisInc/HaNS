@@ -433,13 +433,20 @@ parseDhcpMessage msg = do
           { offerHops                           = dhcp4Hops msg
           , offerXid                            = dhcp4Xid msg
           , offerYourAddr                       = dhcp4YourAddr msg
-          , offerServerAddr                     = dhcp4ServerAddr msg
+          , offerServerAddr                     = getOfferServerAddr (dhcp4ServerAddr msg) (dhcp4Options msg)
           , offerRelayAddr                      = dhcp4RelayAddr msg
           , offerClientHardwareAddr             = dhcp4ClientHardwareAddr msg
           , offerOptions                        = dhcp4Options msg
           }
 
       _ -> Nothing
+
+
+getOfferServerAddr :: IP4 -> [Dhcp4Option] -> IP4
+getOfferServerAddr def []         = def
+getOfferServerAddr def (opt:opts) = case opt of
+  OptServerIdentifier ip -> ip
+  _                      -> getOfferServerAddr def opts
 
 --
 -- Structured to unstrucured logic

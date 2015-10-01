@@ -37,20 +37,16 @@ main  = do
   putStrLn "Network stack running..."
 
   args <- getArgs
-  if args == ["dhcp"]
-     then do putStrLn "Discovering address"
+  if args /= ["dhcp"]
+     then do setAddress mac ns
+     else do putStrLn "Discovering address"
              mbIP <- dhcpDiscover ns mac
              case mbIP of
-               Nothing -> putStrLn "Couldn't get an IP address."
+               Nothing -> do
+                 putStrLn "Couldn't get an IP address."
+                 setAddress mac ns
                Just ip -> do
                  putStrLn ("Bound to address: " ++ show ip)
-
-                 -- putStrLn "Looking up galois.com..."
-                 -- HostEntry { .. } <- getHostByName ns "galois.com"
-                 -- print hostAddresses
-
-
-     else do setAddress mac ns
 
   server ns
 
