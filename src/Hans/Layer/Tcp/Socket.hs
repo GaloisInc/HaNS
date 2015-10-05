@@ -287,7 +287,7 @@ recvBytes sock len = blockResult (sockHandle sock) $ \ res ->
         mbRead <- modifyTcpSocket (inputBytes len wakeup)
         case mbRead of
           Just bytes -> outputS (result bytes)
-          Nothing    -> return ()
+          Nothing    -> outputS (result L.empty)
    in performRecv
 
 inputBytes :: Int64 -> Wakeup -> TcpSocket -> (Maybe L.ByteString, TcpSocket)
