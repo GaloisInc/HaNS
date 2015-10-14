@@ -6,7 +6,6 @@ import Hans.Device
 import Hans.Monad
 import Hans.Queue
 
-import Control.Concurrent.STM (atomically)
 import Data.Array (Array,listArray,(!))
 
 
@@ -36,10 +35,14 @@ roundRobinReader devList = PacketReader (go numDevs 0)
 
 -- | Handle incoming packets.
 processPackets :: [Device] -> Hans ()
-processPackets devList = loop (roundRobinReader devList)
+processPackets devList = runHans (loop (roundRobinReader devList))
   where
   loop devs =
-    do (dev,pkt,reader') <- atomically (readPacket devs)
-       print pkt
+    do (dev,pkt,reader') <- stm (readPacket devs)
+       io (print pkt)
+
+       -- Any packet processing at this point should be run under `setEscape' so
+       -- that we don't restart the whole loop from scratch, and lose the
+       -- context for the round-robin scheduler.
 
        loop reader'
