@@ -71,8 +71,8 @@ openDevice sendSize recvSize devName =
 
 
 -- | Send a packet out over the tap device.
-tapSend :: Fd -> Queue L.ByteString -> IO ()
-tapSend fd queue = forever $
+tapSendLoop :: Fd -> Queue L.ByteString -> IO ()
+tapSendLoop fd queue = forever $
   do bs <- atomically (dequeue queue)
 
      let chunks = L.toChunks bs
@@ -102,8 +102,7 @@ tapRecvLoop fd queue = forever $
           return (fromIntegral actual)
 
      unless (S.length bytes < 60) $ atomically $
-       do success <- enqueue queue bytes
-          unless success (incrementDropped 
+       do success <- atomically (tryEnqueue queue bytes)
           return ()
 
 
