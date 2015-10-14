@@ -66,7 +66,6 @@ openDevice sendSize recvSize devName =
                    , devSend     = tapSend     fd
                    , devClose    = do devDown
                                       tapClose fd
-                   , devChecksum = True
                    , .. }
 
 
