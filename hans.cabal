@@ -36,7 +36,8 @@ library
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
                                 bytestring,
-                                stm
+                                stm,
+                                array
 
         exposed-modules:        Hans
                                 Hans.Device

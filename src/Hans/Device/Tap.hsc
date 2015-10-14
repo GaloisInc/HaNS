@@ -8,10 +8,11 @@ module Hans.Device.Tap (listDevices,openDevice) where
 #include <unistd.h>
 
 import           Hans.Device.Types
-import           Hans.Queue (newQueue,enqueue,dequeue)
+import           Hans.Queue (Queue,newQueue,tryEnqueue,dequeue)
 
-import           Control.Concurrent (threadWaitRead)
-import           Control.Concurrent.STM (newEmptyTMVarIO,tryTakeTMVar,putTMVar)
+import           Control.Concurrent (threadWaitRead,forkIO,killThread)
+import           Control.Concurrent.STM
+                     (atomically,newEmptyTMVarIO,tryTakeTMVar,putTMVar)
 import qualified Control.Exception as X
 import           Control.Monad (forever,unless,when,foldM_)
 import qualified Data.ByteString as S
@@ -39,8 +40,6 @@ openDevice sendSize recvSize devName =
   do fd <- S.unsafeUseAsCString devName c_init_tap_device
      when (fd < 0) (X.throwIO (FailedToOpen devName))
 
-     devStats <- newTVarIO initialStats
-
      running <- newEmptyTMVarIO
 
      devSendQueue <- newQueue sendSize
@@ -62,11 +61,11 @@ openDevice sendSize recvSize devName =
                 Nothing ->
                      return ()
 
-     return Device { devRecvLoop = tapRecvLoop fd
-                   , devSend     = tapSend     fd
-                   , devClose    = do devDown
-                                      tapClose fd
-                   , .. }
+         devClose =
+           do devDown
+              tapClose fd
+
+     return Device { .. }
 
 
 -- | Send a packet out over the tap device.
@@ -101,7 +100,8 @@ tapRecvLoop fd queue = forever $
           return (fromIntegral actual)
 
      unless (S.length bytes < 60) $ atomically $
-       do success <- atomically (tryEnqueue queue bytes)
+       do success <- tryEnqueue queue bytes
+          -- XXX log stats based on success
           return ()
 
 
