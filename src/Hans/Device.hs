@@ -1,7 +1,12 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE CPP #-}
 
-module Hans.Device ( Device, listDevices, openDevice, closeDev ) where
+module Hans.Device (
+    Device,
+    listDevices,
+    openDevice,
+    closeDevice
+  ) where
 
 #if   defined(HANS_TARGET_UNIX)
 import           Hans.Device.Tap (listDevices,openDevice)
@@ -12,5 +17,5 @@ import           Hans.Device.Xen (listDevices,openDevice)
 import           Hans.Device.Types (Device(..))
 
 
-closeDev :: Device -> IO ()
-closeDev Device { .. } = devClose
+closeDevice :: Device -> IO ()
+closeDevice Device { .. } = devClose

@@ -8,8 +8,10 @@ module Hans.Device.Tap (listDevices,openDevice) where
 #include <unistd.h>
 
 import           Hans.Device.Types
+import           Hans.Queue (newQueue,enqueue,dequeue)
 
 import           Control.Concurrent (threadWaitRead)
+import           Control.Concurrent.STM (newEmptyTMVarIO,tryTakeTMVar,putTMVar)
 import qualified Control.Exception as X
 import           Control.Monad (forever,unless,when,foldM_)
 import qualified Data.ByteString as S
@@ -32,31 +34,55 @@ listDevices :: IO [DeviceName]
 listDevices  = return []
 
 
-openDevice :: DeviceName -> IO Device
-openDevice devName =
+openDevice :: Int -> Int -> DeviceName -> IO Device
+openDevice sendSize recvSize devName =
   do fd <- S.unsafeUseAsCString devName c_init_tap_device
      when (fd < 0) (X.throwIO (FailedToOpen devName))
 
+     devStats <- newTVarIO initialStats
+
+     running <- newEmptyTMVarIO
+
+     devSendQueue <- newQueue sendSize
+     devRecvQueue <- newQueue recvSize
+
+     let devUp =
+           do recvThread <- forkIO (tapRecvLoop fd devRecvQueue)
+              sendThread <- forkIO (tapSendLoop fd devSendQueue)
+
+              atomically (putTMVar running (recvThread,sendThread))
+
+         devDown =
+           do mb <- atomically (tryTakeTMVar running)
+              case mb of
+                Just (recvThread,sendThread) ->
+                  do killThread recvThread
+                     killThread sendThread
+
+                Nothing ->
+                     return ()
+
      return Device { devRecvLoop = tapRecvLoop fd
                    , devSend     = tapSend     fd
-                   , devClose    = tapClose    fd
+                   , devClose    = do devDown
+                                      tapClose fd
                    , devChecksum = True
                    , .. }
 
 
 -- | Send a packet out over the tap device.
---
--- XXX It would be nice if there was a way to send the chunked data to the
--- kernel, instead of re-allocating a strict packet first.
-tapSend :: Fd -> L.ByteString -> IO ()
-tapSend fd bs =
-  allocaBytes (fromIntegral ((#size struct iovec) * len)) $ \ iov ->
-    do foldM_ writeChunk iov chunks
-       _bytesWritten <- c_writev fd iov (fromIntegral len)
-       return ()
+tapSend :: Fd -> Queue L.ByteString -> IO ()
+tapSend fd queue = forever $
+  do bs <- atomically (dequeue queue)
+
+     let chunks = L.toChunks bs
+         len    = length chunks
+
+     allocaBytes (fromIntegral ((#size struct iovec) * len)) $ \ iov ->
+       do foldM_ writeChunk iov chunks
+          _bytesWritten <- c_writev fd iov (fromIntegral len)
+          return ()
   where
-  chunks = L.toChunks bs
-  len    = length chunks
 
   -- write the chunk address and length into the iovec entry
   writeChunk iov chunk =
@@ -67,15 +93,18 @@ tapSend fd bs =
        return (iov `plusPtr` (#size struct iovec))
 
 
-tapRecvLoop :: Fd -> (S.ByteString -> IO ()) -> IO ()
-tapRecvLoop fd k = forever $
+tapRecvLoop :: Fd -> Queue S.ByteString -> IO ()
+tapRecvLoop fd queue = forever $
   do threadWaitRead fd
 
      bytes <- S.createAndTrim 1514 $ \ ptr ->
        do actual <- c_read fd ptr 1514
           return (fromIntegral actual)
 
-     unless (S.length bytes < 60) (k bytes)
+     unless (S.length bytes < 60) $ atomically $
+       do success <- enqueue queue bytes
+          unless success (incrementDropped 
+          return ()
 
 
 tapClose :: Fd -> IO ()

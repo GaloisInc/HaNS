@@ -30,10 +30,17 @@ library
                 include-dirs:           cbits
                 c-sources:              cbits/tapdevice.c
 
+        default-language:       Haskell2010
+
         ghc-options:            -Wall -threaded
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
-                                bytestring
+                                bytestring,
+                                stm
 
-        exposed-modules:        Hans.Device
+        exposed-modules:        Hans
+                                Hans.Device
+                                Hans.Protocol.Ethernet
         other-modules:          Hans.Device.Types
+                                Hans.Monad
+                                Hans.Input
