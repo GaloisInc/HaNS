@@ -46,3 +46,4 @@ library
         other-modules:          Hans.Device.Types
                                 Hans.Monad
                                 Hans.Input
+                                Hans.Types

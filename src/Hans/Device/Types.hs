@@ -16,8 +16,18 @@ import           Data.Typeable (Typeable)
 
 type DeviceName = S.ByteString
 
+-- | Static configuration data for creating a device.
+data DeviceConfig = DeviceConfig { dcSendQueueLen :: {-# UNPACK #-} !Int
+                                   -- ^ How large the send queue should be
+                                 }
+
+defaultDeviceConfig :: DeviceConfig
+defaultDeviceConfig  =
+  DeviceConfig { dcSendQueueLen = 128
+               }
+
 data Device = Device { devName :: !DeviceName
-                       -- ^ Readable name for this device
+                       -- ^ The name of this device
 
                      , devSendQueue :: !(Queue L.ByteString)
                        -- ^ Outgoing message queue for this device

@@ -1,8 +1,7 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Hans.Input where
 
-import Hans.Device
 import Hans.Monad
 import Hans.Queue
 
@@ -12,7 +11,7 @@ import qualified Data.ByteString as S
 -- Incoming Packets ------------------------------------------------------------
 
 -- | Handle incoming packets.
-processPackets :: Queue (Device,S.ByteString) -> IO ()
-processPackets inputQueue = runHans $
-  do (dev,pkt) <- stm (dequeue inputQueue)
+processPackets :: Queue S.ByteString -> IO ()
+processPackets input = runHans $
+  do pkt <- stm (dequeue input)
      io (print pkt)

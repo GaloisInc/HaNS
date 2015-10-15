@@ -36,8 +36,8 @@ import           System.Posix.Types (Fd(..))
 listDevices :: IO [DeviceName]
 listDevices  = return []
 
-openDevice :: Int -> Queue (Device,S.ByteString) -> DeviceName -> IO Device
-openDevice sendSize devRecvQueue devName =
+openDevice :: DeviceName -> DeviceConfig -> Queue S.ByteString -> IO Device
+openDevice devName devConfig devRecvQueue=
   do fd <- S.unsafeUseAsCString devName c_init_tap_device
      when (fd < 0) (X.throwIO (FailedToOpen devName))
 
@@ -47,7 +47,7 @@ openDevice sendSize devRecvQueue devName =
      starting <- newTMVarIO ()
      running  <- newEmptyTMVarIO
 
-     devSendQueue <- newQueue sendSize
+     devSendQueue <- newQueue (dcSendQueueLen devConfig)
 
      let dev = Device { .. }
 
@@ -59,8 +59,8 @@ openDevice sendSize devRecvQueue devName =
 
               -- We acquired the lock, and the threads haven't been started yet.
               when shouldStart $
-                do recvThread <- forkIO (tapRecvLoop fd dev devRecvQueue)
-                   sendThread <- forkIO (tapSendLoop fd     devSendQueue)
+                do recvThread <- forkIO (tapRecvLoop fd devRecvQueue)
+                   sendThread <- forkIO (tapSendLoop fd devSendQueue)
                    atomically $ do putTMVar starting ()
                                    putTMVar running (recvThread,sendThread)
 
@@ -103,8 +103,8 @@ tapSendLoop fd queue = forever $
        return (iov `plusPtr` (#size struct iovec))
 
 
-tapRecvLoop :: Fd -> Device -> Queue (Device,S.ByteString) -> IO ()
-tapRecvLoop fd dev queue = forever $
+tapRecvLoop :: Fd -> Queue S.ByteString -> IO ()
+tapRecvLoop fd queue = forever $
   do threadWaitRead fd
 
      bytes <- S.createAndTrim 1514 $ \ ptr ->
@@ -112,7 +112,7 @@ tapRecvLoop fd dev queue = forever $
           return (fromIntegral actual)
 
      unless (S.length bytes < 60) $ atomically $
-       do _success <- tryEnqueue queue (dev,bytes)
+       do _success <- tryEnqueue queue bytes
           -- XXX log stats based on success
           return ()
 
