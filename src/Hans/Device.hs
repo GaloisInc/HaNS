@@ -2,20 +2,20 @@
 {-# LANGUAGE CPP #-}
 
 module Hans.Device (
-    Device,
-    listDevices,
-    openDevice,
+    module Exports,
     closeDevice
   ) where
 
 #if   defined(HANS_TARGET_UNIX)
-import           Hans.Device.Tap (listDevices,openDevice)
+import           Hans.Device.Tap as Exports (listDevices,openDevice)
 #elif defined(HANS_TARGET_XEN)
-import           Hans.Device.Xen (listDevices,openDevice)
+import           Hans.Device.Xen as Exports (listDevices,openDevice)
 #endif
 
-import           Hans.Device.Types (Device(..))
+import           Hans.Device.Types as Exports
 
 
 closeDevice :: Device -> IO ()
-closeDevice Device { .. } = devClose
+closeDevice Device { .. } =
+  do devStop
+     devCleanup

@@ -12,13 +12,15 @@ import           Hans.Queue (Queue,newQueue,tryEnqueue,dequeue)
 
 import           Control.Concurrent (threadWaitRead,forkIO,killThread)
 import           Control.Concurrent.STM
-                     (atomically,newEmptyTMVarIO,tryTakeTMVar,putTMVar)
+                     (atomically,newTMVarIO,newEmptyTMVarIO,tryTakeTMVar
+                     ,putTMVar,isEmptyTMVar)
 import qualified Control.Exception as X
 import           Control.Monad (forever,unless,when,foldM_)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Unsafe as S
+import           Data.Maybe (isJust)
 import           Data.Word (Word8)
 import           Foreign.C.String (CString)
 import           Foreign.C.Types (CSize(..),CLong(..),CInt(..))
@@ -34,24 +36,35 @@ import           System.Posix.Types (Fd(..))
 listDevices :: IO [DeviceName]
 listDevices  = return []
 
-
-openDevice :: Int -> Int -> DeviceName -> IO Device
-openDevice sendSize recvSize devName =
+openDevice :: Int -> Queue (Device,S.ByteString) -> DeviceName -> IO Device
+openDevice sendSize devRecvQueue devName =
   do fd <- S.unsafeUseAsCString devName c_init_tap_device
      when (fd < 0) (X.throwIO (FailedToOpen devName))
 
-     running <- newEmptyTMVarIO
+     -- The `starting` lock makes sure that only one set of threads will be
+     -- started at once, while the `running` var holds the ids of the running
+     -- threads.
+     starting <- newTMVarIO ()
+     running  <- newEmptyTMVarIO
 
      devSendQueue <- newQueue sendSize
-     devRecvQueue <- newQueue recvSize
 
-     let devUp =
-           do recvThread <- forkIO (tapRecvLoop fd devRecvQueue)
-              sendThread <- forkIO (tapSendLoop fd devSendQueue)
+     let dev = Device { .. }
 
-              atomically (putTMVar running (recvThread,sendThread))
+         devStart =
+           do shouldStart <- atomically $
+                do mb         <- tryTakeTMVar starting
+                   notRunning <- isEmptyTMVar running
+                   return (isJust mb && notRunning)
 
-         devDown =
+              -- We acquired the lock, and the threads haven't been started yet.
+              when shouldStart $
+                do recvThread <- forkIO (tapRecvLoop fd dev devRecvQueue)
+                   sendThread <- forkIO (tapSendLoop fd     devSendQueue)
+                   atomically $ do putTMVar starting ()
+                                   putTMVar running (recvThread,sendThread)
+
+         devStop =
            do mb <- atomically (tryTakeTMVar running)
               case mb of
                 Just (recvThread,sendThread) ->
@@ -61,11 +74,10 @@ openDevice sendSize recvSize devName =
                 Nothing ->
                      return ()
 
-         devClose =
-           do devDown
-              tapClose fd
+         devCleanup =
+           do tapClose fd
 
-     return Device { .. }
+     return dev
 
 
 -- | Send a packet out over the tap device.
@@ -91,8 +103,8 @@ tapSendLoop fd queue = forever $
        return (iov `plusPtr` (#size struct iovec))
 
 
-tapRecvLoop :: Fd -> Queue S.ByteString -> IO ()
-tapRecvLoop fd queue = forever $
+tapRecvLoop :: Fd -> Device -> Queue (Device,S.ByteString) -> IO ()
+tapRecvLoop fd dev queue = forever $
   do threadWaitRead fd
 
      bytes <- S.createAndTrim 1514 $ \ ptr ->
@@ -100,7 +112,7 @@ tapRecvLoop fd queue = forever $
           return (fromIntegral actual)
 
      unless (S.length bytes < 60) $ atomically $
-       do success <- tryEnqueue queue bytes
+       do _success <- tryEnqueue queue (dev,bytes)
           -- XXX log stats based on success
           return ()
 

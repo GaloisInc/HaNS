@@ -6,7 +6,7 @@ module Hans.Monad (
   , io
   ) where
 
-import Control.Monad.STM (atomically)
+import Control.Monad.STM (STM,atomically)
 
 
 newtype Hans a = Hans { unHans :: IO () -> (a -> IO ()) -> IO () }
@@ -17,7 +17,6 @@ instance Functor Hans where
 
 instance Applicative Hans where
   pure x  = Hans (\ _ k -> k x)
-  {-# INLINE pure #-}
 
   f <*> x = Hans $ \ e k -> unHans f e
                  $ \ g   -> unHans x e
@@ -28,7 +27,6 @@ instance Applicative Hans where
 
 instance Monad Hans where
   return  = pure
-  {-# INLINE return #-}
 
   m >>= f = Hans $ \ e k -> unHans m e
                  $ \ a   -> unHans (f a) e k

@@ -37,11 +37,12 @@ library
         build-depends:          base       >= 4.0.0.0 && < 5,
                                 bytestring,
                                 stm,
-                                array
+                                array,
+                                cereal
 
         exposed-modules:        Hans
                                 Hans.Device
-                                Hans.Protocol.Ethernet
+                                Hans.Ethernet
         other-modules:          Hans.Device.Types
                                 Hans.Monad
                                 Hans.Input
