@@ -16,12 +16,14 @@ import Hans.Message.Udp
 import Hans.NetworkStack
 import Hans.Timers (delay_)
 
-import Control.Monad (guard,unless)
-import Control.Concurrent.STM
+import Control.Monad (guard)
+import Control.Concurrent
 import Data.Maybe (fromMaybe,mapMaybe)
 import System.Random (randomIO)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+
+import System.Timeout(timeout)
 
 
 -- Protocol Constants ----------------------------------------------------------
@@ -53,15 +55,15 @@ dhcpDiscover :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
 dhcpDiscover ns mac = do
   addEthernetHandler (ethernetHandle ns) ethernetIp4 (dhcpIP4Handler ns)
 
-  offerTMV <- newEmptyTMVarIO
-  addUdpHandler ns bootpc (handleOffer ns offerTMV)
+  offerMV <- newEmptyMVar
+  addUdpHandler ns bootpc (handleOffer ns offerMV)
 
   w32 <- randomIO
   let xid = Xid (fromIntegral (w32 :: Int))
       disc = discoverToMessage (mkDiscover xid mac)
 
   --  waitResult sends our DHCP discover and waits for an offer.
-  mbOffer <- waitResult retries disc offerTMV
+  mbOffer <- waitResult retries disc offerMV
   case mbOffer of
 
     -- We exceeded our retries, give up.
@@ -71,8 +73,8 @@ dhcpDiscover ns mac = do
     --  - Install an DHCP Ack handler.
     --  - Send a DHCP Request via waitResult, and wait for an IP to appear in resp.
     Just offer -> do
-      resp <- newEmptyTMVarIO
-      addUdpHandler ns bootpc (handleAck ns offer (Just (atomically . putTMVar resp)))
+      resp <- newEmptyMVar
+      addUdpHandler ns bootpc (handleAck ns offer (Just (putMVar resp)))
       let req = requestToMessage (offerToRequest offer)
       waitResult retries req resp
 
@@ -87,20 +89,13 @@ dhcpDiscover ns mac = do
 
     -- Sends a message and waits for a response (indicated by a value appearing the TMVar)
     -- until timeout. Retries a given number of times doubling the backoff each time.
-    waitResult :: Int -> Dhcp4Message -> TMVar a -> IO (Maybe a)
+    waitResult :: Int -> Dhcp4Message -> MVar a -> IO (Maybe a)
     waitResult n msg result = go n initialTimeout
       where
         go 0 _to = return Nothing
         go i  to =
           do sendMessage ns msg currentNetwork broadcastIP4 broadcastMac
-             timeout <- registerDelay to
-             -- If there is a result, return Just it.
-             -- If not, and we aren't timed out, retry.
-             -- If we are timed out, return Nothing.
-             mb <- atomically $ orElse (fmap Just (takeTMVar result))
-                                       (do isTimedOut <- readTVar timeout
-                                           unless isTimedOut retry
-                                           return Nothing)
+             mb <- timeout to (takeMVar result)
              -- Exponential backoff on timeout, return result on success.
              case mb of
                Just _  -> return mb
@@ -131,15 +126,15 @@ dhcpIP4Handler ns bytes =
 --  * Write offer to TMV for retrieval.
 handleOffer :: ( HasEthernet stack, HasArp stack, HasIP4 stack, HasUdp stack
                , HasDns stack )
-            => stack -> TMVar Offer -> IP4 -> UdpPort
+            => stack -> MVar Offer -> IP4 -> UdpPort
             -> S.ByteString -> IO ()
-handleOffer ns tmv _src _srcPort bytes =
+handleOffer ns mv _src _srcPort bytes =
   case getDhcp4Message bytes of
     Right msg -> case parseDhcpMessage msg of
 
       Just (Right (OfferMessage offer)) -> do
         removeUdpHandler ns bootpc
-        atomically $ putTMVar tmv offer
+        putMVar mv offer
 
       msg1 -> do
         putStrLn (show msg)

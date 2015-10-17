@@ -145,7 +145,7 @@ executable test
 executable web-server
         main-is:        Main.hs
         hs-source-dirs: web-server
-        ghc-options:    -Wall -threaded -rtsopts -fno-warn-unused-do-bind
+        ghc-options:    -Wall -rtsopts -fno-warn-unused-do-bind
                         -fno-warn-orphans
 
         if os(HaLVM)
@@ -170,7 +170,7 @@ executable web-server
 executable tcp-test
         main-is:        Main.hs
         hs-source-dirs: tcp-test
-        ghc-options:    -Wall -rtsopts -threaded
+        ghc-options:    -Wall -rtsopts
         build-depends:  base       >= 4.0.0.0 && < 5,
                         cereal     >= 0.3.5.2,
                         bytestring >= 0.9.1.0,
@@ -186,7 +186,7 @@ executable tcp-test
 executable udp-test
         main-is:        Main.hs
         hs-source-dirs: udp-test
-        ghc-options:    -Wall -rtsopts -threaded
+        ghc-options:    -Wall -rtsopts
         build-depends:  base       >= 4.0.0.0 && < 5,
                         cereal     >= 0.3.5.2,
                         bytestring >= 0.9.1.0,
@@ -202,7 +202,7 @@ executable udp-test
 executable echo-client
         main-is:        Main.hs
         hs-source-dirs: echo-client
-        ghc-options:    -Wall -rtsopts -threaded
+        ghc-options:    -Wall -rtsopts
         build-depends:  base       >= 4.0.0.0 && < 5,
                         cereal     >= 0.3.5.2,
                         bytestring >= 0.9.1.0,
