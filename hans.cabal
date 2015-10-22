@@ -116,6 +116,14 @@ library
 executable test
         if flag(example)
                 buildable:      True
+                build-depends:  base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                hans
         else
                 buildable:      False
 
@@ -127,14 +135,6 @@ executable test
         other-modules:  WebServer
         ghc-options:    -Wall
         hs-source-dirs: example
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
 
         if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
@@ -148,37 +148,38 @@ executable web-server
         ghc-options:    -Wall -rtsopts -fno-warn-unused-do-bind
                         -fno-warn-orphans
 
-        if os(HaLVM)
-                buildable: False
+        if flag(example) && !os(HaLVM)
+                buildable:      True
+                build-depends:  base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                HTTP       >= 4000.2.17,
+                                blaze-html >= 0.7.0.2,
+                                blaze-markup,
+                                hans
         else
-          if flag(web-server)
-                  build-depends:  base       >= 4.0.0.0 && < 5,
-                                  cereal     >= 0.3.5.2,
-                                  bytestring >= 0.9.1.0,
-                                  containers >= 0.3.0.0,
-                                  monadLib   >= 3.6.0,
-                                  time       >= 1.1.0.0,
-                                  old-locale >= 1.0.0.0,
-                                  HTTP       >= 4000.2.17,
-                                  blaze-html >= 0.7.0.2,
-                                  blaze-markup,
-                                  hans
-
-          else
-                  buildable: False
+                buildable:      False
 
 executable tcp-test
         main-is:        Main.hs
         hs-source-dirs: tcp-test
         ghc-options:    -Wall -rtsopts
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
+        if flag(example)
+                buildable:      True
+                build-depends:  base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                hans
+        else
+                buildable:      False
         if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
                                     HALVMCore     >= 2.0.0 && < 3.0.0
@@ -187,14 +188,18 @@ executable udp-test
         main-is:        Main.hs
         hs-source-dirs: udp-test
         ghc-options:    -Wall -rtsopts
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
+        if flag(example)
+                buildable:      True
+                build-depends:  base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                hans
+        else
+                buildable:      False
         if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
                                     HALVMCore     >= 2.0.0 && < 3.0.0
@@ -203,14 +208,18 @@ executable echo-client
         main-is:        Main.hs
         hs-source-dirs: echo-client
         ghc-options:    -Wall -rtsopts
-        build-depends:  base       >= 4.0.0.0 && < 5,
-                        cereal     >= 0.3.5.2,
-                        bytestring >= 0.9.1.0,
-                        containers >= 0.3.0.0,
-                        monadLib   >= 3.6.0,
-                        time       >= 1.1.0.0,
-                        old-locale >= 1.0.0.0,
-                        hans
+        if flag(example)
+                buildable:      True
+                build-depends:  base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.3.5.2,
+                                bytestring >= 0.9.1.0,
+                                containers >= 0.3.0.0,
+                                monadLib   >= 3.6.0,
+                                time       >= 1.1.0.0,
+                                old-locale >= 1.0.0.0,
+                                hans
+        else
+                buildable:      False
         if os(HaLVM)
                 build-depends:      XenDevice     >= 2.0.0 && < 3.0.0,
                                     HALVMCore     >= 2.0.0 && < 3.0.0
@@ -218,12 +227,13 @@ executable echo-client
 executable tcp-test-client
         main-is:        Main.hs
         hs-source-dirs: tcp-test-client
-        if os(HaLVM)
-                buildable:          False
-        else
+        if flag(example) && !os(HaLVM)
+                buildable:          True
                 build-depends:      base,
                                     bytestring,
                                     network
+        else
+                buildable:          False
 
 
 executable test-suite
