@@ -114,7 +114,7 @@ library
 
 
 executable test
-        if flag(example)
+        if false
                 buildable:      True
                 build-depends:  base       >= 4.0.0.0 && < 5,
                                 cereal     >= 0.3.5.2,

@@ -14,7 +14,7 @@ import Hans.NetworkStack
 import System.Exit (exitFailure)
 import qualified Data.ByteString as S
 
-#ifdef xen_HOST_OS
+#ifdef HaLVM_HOST_OS
 import Communication.IVC (InChannelEx,OutChannelEx,Bin)
 import Hans.Device.Ivc
 import Hans.Device.Xen
@@ -30,7 +30,7 @@ import System.Environment (getArgs)
 output   :: String -> IO ()
 outputBS :: S.ByteString -> IO ()
 
-#ifdef xen_HOST_OS
+#ifdef HaLVM_HOST_OS
 output str = writeDebugConsole (showString str "\n")
 outputBS  = output . map (toEnum . fromEnum) . S.unpack
 
@@ -50,7 +50,7 @@ outputBS = S.putStrLn
 
 
 initEthernetDevice :: NetworkStack -> IO Mac
-#ifdef xen_HOST_OS
+#ifdef HaLVM_HOST_OS
 initEthernetDevice ns = do
   Just nic <- openXenDevice ""
   let mac = read (getNICName nic)
@@ -72,7 +72,7 @@ initEthernetDevice ns = do
 #endif
 
 main :: IO ()
-#ifdef xen_HOST_OS
+#ifdef HaLVM_HOST_OS
 main = halvm_kernel [dNICs] $ \ args -> do
 #else
 main = do
