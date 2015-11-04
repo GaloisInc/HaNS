@@ -15,7 +15,7 @@ import           Control.Concurrent.STM
                      (atomically,newTMVarIO,newEmptyTMVarIO,tryTakeTMVar
                      ,putTMVar,isEmptyTMVar)
 import qualified Control.Exception as X
-import           Control.Monad (forever,unless,when,foldM_)
+import           Control.Monad (forever,when,foldM_)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
@@ -36,7 +36,7 @@ import           System.Posix.Types (Fd(..))
 listDevices :: IO [DeviceName]
 listDevices  = return []
 
-openDevice :: DeviceName -> DeviceConfig -> Queue S.ByteString -> IO Device
+openDevice :: DeviceName -> DeviceConfig -> Queue InputPacket -> IO Device
 openDevice devName devConfig devRecvQueue=
   do fd <- S.unsafeUseAsCString devName c_init_tap_device
      when (fd < 0) (X.throwIO (FailedToOpen devName))
@@ -46,6 +46,8 @@ openDevice devName devConfig devRecvQueue=
      -- threads.
      starting <- newTMVarIO ()
      running  <- newEmptyTMVarIO
+
+     devStats <- newDeviceStats
 
      devSendQueue <- newQueue (dcSendQueueLen devConfig)
 
@@ -59,8 +61,8 @@ openDevice devName devConfig devRecvQueue=
 
               -- We acquired the lock, and the threads haven't been started yet.
               when shouldStart $
-                do recvThread <- forkIO (tapRecvLoop fd devRecvQueue)
-                   sendThread <- forkIO (tapSendLoop fd devSendQueue)
+                do recvThread <- forkIO (tapRecvLoop dev      fd devRecvQueue)
+                   sendThread <- forkIO (tapSendLoop devStats fd devSendQueue)
                    atomically $ do putTMVar starting ()
                                    putTMVar running (recvThread,sendThread)
 
@@ -81,8 +83,8 @@ openDevice devName devConfig devRecvQueue=
 
 
 -- | Send a packet out over the tap device.
-tapSendLoop :: Fd -> Queue L.ByteString -> IO ()
-tapSendLoop fd queue = forever $
+tapSendLoop :: DeviceStats -> Fd -> Queue L.ByteString -> IO ()
+tapSendLoop stats fd queue = forever $
   do bs <- atomically (dequeue queue)
 
      let chunks = L.toChunks bs
@@ -90,8 +92,8 @@ tapSendLoop fd queue = forever $
 
      allocaBytes (fromIntegral ((#size struct iovec) * len)) $ \ iov ->
        do foldM_ writeChunk iov chunks
-          _bytesWritten <- c_writev fd iov (fromIntegral len)
-          return ()
+          bytesWritten <- c_writev fd iov (fromIntegral len)
+          atomically (updateTX stats (fromIntegral bytesWritten == L.length bs))
   where
 
   -- write the chunk address and length into the iovec entry
@@ -103,18 +105,22 @@ tapSendLoop fd queue = forever $
        return (iov `plusPtr` (#size struct iovec))
 
 
-tapRecvLoop :: Fd -> Queue S.ByteString -> IO ()
-tapRecvLoop fd queue = forever $
+-- | Receive a packet from the tap device.
+tapRecvLoop :: Device -> Fd -> Queue InputPacket -> IO ()
+tapRecvLoop dev @ Device { .. } fd queue = forever $
   do threadWaitRead fd
 
-     bytes <- S.createAndTrim 1514 $ \ ptr ->
+     ipBytes <- S.createAndTrim 1514 $ \ ptr ->
        do actual <- c_read fd ptr 1514
           return (fromIntegral actual)
 
-     unless (S.length bytes < 60) $ atomically $
-       do _success <- tryEnqueue queue bytes
-          -- XXX log stats based on success
-          return ()
+     -- make sure that queueing and stat updates take place in separate
+     -- transactions
+     if S.length ipBytes < 60
+        then atomically (updateError devStats)
+        else do let input = InputPacket { ipDevice = dev, .. }
+                success <- atomically (tryEnqueue queue $! input)
+                atomically (updateRX devStats success)
 
 
 tapClose :: Fd -> IO ()

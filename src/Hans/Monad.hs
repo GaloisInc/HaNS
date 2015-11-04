@@ -4,9 +4,14 @@ module Hans.Monad (
   , setEscape, escape, dropPacket
   , stm
   , io
+  , decode, decode'
   ) where
 
-import Control.Monad.STM (STM,atomically)
+import Hans.Device (DeviceStats(), updateDropped)
+
+import           Control.Monad.STM (STM,atomically)
+import qualified Data.ByteString as S
+import           Data.Serialize.Get (runGet,runGetState,Get)
 
 
 newtype Hans a = Hans { unHans :: IO () -> (a -> IO ()) -> IO () }
@@ -54,8 +59,10 @@ escape  = Hans (\ e _ -> e)
 {-# INLINE escape #-}
 
 -- | Synonym for 'escape'.
-dropPacket :: Hans a
-dropPacket  = escape
+dropPacket :: DeviceStats -> Hans a
+dropPacket stats =
+  do stm (updateDropped stats)
+     escape
 {-# INLINE dropPacket #-}
 
 -- | Lift an 'STM' operation into 'Hans'.
@@ -67,3 +74,23 @@ stm m = io (atomically m)
 io :: IO a -> Hans a
 io m = Hans (\ _ k -> m >>= k )
 {-# INLINE io #-}
+
+-- | Run a Get action in the context of the Hans monad, 
+decode :: DeviceStats -> Get a -> S.ByteString -> Hans a
+decode stats m bytes =
+  case runGet m bytes of
+    Right a -> return a
+
+    -- XXX what should we do with the error text?
+    Left _err -> dropPacket stats
+{-# INLINE decode #-}
+
+-- | Run a Get action in the context of the Hans monad, returning any unconsumed
+-- input.
+decode' :: DeviceStats -> Get a -> S.ByteString -> Hans (a,S.ByteString)
+decode' stats m bytes =
+  case runGetState m bytes 0 of
+    Right a -> return a
+
+    -- XXX what should we do with the error text?
+    Left _err -> dropPacket stats

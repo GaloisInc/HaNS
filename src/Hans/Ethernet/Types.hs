@@ -1,36 +1,67 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Hans.Ethernet.Types (
+    -- * Ethernet Headers
     EthernetHeader(..), getEthernetHeader, putEthernetHeader,
-    Mac(..), getMac, putMac
+
+    -- ** MAC addresses
+    Mac(), getMac, putMac,
+    pattern BroadcastMac,
+
+    -- ** EtherType Patterns
+    pattern ETYPE_IPV4,
+    pattern ETYPE_ARP,
+    pattern ETYPE_IPV6
+
   ) where
 
-import           Data.Serialize.Get (Get,getWord16be,getBytes)
-import           Data.Serialize.Put (Putter,putWord16be,putByteString)
-import qualified Data.ByteString as S
-import           Data.Word (Word16)
+import           Data.Serialize
+                     (Get,getWord8,getWord16be,Putter,putWord16be,putWord8)
+import           Data.Word (Word8,Word16)
 
 
 -- Mac Addresses ---------------------------------------------------------------
 
-newtype Mac = Mac { macBytes :: S.ByteString
-                  } deriving (Eq,Ord,Show)
+data Mac = Mac {-# UNPACK #-} !Word8
+               {-# UNPACK #-} !Word8
+               {-# UNPACK #-} !Word8
+               {-# UNPACK #-} !Word8
+               {-# UNPACK #-} !Word8
+               {-# UNPACK #-} !Word8
+               deriving (Eq,Ord,Show)
 
 getMac :: Get Mac
 getMac  =
-  do macBytes <- getBytes 6
-     return Mac { .. }
+  do a <- getWord8
+     b <- getWord8
+     c <- getWord8
+     d <- getWord8
+     e <- getWord8
+     f <- getWord8
+     return $! Mac a b c d e f
 
 putMac :: Putter Mac
-putMac Mac { .. } = putByteString macBytes
+putMac (Mac a b c d e f) =
+  do putWord8 a
+     putWord8 b
+     putWord8 c
+     putWord8 d
+     putWord8 e
+     putWord8 f
+
+-- | The broadcast MAC address.
+pattern BroadcastMac = Mac 0xff 0xff 0xff 0xff 0xff 0xff
 
 
--- Ethernet Frames -------------------------------------------------------------
+-- Ethernet Headers ------------------------------------------------------------
+
+type EtherType = Word16
 
 data EthernetHeader = EthernetHeader
-  { eDest    :: !Mac
-  , eSource  :: !Mac
-  , eType    :: {-# UNPACK #-} !Word16
+  { eDest    :: {-# UNPACK #-} !Mac
+  , eSource  :: {-# UNPACK #-} !Mac
+  , eType    :: {-# UNPACK #-} !EtherType
   } deriving (Eq,Show)
 
 getEthernetHeader :: Get EthernetHeader
@@ -45,3 +76,10 @@ putEthernetHeader EthernetHeader { .. } =
   do putMac      eDest
      putMac      eSource
      putWord16be eType
+
+
+-- Common Ether-Types ----------------------------------------------------------
+
+pattern ETYPE_IPV4 = 0x0800
+pattern ETYPE_ARP  = 0x0806
+pattern ETYPE_IPV6 = 0x86DD

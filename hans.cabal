@@ -16,6 +16,10 @@ source-repository head
         type:           git
         location:       git://github.com/GaloisInc/HaNS.git
 
+flag examples
+        description:    Build example programs
+        default:        False
+
 library
         if os(HALVM)
                 cpp-options:            -DHANS_TARGET_XEN
@@ -30,20 +34,51 @@ library
                 include-dirs:           cbits
                 c-sources:              cbits/tapdevice.c
 
+        -- XXX: Tap devices are supported on windows, someone should add support
+
         default-language:       Haskell2010
 
         ghc-options:            -Wall -threaded
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
+                                cereal     >= 0.5.0.0,
+                                heaps,
                                 bytestring,
-                                stm,
+                                containers,
                                 array,
-                                cereal
+                                stm,
+                                time,
+                                hashable,
+                                array
 
+        -- XXX: which of these should be exposed?
         exposed-modules:        Hans
+                                Hans.Arp
+                                Hans.Arp.Types
+                                Hans.Config
                                 Hans.Device
+                                Hans.Device.Types
                                 Hans.Ethernet
-        other-modules:          Hans.Device.Types
-                                Hans.Monad
+                                Hans.Ethernet.Types
+                                Hans.HashTable
+                                Hans.IP4
+                                Hans.IP4.Types
                                 Hans.Input
+                                Hans.Monad
+                                Hans.Queue
+                                Hans.Time
                                 Hans.Types
+
+executable echo-server
+        if flag(examples)
+                build-depends:  base >= 4.0.0.0 && < 5,
+                                bytestring,
+                                hans
+
+        else
+                buildable:      False
+
+        default-language:       Haskell2010
+        main-is:                Main.hs
+        hs-source-dirs:         examples/echo-server
+        ghc-options:            -Wall -threaded

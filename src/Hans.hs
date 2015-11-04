@@ -2,33 +2,36 @@
 
 module Hans (
     -- * Network Stack
-    NetworkStack(), NetworkStackConfig(..), defaultNetworkStackConfig,
+    NetworkStack(), Config(..), defaultConfig,
     newNetworkStack,
+    processPackets,
 
     -- * Devices
     DeviceName,
     Device(), DeviceConfig(..), defaultDeviceConfig,
     addDevice,
     listDevices,
-    closeDevice
+    closeDevice,
+    startDevice
 
   ) where
 
+import Hans.Arp
+import Hans.Config
 import Hans.Device
 import Hans.Input
 import Hans.Queue
 import Hans.Types
 
-import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (atomically,newTVarIO,modifyTVar')
 
 
 -- | Create a network stack with no devices registered.
-newNetworkStack :: NetworkStackConfig -> IO NetworkStack
-newNetworkStack NetworkStackConfig { .. } =
-  do nsInput        <- newQueue nscInputQueueSize
-     nsDevices      <- newTVarIO []
-     nsPacketThread <- forkIO (processPackets nsInput)
+newNetworkStack :: Config -> IO NetworkStack
+newNetworkStack cfg =
+  do nsInput    <- newQueue (cfgInputQueueSize cfg)
+     nsDevices  <- newTVarIO []
+     nsArpState <- newArpState cfg
      return NetworkStack { .. }
 
 -- | Initialize and register a device with the network stack.
