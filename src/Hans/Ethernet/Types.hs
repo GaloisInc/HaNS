@@ -4,9 +4,10 @@
 module Hans.Ethernet.Types (
     -- * Ethernet Headers
     EthernetHeader(..), getEthernetHeader, putEthernetHeader,
+    EtherType,
 
     -- ** MAC addresses
-    Mac(), getMac, putMac,
+    Mac(..), getMac, putMac,
     pattern BroadcastMac,
 
     -- ** EtherType Patterns

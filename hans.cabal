@@ -46,10 +46,10 @@ library
                                 bytestring,
                                 containers,
                                 array,
-                                stm,
                                 time,
                                 hashable,
-                                array
+                                array,
+                                BoundedChan
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
@@ -65,7 +65,6 @@ library
                                 Hans.IP4.Types
                                 Hans.Input
                                 Hans.Monad
-                                Hans.Queue
                                 Hans.Time
                                 Hans.Types
 

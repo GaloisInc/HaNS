@@ -2,14 +2,12 @@ module Hans.Monad (
     Hans()
   , runHans
   , setEscape, escape, dropPacket
-  , stm
   , io
   , decode, decode'
   ) where
 
 import Hans.Device (DeviceStats(), updateDropped)
 
-import           Control.Monad.STM (STM,atomically)
 import qualified Data.ByteString as S
 import           Data.Serialize.Get (runGet,runGetState,Get)
 
@@ -61,14 +59,9 @@ escape  = Hans (\ e _ -> e)
 -- | Synonym for 'escape'.
 dropPacket :: DeviceStats -> Hans a
 dropPacket stats =
-  do stm (updateDropped stats)
+  do io (updateDropped stats)
      escape
 {-# INLINE dropPacket #-}
-
--- | Lift an 'STM' operation into 'Hans'.
-stm :: STM a -> Hans a
-stm m = io (atomically m)
-{-# INLINE stm #-}
 
 -- | Lift an 'IO' operation into 'Hans'.
 io :: IO a -> Hans a

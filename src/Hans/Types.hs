@@ -2,16 +2,20 @@ module Hans.Types where
 
 import Hans.Arp
 import Hans.Config
-import Hans.Queue
 import Hans.Device
 
-import Control.Concurrent.STM (TVar)
+import Control.Concurrent.BoundedChan (BoundedChan)
+import Data.IORef (IORef)
 
 
-data NetworkStack = NetworkStack { nsInput :: !(Queue InputPacket)
+data NetworkStack = NetworkStack { nsConfig :: !Config
+                                   -- ^ The configuration for this instance of
+                                   -- the network stack.
+
+                                 , nsInput :: !(BoundedChan InputPacket)
                                    -- ^ The input packet queue
 
-                                 , nsDevices :: {-# UNPACK #-} !(TVar [Device])
+                                 , nsDevices :: {-# UNPACK #-} !(IORef [Device])
                                    -- ^ All registered devices
 
                                  , nsArpState :: !ArpState

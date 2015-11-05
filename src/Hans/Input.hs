@@ -6,9 +6,10 @@ module Hans.Input where
 import Hans.Arp
 import Hans.Device (InputPacket(..))
 import Hans.Ethernet
-import Hans.Monad (runHans,dropPacket,stm)
-import Hans.Queue (dequeue)
+import Hans.Monad (runHans,dropPacket,io)
 import Hans.Types (NetworkStack(..))
+
+import Control.Concurrent.BoundedChan (readChan)
 
 
 -- Incoming Packets ------------------------------------------------------------
@@ -16,7 +17,7 @@ import Hans.Types (NetworkStack(..))
 -- | Handle incoming packets.
 processPackets :: NetworkStack -> IO ()
 processPackets NetworkStack { .. } = runHans $
-  do input               <- stm (dequeue nsInput)
+  do input               <- io (readChan nsInput)
      (stats,hdr,payload) <- decodeEthernet input
 
      case eType hdr of
@@ -25,7 +26,7 @@ processPackets NetworkStack { .. } = runHans $
          dropPacket stats
 
        ETYPE_ARP ->
-         processArp nsArpState (ipDevice input) hdr payload
+         processArp nsConfig nsArpState (ipDevice input) payload
 
        ETYPE_IPV6 ->
          dropPacket stats

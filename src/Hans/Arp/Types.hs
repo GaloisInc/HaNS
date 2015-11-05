@@ -4,18 +4,19 @@
 module Hans.Arp.Types where
 
 import           Hans.Config (Config(..))
+import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet.Types (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import           Hans.IP4.Types (IP4,getIP4,putIP4)
 import qualified Hans.HashTable as HT
 import           Hans.Time
 
-import           Control.Monad (guard,unless)
+import           Control.Monad (guard)
 import qualified Data.Foldable as F
 import           Data.IORef (IORef,newIORef,atomicModifyIORef')
-import qualified Data.Map.Strict as Map
 import           Data.Serialize.Get (Get,getWord8,getWord16be,label)
 import           Data.Serialize.Put (Putter,putWord16be,putWord8)
-import           Data.Time.Clock (UTCTime)
+import           Data.Time.Clock
+                     (NominalDiffTime,getCurrentTime,addUTCTime)
 import           Data.Word (Word16)
 
 
@@ -32,10 +33,10 @@ data ArpState = ArpState { arpTable :: !ArpTable
 newArpState :: Config -> IO ArpState
 newArpState cfg =
   do arpTable <- newArpTable cfg
-     arpAddrs <- newIORef Map.empty
+     arpAddrs <- newIORef []
      return ArpState { .. }
 
-type ArpAddrs = IORef (Map.Map IP4 Mac)
+type ArpAddrs = IORef [(IP4,Device)]
 
 -- | The Arp table consists of a map of IP4 to Mac, as well as a heap that
 -- orders the IP4 addresses according to when their corresponding entries should
@@ -53,16 +54,39 @@ newArpTable Config { .. } =
      atExpire <- newIORef emptyHeap
      return ArpTable { .. }
 
--- | Expire entries in the 'ArpTable'.
-expireEntries :: UTCTime -> ArpTable -> IO ()
-expireEntries now ArpTable { .. } =
-  do expired <- atomicModifyIORef' atExpire $ \ heap ->
-                    let (expired,rest) = partitionInvalid now heap
-                     in (rest,expired)
+-- | Expire entries in the 'ArpTable', and return the delay until the next entry
+-- expires.
+expireEntries :: ArpTable -> IO (Maybe NominalDiffTime)
+expireEntries ArpTable { .. } =
+  do now <- getCurrentTime
 
-     unless (nullHeap expired)
-       $ F.forM_ expired
-       $ \ Entry { .. } -> HT.delete payload atMacs
+     -- partition the expiration heap by the current time
+     (valid,expired) <- atomicModifyIORef' atExpire $ \ heap ->
+                          let heaps = partitionExpired now heap
+                           in (fst heaps, heaps)
+
+     -- remove expired entries from the hash table
+     F.mapM_ (\ Entry { .. } -> HT.delete payload atMacs) expired
+
+     return $! expirationDelay now valid
+
+-- | Lookup an entry in the Arp table.
+lookupEntry :: IP4 -> ArpTable -> IO (Maybe Mac)
+lookupEntry spa ArpTable { .. } = HT.lookup spa atMacs
+
+-- | Insert an entry into the Arp table.
+addEntry :: IP4 -> Mac -> NominalDiffTime -> ArpTable -> IO ()
+addEntry spa sha lifetime ArpTable { .. } =
+  do now <- getCurrentTime
+     let end = addUTCTime lifetime now
+
+     HT.insert spa sha atMacs
+
+     -- XXX given that entries are expired in a separate thread, is the deadline
+     -- actually necessary?
+     _deadline <- atomicModifyIORef' atExpire (expireAt end spa)
+
+     return ()
 
 
 -- Arp Packets -----------------------------------------------------------------
@@ -124,7 +148,10 @@ pattern ArpReply   = 0x2
 
 -- | Parse an Arp operation.
 getArpOper :: Get ArpOper
-getArpOper  = getWord16be
+getArpOper  =
+  do w <- getWord16be
+     guard (w == ArpRequest || w == ArpReply)
+     return w
 {-# INLINE getArpOper #-}
 
 -- | Render an Arp operation.

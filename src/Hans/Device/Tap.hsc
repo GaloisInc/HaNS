@@ -7,67 +7,62 @@ module Hans.Device.Tap (listDevices,openDevice) where
 #include <sys/uio.h>
 #include <unistd.h>
 
+import           Hans.Ethernet.Types (Mac(..))
 import           Hans.Device.Types
-import           Hans.Queue (Queue,newQueue,tryEnqueue,dequeue)
 
-import           Control.Concurrent (threadWaitRead,forkIO,killThread)
-import           Control.Concurrent.STM
-                     (atomically,newTMVarIO,newEmptyTMVarIO,tryTakeTMVar
-                     ,putTMVar,isEmptyTMVar)
+import           Control.Concurrent
+                     (threadWaitRead,forkIO,killThread,newMVar,withMVar)
+import           Control.Concurrent.BoundedChan
+                     (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
 import           Control.Monad (forever,when,foldM_)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Unsafe as S
-import           Data.Maybe (isJust)
+import           Data.IORef (newIORef,atomicModifyIORef',readIORef,writeIORef)
 import           Data.Word (Word8)
 import           Foreign.C.String (CString)
 import           Foreign.C.Types (CSize(..),CLong(..),CInt(..))
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (allocaBytes)
+import           Foreign.Marshal.Array (allocaArray,peekArray)
 import           Foreign.Ptr (Ptr,plusPtr)
 import           Foreign.Storable (pokeByteOff)
 import           System.Posix.Types (Fd(..))
 
 
 -- | Not sure how this should work yet... Should it only ever show tap device
--- names?
+-- names? Maybe this should return a singleton list of an ephemeral device?
 listDevices :: IO [DeviceName]
 listDevices  = return []
 
-openDevice :: DeviceName -> DeviceConfig -> Queue InputPacket -> IO Device
-openDevice devName devConfig devRecvQueue=
-  do fd <- S.unsafeUseAsCString devName c_init_tap_device
-     when (fd < 0) (X.throwIO (FailedToOpen devName))
+openDevice :: DeviceName -> DeviceConfig -> BoundedChan InputPacket -> IO Device
+openDevice devName devConfig devRecvQueue =
+  do (fd,devMac) <- initTapDevice devName
 
      -- The `starting` lock makes sure that only one set of threads will be
      -- started at once, while the `running` var holds the ids of the running
      -- threads.
-     starting <- newTMVarIO ()
-     running  <- newEmptyTMVarIO
+     lock      <- newMVar ()
+     threadIds <- newIORef Nothing
 
      devStats <- newDeviceStats
 
-     devSendQueue <- newQueue (dcSendQueueLen devConfig)
+     devSendQueue <- newBoundedChan (dcSendQueueLen devConfig)
 
      let dev = Device { .. }
 
-         devStart =
-           do shouldStart <- atomically $
-                do mb         <- tryTakeTMVar starting
-                   notRunning <- isEmptyTMVar running
-                   return (isJust mb && notRunning)
+         devStart = withMVar lock $ \ () ->
+           do mbTids <- readIORef threadIds
 
-              -- We acquired the lock, and the threads haven't been started yet.
-              when shouldStart $
+              when (mbTids == Nothing) $
                 do recvThread <- forkIO (tapRecvLoop dev      fd devRecvQueue)
                    sendThread <- forkIO (tapSendLoop devStats fd devSendQueue)
-                   atomically $ do putTMVar starting ()
-                                   putTMVar running (recvThread,sendThread)
+                   writeIORef threadIds (Just (recvThread,sendThread))
 
-         devStop =
-           do mb <- atomically (tryTakeTMVar running)
+         devStop = withMVar lock $ \ () ->
+           do mb <- atomicModifyIORef' threadIds ( \mb -> (mb, Nothing) )
               case mb of
                 Just (recvThread,sendThread) ->
                   do killThread recvThread
@@ -81,11 +76,25 @@ openDevice devName devConfig devRecvQueue=
 
      return dev
 
+initTapDevice :: DeviceName -> IO (Fd,Mac)
+initTapDevice devName =
+  do (fd,[a,b,c,d,e,f]) <-
+         allocaArray 6 $ \ macPtr ->
+             do fd <- S.unsafeUseAsCString devName $ \ devNamePtr ->
+                          c_init_tap_device devNamePtr macPtr
+
+                mac <- peekArray 6 macPtr
+                return (fd,mac)
+
+     when (fd < 0) (X.throwIO (FailedToOpen devName))
+
+     return (fd, Mac a b c d e f)
+
 
 -- | Send a packet out over the tap device.
-tapSendLoop :: DeviceStats -> Fd -> Queue L.ByteString -> IO ()
+tapSendLoop :: DeviceStats -> Fd -> BoundedChan L.ByteString -> IO ()
 tapSendLoop stats fd queue = forever $
-  do bs <- atomically (dequeue queue)
+  do bs <- readChan queue
 
      let chunks = L.toChunks bs
          len    = length chunks
@@ -93,7 +102,7 @@ tapSendLoop stats fd queue = forever $
      allocaBytes (fromIntegral ((#size struct iovec) * len)) $ \ iov ->
        do foldM_ writeChunk iov chunks
           bytesWritten <- c_writev fd iov (fromIntegral len)
-          atomically (updateTX stats (fromIntegral bytesWritten == L.length bs))
+          updateTX stats (fromIntegral bytesWritten == L.length bs)
   where
 
   -- write the chunk address and length into the iovec entry
@@ -106,7 +115,7 @@ tapSendLoop stats fd queue = forever $
 
 
 -- | Receive a packet from the tap device.
-tapRecvLoop :: Device -> Fd -> Queue InputPacket -> IO ()
+tapRecvLoop :: Device -> Fd -> BoundedChan InputPacket -> IO ()
 tapRecvLoop dev @ Device { .. } fd queue = forever $
   do threadWaitRead fd
 
@@ -117,10 +126,10 @@ tapRecvLoop dev @ Device { .. } fd queue = forever $
      -- make sure that queueing and stat updates take place in separate
      -- transactions
      if S.length ipBytes < 60
-        then atomically (updateError devStats)
+        then updateError devStats
         else do let input = InputPacket { ipDevice = dev, .. }
-                success <- atomically (tryEnqueue queue $! input)
-                atomically (updateRX devStats success)
+                success <- tryWriteChan queue $! input
+                updateRX devStats success
 
 
 tapClose :: Fd -> IO ()
@@ -131,7 +140,7 @@ tapClose fd =
 -- Foreign Interface -----------------------------------------------------------
 
 foreign import ccall unsafe "init_tap_device"
-  c_init_tap_device :: CString -> IO Fd
+  c_init_tap_device :: CString -> Ptr Word8 -> IO Fd
 
 type IOVec = ()
 

@@ -6,12 +6,13 @@
 
 module Hans.Device.Types where
 
-import           Hans.Queue
+import           Hans.Ethernet.Types (Mac)
 
-import           Control.Concurrent.STM (STM,TVar,newTVarIO,modifyTVar')
+import           Control.Concurrent.BoundedChan (BoundedChan)
 import qualified Control.Exception as X
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import           Data.IORef (IORef,newIORef,atomicModifyIORef')
 import           Data.Typeable (Typeable)
 
 
@@ -19,26 +20,31 @@ type DeviceName = S.ByteString
 
 -- | Static configuration data for creating a device.
 data DeviceConfig = DeviceConfig { dcSendQueueLen :: {-# UNPACK #-} !Int
-                                   -- ^ How large the send queue should be
+                                   -- ^ How large the send queue should be.
 
                                  , dcChecksumOffload :: !Bool
                                    -- ^ Whether or not the checksum calculation
-                                   -- has been offloaded to the 
+                                   -- has been offloaded to the device.
+
+                                 , dcMtu :: !Int
                                  }
 
 defaultDeviceConfig :: DeviceConfig
-defaultDeviceConfig  =
-  DeviceConfig { dcSendQueueLen    = 128
-               , dcChecksumOffload = False
-               }
+defaultDeviceConfig  = DeviceConfig { dcSendQueueLen    = 128
+                                    , dcChecksumOffload = False
+                                    , dcMtu             = 1500
+                                    }
 
 data Device = Device { devName :: !DeviceName
                        -- ^ The name of this device
 
+                     , devMac :: !Mac
+                       -- ^ The mac address associated with this device
+
                      , devConfig :: !DeviceConfig
                        -- ^ Static configuration information for this device
 
-                     , devSendQueue :: !(Queue L.ByteString)
+                     , devSendQueue :: !(BoundedChan L.ByteString)
                        -- ^ Outgoing message queue for this device
 
                      , devStart :: !(IO ())
@@ -70,36 +76,41 @@ data InputPacket = InputPacket { ipDevice :: !Device
 
 -- Statistics ------------------------------------------------------------------
 
-data DeviceStats = DeviceStats { statTX      :: !(TVar Int)
-                               , statRX      :: !(TVar Int)
-                               , statDropped :: !(TVar Int)
-                               , statError   :: !(TVar Int)
+type Stat = IORef Int
+
+incrementStat :: Stat -> IO ()
+incrementStat ref = atomicModifyIORef' ref (\ i -> (i + 1, ()))
+
+data DeviceStats = DeviceStats { statTX      :: !Stat
+                               , statRX      :: !Stat
+                               , statDropped :: !Stat
+                               , statError   :: !Stat
                                }
 
 newDeviceStats :: IO DeviceStats
 newDeviceStats  =
-  do statTX      <- newTVarIO 0
-     statRX      <- newTVarIO 0
-     statDropped <- newTVarIO 0
-     statError   <- newTVarIO 0
+  do statTX      <- newIORef 0
+     statRX      <- newIORef 0
+     statDropped <- newIORef 0
+     statError   <- newIORef 0
      return DeviceStats { .. }
 
 -- | Add one to the count of dropped packets for this device.
-updateDropped :: DeviceStats -> STM ()
-updateDropped DeviceStats { .. } = modifyTVar' statDropped (+ 1)
+updateDropped :: DeviceStats -> IO ()
+updateDropped DeviceStats { .. } = incrementStat statDropped 
 
 -- | Add one to the error count for this device.
-updateError :: DeviceStats -> STM ()
-updateError DeviceStats { .. } = modifyTVar' statError (+ 1)
+updateError :: DeviceStats -> IO ()
+updateError DeviceStats { .. } = incrementStat statError 
 
 -- | Update information about packets received.
-updateRX :: DeviceStats -> Bool -> STM ()
+updateRX :: DeviceStats -> Bool -> IO ()
 updateRX stats success
-  | success   = modifyTVar' (statTX stats) (+ 1)
+  | success   = incrementStat (statTX stats)
   | otherwise = updateError stats
 
 -- | Update information about packets sent.
-updateTX :: DeviceStats -> Bool -> STM ()
+updateTX :: DeviceStats -> Bool -> IO ()
 updateTX stats success
-  | success   = modifyTVar' (statTX stats) (+ 1)
+  | success   = incrementStat (statTX stats)
   | otherwise = updateError stats
