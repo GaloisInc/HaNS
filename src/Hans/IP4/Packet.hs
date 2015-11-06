@@ -2,45 +2,13 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 
-module Hans.IP4.Types (
-    -- * IP4 State
-    IP4State(..), newIP4State,
-
-    -- * IP4 Packets
-    noMoreFragments,
-    moreFragments,
-    addOffset,
-    setIdent,
-    ip4PacketSize,
-    ip4HeaderSize,
-    splitPacket,
-    fragmentPacket,
-
-    -- ** IP4 Pseudo Header
-    mkIP4PseudoHeader,
-
-    -- ** IP4 Headers
-    IP4Header(..), emptyIP4Header,
-    putIP4Header,
-    renderIP4Packet,
-    getIP4Packet,
-
-    IP4Ident,
-
-    IP4Protocol,
-    pattern IP4_PROT_ICMP,
-    pattern IP4_PROT_TCP,
-    pattern IP4_PROT_UDP,
-
-    -- ** IP4 addresses
-    IP4(), putIP4, getIP4,
-    packIP4, unpackIP4
-  ) where
+module Hans.IP4.Packet where
 
 import Hans.Checksum (computeChecksumLazy)
+import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Serialize (runPutPacket)
 
-import           Control.Monad (unless)
+import           Control.Monad (unless,guard)
 import           Data.Bits ((.|.),(.&.),testBit,shiftL,shiftR,bit,setBit)
 import qualified Data.ByteString.Short as Sh
 import qualified Data.ByteString.Lazy as L
@@ -52,14 +20,6 @@ import           Data.Serialize
                     ,Putter,Put,putWord8,putWord16be,putWord32be
                     ,putLazyByteString,putShortByteString)
 import           Data.Word (Word8,Word16,Word32)
-
-
--- IP4 State -------------------------------------------------------------------
-
-data IP4State = IP4State
-
-newIP4State :: IO IP4State
-newIP4State  = return IP4State
 
 
 -- IP4 Addresses ---------------------------------------------------------------
@@ -355,3 +315,74 @@ putIP4Option IP4Option { .. } =
        1 -> return ()
        _ -> do putWord8 (fromIntegral (Sh.length ip4OptionData))
                putShortByteString ip4OptionData
+
+
+-- Arp Packets -----------------------------------------------------------------
+
+-- | Arp packets, specialized to IP4 and Mac addresses.
+data ArpPacket = ArpPacket { arpOper   :: {-# UNPACK #-} !ArpOper
+                           , arpSHA    :: !Mac
+                           , arpSPA    :: !IP4
+                           , arpTHA    :: !Mac
+                           , arpTPA    :: !IP4
+                           } deriving (Show)
+
+-- | Parse an Arp packet, given a way to parse hardware and protocol addresses.
+getArpPacket :: Get ArpPacket
+getArpPacket  = label "ArpPacket" $
+  do hwtype <- getWord16be
+     ptype  <- getWord16be
+     hwlen  <- getWord8
+     plen   <- getWord8
+
+     -- make sure that this packet is specialized to IP4/Ethernet
+     guard $ hwtype == 0x1        && hwlen == 6
+          && ptype  == ETYPE_IPV4 && plen  == 4
+
+     arpOper   <- getArpOper
+
+     arpSHA    <- getMac
+     arpSPA    <- getIP4
+
+     arpTHA    <- getMac
+     arpTPA    <- getIP4
+
+     return ArpPacket { .. }
+
+-- | Render an Arp packet, given a way to render hardware and protocol
+-- addresses.
+putArpPacket :: Putter ArpPacket
+putArpPacket ArpPacket { .. } =
+  do putWord16be   0x1
+     putWord16be   ETYPE_IPV4
+     putWord8      6
+     putWord8      4
+
+     putArpOper    arpOper
+
+     putMac        arpSHA
+     putIP4        arpSPA
+
+     putMac        arpTHA
+     putIP4        arpTPA
+
+
+-- Arp Opcodes -----------------------------------------------------------------
+
+type ArpOper = Word16
+
+pattern ArpRequest = 0x1
+pattern ArpReply   = 0x2
+
+-- | Parse an Arp operation.
+getArpOper :: Get ArpOper
+getArpOper  =
+  do w <- getWord16be
+     guard (w == ArpRequest || w == ArpReply)
+     return w
+{-# INLINE getArpOper #-}
+
+-- | Render an Arp operation.
+putArpOper :: Putter ArpOper
+putArpOper  = putWord16be
+{-# INLINE putArpOper #-}

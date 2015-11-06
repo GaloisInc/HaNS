@@ -1,9 +1,8 @@
 module Hans.Types where
 
-import Hans.Arp (ArpState)
 import Hans.Config (Config)
 import Hans.Device (Device,InputPacket)
-import Hans.IP4 (IP4State)
+import Hans.IP4.State (IP4State)
 
 import Control.Concurrent.BoundedChan (BoundedChan)
 import Data.IORef (IORef)
@@ -18,9 +17,6 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
 
                                  , nsDevices :: {-# UNPACK #-} !(IORef [Device])
                                    -- ^ All registered devices
-
-                                 , nsArpState :: !ArpState
-                                   -- ^ State for Arp processing
 
                                  , nsIP4State :: !IP4State
                                    -- ^ State for IP4 processing

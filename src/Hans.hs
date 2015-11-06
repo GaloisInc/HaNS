@@ -16,10 +16,9 @@ module Hans (
 
   ) where
 
-import Hans.Arp (newArpState)
 import Hans.Config
 import Hans.Device
-import Hans.IP4.Types (newIP4State)
+import Hans.IP4.State (newIP4State)
 import Hans.Input
 import Hans.Types
 
@@ -32,8 +31,7 @@ newNetworkStack :: Config -> IO NetworkStack
 newNetworkStack nsConfig =
   do nsInput    <- newBoundedChan (cfgInputQueueSize nsConfig)
      nsDevices  <- newIORef []
-     nsArpState <- newArpState nsConfig
-     nsIP4State <- newIP4State
+     nsIP4State <- newIP4State nsConfig
      return NetworkStack { .. }
 
 -- | Initialize and register a device with the network stack.

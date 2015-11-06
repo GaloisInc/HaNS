@@ -53,8 +53,6 @@ library
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
-                                Hans.Arp
-                                Hans.Arp.Types
                                 Hans.Checksum
                                 Hans.Config
                                 Hans.Device
@@ -62,8 +60,10 @@ library
                                 Hans.Ethernet
                                 Hans.Ethernet.Types
                                 Hans.HashTable
-                                Hans.IP4
-                                Hans.IP4.Types
+                                Hans.IP4.ArpTable
+                                Hans.IP4.Input
+                                Hans.IP4.Packet
+                                Hans.IP4.State
                                 Hans.Input
                                 Hans.Monad
                                 Hans.Serialize
