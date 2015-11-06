@@ -8,12 +8,12 @@ module Hans.Ethernet (
 import Hans.Device.Types
 import Hans.Ethernet.Types as Exports
 import Hans.Monad (Hans,decode',io,escape)
+import Hans.Serialize (runPutPacket)
 
 import           Control.Concurrent.BoundedChan (tryWriteChan)
 import           Control.Monad (when,unless)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.Serialize (runPut)
 
 
 -- | Decode an ethernet frame, or fail trying.
@@ -27,11 +27,8 @@ decodeEthernet InputPacket { .. } =
 -- | Send a message out via a device.
 sendEthernet :: Device -> Mac -> EtherType -> L.ByteString -> Hans ()
 sendEthernet Device { .. } eDest eType payload =
-  do let header = runPut
-                $ putEthernetHeader
-                $ EthernetHeader { eSource = devMac, .. }
-
-         packet = L.fromStrict header `L.append` payload
+  do let packet = runPutPacket 14 100 payload
+                $ putEthernetHeader EthernetHeader { eSource = devMac, .. }
 
      -- if the packet is too big for the device, throw it away
      when (fromIntegral (L.length packet) > dcMtu devConfig) $

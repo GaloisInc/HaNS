@@ -10,7 +10,8 @@ import           Hans.IP4.Types (IP4,getIP4,putIP4)
 import qualified Hans.HashTable as HT
 import           Hans.Time
 
-import           Control.Monad (guard)
+import           Control.Concurrent (ThreadId,forkIO,threadDelay)
+import           Control.Monad (guard,forever)
 import qualified Data.Foldable as F
 import           Data.IORef (IORef,newIORef,atomicModifyIORef')
 import           Data.Serialize.Get (Get,getWord8,getWord16be,label)
@@ -28,12 +29,16 @@ data ArpState = ArpState { arpTable :: !ArpTable
                          , arpAddrs :: !ArpAddrs
                            -- ^ Addresses held by this network stack
 
+                         , arpPurgeThread :: !ThreadId
+                           -- ^ The 'ThreadID' of the thread that periodically
+                           -- purges the Arp table.
                          }
 
 newArpState :: Config -> IO ArpState
 newArpState cfg =
-  do arpTable <- newArpTable cfg
-     arpAddrs <- newIORef []
+  do arpTable       <- newArpTable cfg
+     arpAddrs       <- newIORef []
+     arpPurgeThread <- forkIO (purgeArpTable cfg arpTable)
      return ArpState { .. }
 
 type ArpAddrs = IORef [(IP4,Device)]
@@ -53,6 +58,21 @@ newArpTable Config { .. } =
   do atMacs   <- HT.newHashTable cfgArpTableSize
      atExpire <- newIORef emptyHeap
      return ArpTable { .. }
+
+-- | Loops forever, delaying until the next arp table entry needs to be purged.
+-- If no entries exist, it waits for the maximum entry lifetime before checking
+-- again.
+purgeArpTable :: Config -> ArpTable -> IO ()
+purgeArpTable Config { .. } table = forever $
+  do mbDelay <- expireEntries table
+
+     -- delay until the top of the heap expires, or the default entry lifetime
+     -- if the heap is empty
+     threadDelay (maybe defaultDelay toUSeconds mbDelay)
+
+  where
+
+  defaultDelay = toUSeconds cfgArpTableLifetime
 
 -- | Expire entries in the 'ArpTable', and return the delay until the next entry
 -- expires.

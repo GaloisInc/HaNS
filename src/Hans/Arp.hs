@@ -12,31 +12,13 @@ import Hans.Device (Device(..))
 import Hans.Ethernet
 import Hans.IP4 (IP4)
 import Hans.Monad (Hans,decode,io,escape)
-import Hans.Time (toUSeconds)
+import Hans.Serialize (runPutPacket)
 
-import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever,unless,when)
+import           Control.Monad (unless,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 import           Data.List (find)
-import           Data.Serialize (runPut)
-
-
--- | Loops forever, delaying until the next arp table entry needs to be purged.
--- If no entries exist, it waits for the maximum entry lifetime before checking
--- again.
-purgeArpTable :: Config -> ArpState -> IO ()
-purgeArpTable Config { .. } ArpState { .. } = forever $
-  do mbDelay <- expireEntries arpTable
-
-     -- delay until the top of the heap expires, or the default entry lifetime
-     -- if the heap is empty
-     threadDelay (maybe defaultDelay toUSeconds mbDelay)
-
-  where
-
-  defaultDelay = toUSeconds cfgArpTableLifetime
 
 
 -- | Handle incoming Arp packets.
@@ -54,13 +36,12 @@ processArp cfg arp dev payload =
      unless merge (io (addEntry arpSPA arpSHA (cfgArpTableLifetime cfg) (arpTable arp)))
 
      -- respond if the packet was a who-has request for our mac
-     when (arpOper == ArpRequest) $ sendEthernet dev' arpSHA ETYPE_ARP
-                                  $ L.fromStrict
-                                  $ runPut
-                                  $ putArpPacket
-                                  $ ArpPacket { arpSHA  = lha,    arpSPA = arpTPA
-                                              , arpTHA  = arpSHA, arpTPA = arpSPA
-                                              , arpOper = ArpReply }
+     when (arpOper == ArpRequest)
+       $ sendEthernet dev' arpSHA ETYPE_ARP
+       $ runPutPacket 28 100 L.empty
+       $ putArpPacket ArpPacket { arpSHA  = lha,    arpSPA = arpTPA
+                                , arpTHA  = arpSHA, arpTPA = arpSPA
+                                , arpOper = ArpReply }
 
 
 -- | Update an entry in the arp table, if it exists already.

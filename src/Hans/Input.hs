@@ -6,6 +6,7 @@ module Hans.Input where
 import Hans.Arp
 import Hans.Device (InputPacket(..))
 import Hans.Ethernet
+import Hans.IP4 (processIP4)
 import Hans.Monad (runHans,dropPacket,io)
 import Hans.Types (NetworkStack(..))
 
@@ -23,7 +24,7 @@ processPackets NetworkStack { .. } = runHans $
      case eType hdr of
 
        ETYPE_IPV4 ->
-         dropPacket stats
+         processIP4 nsIP4State payload
 
        ETYPE_ARP ->
          processArp nsConfig nsArpState (ipDevice input) payload
