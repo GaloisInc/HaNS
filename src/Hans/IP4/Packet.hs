@@ -60,7 +60,7 @@ unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
 -- |  zero  |protocol|     length      |
 -- +--------+--------+--------+--------+
 mkIP4PseudoHeader :: IP4 -> IP4 -> IP4Protocol -> Int -> L.ByteString
-mkIP4PseudoHeader src dst prot len = runPutPacket 3 10 L.empty $ do
+mkIP4PseudoHeader src dst prot len = runPutPacket 12 10 L.empty $ do
   putIP4 src
   putIP4 dst
   putWord8 0 >> putWord8 prot >> putWord16be (fromIntegral len)
