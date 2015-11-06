@@ -24,7 +24,7 @@ processPackets NetworkStack { .. } = runHans $
      case eType hdr of
 
        ETYPE_IPV4 ->
-         processIP4 nsIP4State payload
+         processIP4 nsArpState nsIP4State (ipDevice input) payload
 
        ETYPE_ARP ->
          processArp nsConfig nsArpState (ipDevice input) payload

@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Hans.IP4.Types (
     -- * IP4 State
@@ -23,6 +24,13 @@ module Hans.IP4.Types (
     putIP4Header,
     renderIP4Packet,
     getIP4Packet,
+
+    IP4Ident,
+
+    IP4Protocol,
+    pattern IP4_PROT_ICMP,
+    pattern IP4_PROT_TCP,
+    pattern IP4_PROT_UDP,
 
     -- ** IP4 addresses
     IP4(), putIP4, getIP4,
@@ -103,6 +111,11 @@ mkIP4PseudoHeader src dst prot len = runPutPacket 3 10 L.empty $ do
 type IP4Ident = Word16
 
 type IP4Protocol = Word8
+
+pattern IP4_PROT_ICMP = 0x1
+pattern IP4_PROT_TCP  = 0x6
+pattern IP4_PROT_UDP  = 0x11
+
 
 data IP4Header = IP4Header
   { ip4TypeOfService  :: {-# UNPACK #-} !Word8
@@ -206,7 +219,7 @@ getIP4Packet  = label "IP4 Header" $ do
           payloadLen         <- getWord16be
           ip4Ident           <- getWord16be
 
-          s1                 <- getWord16be
+          s1 <- getWord16be
           let flags             = s1 `shiftR` 13
               ip4DontFragment   = flags `testBit` 1
               ip4MoreFragments  = flags `testBit` 0
@@ -223,7 +236,7 @@ getIP4Packet  = label "IP4 Header" $ do
                                   $ getIP4Options optlen
 
           let hdr = IP4Header { .. }
-          hdr `seq` return (hdr, fromIntegral ihl, fromIntegral payloadLen)
+          hdr `seq` return (hdr, ihl, fromIntegral payloadLen)
 
 putIP4Header :: IP4Header -> Int -> Put
 putIP4Header IP4Header { .. } pktlen = do
