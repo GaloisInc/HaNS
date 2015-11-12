@@ -16,7 +16,6 @@ import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
 import           Control.Monad (forever,when,foldM_)
-import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Unsafe as S
@@ -123,13 +122,12 @@ tapRecvLoop dev @ Device { .. } fd queue = forever $
        do actual <- c_read fd ptr 1514
           return (fromIntegral actual)
 
-     -- make sure that queueing and stat updates take place in separate
-     -- transactions
-     if S.length ipBytes < 60
-        then updateError devStats
-        else do let input = InputPacket { ipDevice = dev, .. }
-                success <- tryWriteChan queue $! input
-                updateRX devStats success
+     -- tap devices don't appear to pad received packets out to the minimum size
+     -- of 60 bytes, so just don't do that check here.
+
+     let input = InputPacket { ipDevice = dev, .. }
+     success <- tryWriteChan queue $! input
+     updateRX devStats success
 
 
 tapClose :: Fd -> IO ()
