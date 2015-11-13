@@ -2,12 +2,13 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 module Hans.IP4.Output (
-    sendIP4,
+    sendIP4, queueIP4,
     prepareIP4,
     primSendIP4,
+    responder,
   ) where
 
-import Hans.Device (Device(..),DeviceConfig(..))
+import Hans.Device (Device(..),DeviceConfig(..),DeviceStats(..),updateError)
 import Hans.Ethernet
            ( Mac,sendEthernet,pattern ETYPE_IPV4, pattern ETYPE_ARP
            , pattern BroadcastMac)
@@ -21,7 +22,7 @@ import Hans.Monad
 
 import           Control.Concurrent (takeMVar,forkIO,ThreadId,threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
-import           Control.Monad (when,forever)
+import           Control.Monad (when,forever,unless)
 import qualified Data.ByteString.Lazy as L
 
 
@@ -37,6 +38,14 @@ responder ip4 = forever $
 
        Finish dev mac frames ->
          mapM_ (sendEthernet dev mac ETYPE_IPV4) frames
+
+
+-- | Queue a message on the responder queue instead of attempting to send it
+-- directly.
+queueIP4 :: IP4State -> DeviceStats -> IP4 -> IP4Protocol -> L.ByteString -> IO ()
+queueIP4 ip4 stats dst prot payload =
+  do written <- BC.tryWriteChan (ip4ResponderQueue ip4) (Send dst prot payload)
+     unless written (updateError stats)
 
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
@@ -65,7 +74,7 @@ prepareIP4 ip4 dev src dst prot payload =
 
      let DeviceConfig { .. } = devConfig dev
 
-     return $ [ renderIP4Packet dcChecksumOffload h p
+     return $ [ renderIP4Packet (not dcChecksumOffload) h p
               | (h,p) <- splitPacket (fromIntegral dcMtu) hdr payload ]
 
 
@@ -86,7 +95,7 @@ arpOutgoing ip4 dev src next packets =
   do res <- resolveAddr (ip4ArpTable ip4) next queueSend
      case res of
        Known dstMac ->
-         mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
+         do mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
 
        -- The mac wasn't present in the table. If this was the first request for
        -- this address, start a request thread.

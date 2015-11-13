@@ -65,6 +65,7 @@ library
                                 Hans.IP4.Fragments
                                 Hans.IP4.Icmp4
                                 Hans.IP4.Input
+                                Hans.IP4.Output
                                 Hans.IP4.Packet
                                 Hans.IP4.RoutingTable
                                 Hans.IP4.State

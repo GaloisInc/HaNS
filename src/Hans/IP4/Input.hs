@@ -9,8 +9,8 @@ import Hans.Device (Device(..),DeviceConfig(..))
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
 import Hans.IP4.ArpTable (addEntry,lookupEntry)
 import Hans.IP4.Fragments (processFragment)
-import Hans.IP4.Icmp4 (getIcmp4Packet)
-import Hans.IP4.Output (sendIP4)
+import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet,renderIcmp4Packet)
+import Hans.IP4.Output (queueIP4)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (isLocal)
 import Hans.IP4.State (IP4State(..))
@@ -38,12 +38,11 @@ processArp cfg ip4 dev payload =
      let lha = devMac dev'
 
      -- add the entry if it didn't already exist
-     unless merge $ io
-                  $ addEntry arpSPA arpSHA (cfgArpTableLifetime cfg)
-                  $ ip4ArpTable ip4
+     unless merge (io (addEntry (ip4ArpTable ip4) arpSPA arpSHA))
 
      -- respond if the packet was a who-has request for our mac
      when (arpOper == ArpRequest)
+       $ io
        $ sendEthernet dev' arpSHA ETYPE_ARP
        $ runPutPacket 28 100 L.empty
        $ putArpPacket ArpPacket { arpSHA  = lha,    arpSPA = arpTPA
@@ -54,10 +53,10 @@ processArp cfg ip4 dev payload =
 -- | Update an entry in the arp table, if it exists already.
 updateEntry :: Config -> IP4State -> Mac -> IP4 -> IO Bool
 updateEntry Config { .. } IP4State { .. } sha spa =
-  do mb <- lookupEntry spa ip4ArpTable
+  do mb <- lookupEntry ip4ArpTable spa
      case mb of
 
-       Just _  -> do addEntry spa sha cfgArpTableLifetime ip4ArpTable
+       Just _  -> do addEntry ip4ArpTable spa sha
                      return True
 
        Nothing -> return False
@@ -77,7 +76,7 @@ guardLocalAddress IP4State { .. } dst =
 -- IP4 Processing --------------------------------------------------------------
 
 processIP4 :: Config -> IP4State -> Device -> S.ByteString -> Hans ()
-processIP4 cfg ip4 dev payload =
+processIP4 _cfg ip4 dev payload =
   do ((hdr,hdrLen,_),body) <- decode' (devStats dev) getIP4Packet payload
 
      -- only validate the checkum if the device hasn't done that already
@@ -88,7 +87,7 @@ processIP4 cfg ip4 dev payload =
      (hdr',body') <- processFragment (ip4Fragments ip4) hdr body
 
      -- was this packet destined for a local address?
-     routeLocal cfg ip4 dev hdr' body'
+     routeLocal ip4 dev hdr' body'
        -- XXX: as routeLocal can fail, add in support for conditional routing
        -- based on network stack config.
        -- XXX: do we ever want to support using HaNS as a router?
@@ -96,13 +95,13 @@ processIP4 cfg ip4 dev payload =
 
 -- | Make sure that the destination of this packet is a device that we manage,
 -- then pass it on to the appropriate layer for further processing.
-routeLocal :: Config -> IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
-routeLocal cfg ip4 inDev hdr body =
+routeLocal :: IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
+routeLocal ip4 inDev hdr body =
   do _ <- guardLocalAddress ip4 (ip4DestAddr hdr)
 
      case ip4Protocol hdr of
 
-       IP4_PROT_ICMP -> processICMP cfg ip4 inDev hdr body
+       IP4_PROT_ICMP -> processICMP ip4 inDev hdr body
 
        _ ->
          dropPacket (devStats inDev)
@@ -111,10 +110,9 @@ routeLocal cfg ip4 inDev hdr body =
 -- ICMP Processing -------------------------------------------------------------
 
 -- | Process incoming ICMP packets.
-processICMP :: Config -> IP4State -> Device -> IP4Header -> S.ByteString
-            -> Hans ()
+processICMP :: IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
 
-processICMP cfg ip4 dev hdr body =
+processICMP ip4 dev hdr body =
   do let packetValid = dcChecksumOffload (devConfig dev)
                     || 0 == computeChecksum 0 body
 
@@ -124,5 +122,16 @@ processICMP cfg ip4 dev hdr body =
 
      case msg of
 
+       -- XXX: use the stats and config for the device that the message arrived
+       -- on. As it's probably going out the same device, this seems OK, but it
+       -- would be nice to confirm that.
        Echo ident seqNum bytes ->
-         queueResponse ip4 
+         do let packet = renderIcmp4Packet
+                             (not (dcChecksumOffload (devConfig dev)))
+                             (EchoReply ident seqNum bytes)
+            io (queueIP4 ip4 (devStats dev) (ip4SourceAddr hdr) IP4_PROT_ICMP packet)
+            escape
+
+
+       -- Drop all other messages for now
+       _ -> escape

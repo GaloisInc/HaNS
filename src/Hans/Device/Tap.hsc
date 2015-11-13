@@ -22,8 +22,7 @@ import qualified Data.ByteString.Unsafe as S
 import           Data.IORef (newIORef,atomicModifyIORef',readIORef,writeIORef)
 import           Data.Word (Word8)
 import           Foreign.C.String (CString)
-import           Foreign.C.Types (CSize(..),CLong(..),CInt(..))
-import           Foreign.ForeignPtr (withForeignPtr)
+import           Foreign.C.Types (CSize(..),CLong(..),CInt(..),CChar(..))
 import           Foreign.Marshal.Alloc (allocaBytes)
 import           Foreign.Marshal.Array (allocaArray,peekArray)
 import           Foreign.Ptr (Ptr,plusPtr)
@@ -106,8 +105,7 @@ tapSendLoop stats fd queue = forever $
 
   -- write the chunk address and length into the iovec entry
   writeChunk iov chunk =
-    do let (fptr, 0, clen) = S.toForeignPtr chunk
-       _ <- withForeignPtr fptr $ \ptr ->
+    do S.unsafeUseAsCStringLen chunk $ \ (ptr,clen) ->
               writeIOVec iov ptr (fromIntegral clen)
 
        return (iov `plusPtr` (#size struct iovec))
@@ -142,7 +140,7 @@ foreign import ccall unsafe "init_tap_device"
 
 type IOVec = ()
 
-writeIOVec :: Ptr IOVec -> Ptr Word8 -> CSize -> IO ()
+writeIOVec :: Ptr IOVec -> Ptr CChar -> CSize -> IO ()
 writeIOVec iov ptr len =
   do (#poke struct iovec, iov_base) iov ptr
      (#poke struct iovec, iov_len)  iov len

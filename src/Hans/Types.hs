@@ -4,6 +4,7 @@ import Hans.Config (Config)
 import Hans.Device (Device,InputPacket)
 import Hans.IP4.State (IP4State)
 
+import Control.Concurrent (ThreadId)
 import Control.Concurrent.BoundedChan (BoundedChan)
 import Data.IORef (IORef)
 
@@ -20,4 +21,7 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
 
                                  , nsIP4State :: !IP4State
                                    -- ^ State for IP4 processing
+
+                                 , nsIP4Responder :: !ThreadId
+                                   -- ^ Internal IP4 responder
                                  }

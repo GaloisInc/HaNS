@@ -16,10 +16,16 @@ main  =
      ns  <- newNetworkStack defaultConfig
      dev <- addDevice name defaultDeviceConfig ns
 
-     addIP4Route ns True
+     addIP4Route ns False
          Route { routeNetwork = IP4Mask (packIP4 192 168 71 10) 24
-               , routeGateway = packIP4 192 168 71 1
+               , routeType    = Direct
                , routeDevice  = dev }
+
+     addIP4Route ns True
+         Route { routeNetwork = IP4Mask (packIP4 192 168 71 10) 0
+               , routeType    = Indirect (packIP4 192 168 71 1)
+               , routeDevice  = dev
+               }
 
      -- start receiving data
      startDevice dev

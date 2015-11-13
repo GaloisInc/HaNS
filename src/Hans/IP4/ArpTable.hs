@@ -86,8 +86,8 @@ lookupEntry ArpTable { .. } spa =
 
 
 -- | Insert an entry into the Arp table, and unblock any waiting actions.
-addEntry :: IP4 -> Mac -> ArpTable -> IO ()
-addEntry spa sha ArpTable { .. } =
+addEntry :: ArpTable -> IP4 -> Mac -> IO ()
+addEntry ArpTable { .. } spa sha =
   do now <- getCurrentTime
      let end = addUTCTime atLifetime now
 

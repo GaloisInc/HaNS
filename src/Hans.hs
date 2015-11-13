@@ -17,7 +17,7 @@ module Hans (
     -- * IP4
     IP4.IP4(), IP4.packIP4,
     IP4.IP4Mask(..),
-    IP4.Route(..),
+    IP4.Route(..), IP4.RouteType(..),
     addIP4Route,
     lookupIP4Route,
 
@@ -27,10 +27,12 @@ import           Hans.Config
 import           Hans.Device
 import qualified Hans.IP4.State as IP4
 import qualified Hans.IP4.Packet as IP4
-import qualified Hans.IP4.RoutingTable as IP4
+import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
+import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Types
 
+import Control.Concurrent (forkIO)
 import Control.Concurrent.BoundedChan (newBoundedChan)
 import Data.IORef (newIORef,atomicModifyIORef')
 
@@ -38,9 +40,10 @@ import Data.IORef (newIORef,atomicModifyIORef')
 -- | Create a network stack with no devices registered.
 newNetworkStack :: Config -> IO NetworkStack
 newNetworkStack nsConfig =
-  do nsInput    <- newBoundedChan (cfgInputQueueSize nsConfig)
-     nsDevices  <- newIORef []
-     nsIP4State <- IP4.newIP4State nsConfig
+  do nsInput        <- newBoundedChan (cfgInputQueueSize nsConfig)
+     nsDevices      <- newIORef []
+     nsIP4State     <- IP4.newIP4State nsConfig
+     nsIP4Responder <- forkIO (IP4.responder nsIP4State)
      return NetworkStack { .. }
 
 -- | Initialize and register a device with the network stack.
@@ -56,6 +59,6 @@ addIP4Route :: NetworkStack -> Bool -> IP4.Route -> IO ()
 addIP4Route NetworkStack { .. } = IP4.addRoute nsIP4State
 {-# INLINE addIP4Route #-}
 
-lookupIP4Route :: NetworkStack -> IP4.IP4 -> IO (Maybe (IP4.IP4,Device))
+lookupIP4Route :: NetworkStack -> IP4.IP4 -> IO (Maybe (IP4.IP4,IP4.IP4,Device))
 lookupIP4Route NetworkStack { .. } = IP4.lookupRoute nsIP4State
 {-# INLINE lookupIP4Route #-}

@@ -17,7 +17,7 @@ import           Hans.IP4.Icmp4 (Icmp4Packet)
 import           Hans.IP4.Packet (IP4,IP4Protocol)
 import qualified Hans.IP4.RoutingTable as RT
 
-import           Control.Concurrent (ThreadId,forkIO)
+
 import qualified Control.Concurrent.BoundedChan as BC
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
