@@ -3,19 +3,22 @@
 
 module Hans.IP4.Input where
 
-import Hans.IP4.ArpTable (addEntry,lookupEntry)
 import Hans.Checksum (computeChecksum)
 import Hans.Config (Config(..))
 import Hans.Device (Device(..),DeviceConfig(..))
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
+import Hans.IP4.ArpTable (addEntry,lookupEntry)
+import Hans.IP4.Fragments (processFragment)
+import Hans.IP4.Icmp4 (getIcmp4Packet)
+import Hans.IP4.Output (sendIP4)
 import Hans.IP4.Packet
+import Hans.IP4.RoutingTable (isLocal)
 import Hans.IP4.State (IP4State(..))
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (when,unless)
 import           Data.IORef (readIORef)
-import           Data.List (find)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 
@@ -27,6 +30,7 @@ processArp :: Config -> IP4State -> Device -> S.ByteString -> Hans ()
 processArp cfg ip4 dev payload =
   do ArpPacket { .. } <- decode (devStats dev) getArpPacket payload
 
+     -- if the entry already exists in the arp table, update it
      merge <- io (updateEntry cfg ip4 arpSHA arpSPA)
 
      -- are we the target of the request?
@@ -64,19 +68,16 @@ updateEntry Config { .. } IP4State { .. } sha spa =
 -- processing.
 guardLocalAddress :: IP4State -> IP4 -> Hans Device
 guardLocalAddress IP4State { .. } dst =
-  do addrs <- io (readIORef ip4Addrs)
-     case find hasDst addrs of
-       Just (_,dev) -> return dev
-       Nothing      -> escape
-  where
-
-  hasDst (addr,_) = addr == dst
+  do rt <- io (readIORef ip4Routes)
+     case isLocal dst rt of
+       Just dev -> return dev
+       Nothing  -> escape
 
 
 -- IP4 Processing --------------------------------------------------------------
 
 processIP4 :: Config -> IP4State -> Device -> S.ByteString -> Hans ()
-processIP4 _ ip4 dev payload =
+processIP4 cfg ip4 dev payload =
   do ((hdr,hdrLen,_),body) <- decode' (devStats dev) getIP4Packet payload
 
      -- only validate the checkum if the device hasn't done that already
@@ -84,22 +85,44 @@ processIP4 _ ip4 dev payload =
                     || 0 == computeChecksum 0 (S.take hdrLen payload)
      unless packetValid (dropPacket (devStats dev))
 
+     (hdr',body') <- processFragment (ip4Fragments ip4) hdr body
+
      -- was this packet destined for a local address?
-     routeLocal ip4 dev hdr body
+     routeLocal cfg ip4 dev hdr' body'
        -- XXX: as routeLocal can fail, add in support for conditional routing
        -- based on network stack config.
+       -- XXX: do we ever want to support using HaNS as a router?
 
 
 -- | Make sure that the destination of this packet is a device that we manage,
 -- then pass it on to the appropriate layer for further processing.
-routeLocal :: IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
-routeLocal ip4 dev IP4Header { .. } _body =
-  do _ <- guardLocalAddress ip4 ip4DestAddr
+routeLocal :: Config -> IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
+routeLocal cfg ip4 inDev hdr body =
+  do _ <- guardLocalAddress ip4 (ip4DestAddr hdr)
 
-     case ip4Protocol of
+     case ip4Protocol hdr of
+
+       IP4_PROT_ICMP -> processICMP cfg ip4 inDev hdr body
 
        _ ->
-         dropPacket (devStats dev)
+         dropPacket (devStats inDev)
 
 
 -- ICMP Processing -------------------------------------------------------------
+
+-- | Process incoming ICMP packets.
+processICMP :: Config -> IP4State -> Device -> IP4Header -> S.ByteString
+            -> Hans ()
+
+processICMP cfg ip4 dev hdr body =
+  do let packetValid = dcChecksumOffload (devConfig dev)
+                    || 0 == computeChecksum 0 body
+
+     unless packetValid (dropPacket (devStats dev))
+
+     msg <- decode (devStats dev) getIcmp4Packet body
+
+     case msg of
+
+       Echo ident seqNum bytes ->
+         queueResponse ip4 

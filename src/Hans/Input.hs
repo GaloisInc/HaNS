@@ -19,6 +19,7 @@ processPackets :: NetworkStack -> IO ()
 processPackets NetworkStack { .. } = runHans $
   do input               <- io (readChan nsInput)
      (stats,hdr,payload) <- decodeEthernet input
+     io (print payload)
 
      case eType hdr of
 

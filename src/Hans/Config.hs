@@ -10,10 +10,23 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                        -- ^ Best to pick a prime number.
 
                      , cfgArpTableLifetime :: !NominalDiffTime
+
+                     , cfgArpRetry :: {-# UNPACK #-} !Int
+                       -- ^ Number of times to retry an arp request before
+                       -- failing
+
+                     , cfgArpRetryDelay :: {-# UNPACK #-} !Int
+                       -- ^ The amount of time to wait between arp request
+                       -- retransmission.
+
+                     , cfgIP4FragTimeout :: !NominalDiffTime
                      }
 
 defaultConfig :: Config
 defaultConfig  = Config { cfgInputQueueSize   = 128
                         , cfgArpTableSize     = 67
-                        , cfgArpTableLifetime = 10 * 60 -- 10 minutes
+                        , cfgArpTableLifetime = 60 -- 60 seconds
+                        , cfgArpRetry         = 10
+                        , cfgArpRetryDelay    = 2000 -- 2 seconds
+                        , cfgIP4FragTimeout   = 30
                         }

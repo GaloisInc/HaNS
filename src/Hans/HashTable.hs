@@ -6,7 +6,9 @@ module Hans.HashTable (
     insert,
     lookup,
     delete,
-    mapHashTable
+    mapHashTable,
+    filterHashTable,
+    alter,
   ) where
 
 import           Prelude hiding (lookup)
@@ -26,6 +28,7 @@ data HashTable k a =
 type Bucket k a = IORef [(k,a)]
 
 
+
 -- | Create a new hash table with the given size.
 newHashTable :: (Eq k, Hashable k) => Int -> IO (HashTable k a)
 newHashTable htSize =
@@ -33,16 +36,26 @@ newHashTable htSize =
      return HashTable { htBuckets = listArray (0,htSize - 1) buckets
                       , .. }
 
-mapHashTable :: (Eq k, Hashable k) => (k -> a -> a) -> HashTable k a -> IO ()
-mapHashTable f HashTable { .. } = go 0
+mapBuckets :: (Eq k, Hashable k) => ([(k,a)] -> [(k,a)]) -> HashTable k a -> IO ()
+mapBuckets f HashTable { .. } = go 0
   where
-  f' (k,a) = (k, f k a)
-
-  update bucket = (map f' bucket, ())
+  update bucket = (f bucket, ())
 
   go ix | ix < htSize = do atomicModifyIORef' (htBuckets ! ix) update
                            go (succ ix)
         | otherwise   = return ()
+{-# INLINE mapBuckets #-}
+
+
+filterHashTable :: (Eq k, Hashable k)
+                => (k -> a -> Bool) -> HashTable k a -> IO ()
+filterHashTable p = mapBuckets (filter (uncurry p))
+{-# INLINE filterHashTable #-}
+
+mapHashTable :: (Eq k, Hashable k) => (k -> a -> a) -> HashTable k a -> IO ()
+mapHashTable f = mapBuckets (map f')
+  where
+  f' (k,a) = (k, f k a)
 {-# INLINE mapHashTable #-}
 
 getBucket :: Hashable k => HashTable k a -> k -> Bucket k a
@@ -85,3 +98,26 @@ delete k ht = modifyBucket ht k (\ bucket -> (removeEntry bucket, ()))
 
   removeEntry []  = []
 {-# INLINE delete #-}
+
+
+-- | Create, update, or delete an entry in the hash table, returning some
+-- additional value derived from the operation.
+-- NOTE: This operation is only useful when you need to perform any of these
+-- operations at the same time -- the specialized versions of the individual
+-- behaviors all perform slightly better.
+alter :: (Eq k, Hashable k)
+       => (Maybe a -> (Maybe a, b)) -> k -> HashTable k a -> IO b
+alter f k ht = modifyBucket ht k (update id)
+  where
+
+  update mkBucket (e@(k',a):rest)
+    | k == k'   = finish mkBucket (Just a) rest
+    | otherwise = update (\l -> mkBucket ( e : l )) rest
+
+  update mkBucket [] = finish mkBucket Nothing []
+
+  finish mkBucket mb rest =
+    case f mb of
+      (Just a, b) -> (mkBucket ((k,a):rest), b)
+      (Nothing,b) -> (mkBucket        rest , b)
+{-# INLINE alter #-}

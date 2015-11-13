@@ -49,7 +49,8 @@ library
                                 time,
                                 hashable,
                                 array,
-                                BoundedChan
+                                BoundedChan,
+                                random
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
@@ -61,8 +62,11 @@ library
                                 Hans.Ethernet.Types
                                 Hans.HashTable
                                 Hans.IP4.ArpTable
+                                Hans.IP4.Fragments
+                                Hans.IP4.Icmp4
                                 Hans.IP4.Input
                                 Hans.IP4.Packet
+                                Hans.IP4.RoutingTable
                                 Hans.IP4.State
                                 Hans.Input
                                 Hans.Monad

@@ -9,7 +9,9 @@ import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (unless,guard)
-import           Data.Bits ((.|.),(.&.),testBit,shiftL,shiftR,bit,setBit)
+import           Data.Bits
+                     ((.|.),(.&.),testBit,shiftL,shiftR,bit,setBit,bit
+                     ,complement)
 import qualified Data.ByteString.Short as Sh
 import qualified Data.ByteString.Lazy as L
 import           Data.Hashable (Hashable)
@@ -47,6 +49,41 @@ unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
                     , fromIntegral (w `shiftR`  8)
                     , fromIntegral  w
                     )
+
+
+-- IP4 Masks -------------------------------------------------------------------
+
+data IP4Mask = IP4Mask {-# UNPACK #-} !IP4
+                       {-# UNPACK #-} !Int -- ^ Between 0 and 32
+               deriving (Show)
+
+instance Eq IP4Mask where
+  m1 == m2 = maskBits m1 == maskBits m2
+          && clearHostBits m1 == clearHostBits m2
+
+hostmask :: Int -> Word32
+hostmask bits = bit (32 - bits) - 1
+
+netmask :: Int -> Word32
+netmask bits = complement (hostmask bits)
+
+maskRange :: IP4Mask -> (IP4,IP4)
+maskRange mask = (clearHostBits mask, setHostBits mask)
+
+maskBits :: IP4Mask -> Int
+maskBits (IP4Mask _ bits) = bits
+
+maskAddr :: IP4Mask -> IP4
+maskAddr (IP4Mask addr _) = addr
+
+clearHostBits :: IP4Mask -> IP4
+clearHostBits (IP4Mask (IP4 addr) bits)= IP4 (addr .&. netmask bits)
+
+setHostBits :: IP4Mask -> IP4
+setHostBits (IP4Mask (IP4 addr) bits) = IP4 (addr .|. hostmask bits)
+
+broadcastAddress :: IP4Mask -> IP4
+broadcastAddress  = setHostBits
 
 
 -- IP4 Pseudo Header -----------------------------------------------------------
@@ -233,8 +270,10 @@ putIP4Header IP4Header { .. } pktlen = do
 -- 'ByteString'. Compute the checksum over the packet with its checksum zeroed,
 -- then reconstruct a new lazy 'ByteString' that contains chunks from the old
 -- header, and the new checksum.
-renderIP4Packet :: IP4Header -> L.ByteString -> L.ByteString
-renderIP4Packet hdr pkt = newHeader `L.append` pkt
+renderIP4Packet :: Bool -> IP4Header -> L.ByteString -> L.ByteString
+renderIP4Packet includeCS hdr pkt
+  | not includeCS = bytes
+  | otherwise     = packet
   where
 
   pktlen    = fromIntegral (L.length pkt)
@@ -243,9 +282,9 @@ renderIP4Packet hdr pkt = newHeader `L.append` pkt
 
   beforeCS  = L.take 10 bytes
   afterCS   = L.drop 12 bytes
-  csBytes   = runPutPacket 2 100 afterCS (putWord16be cs)
+  csBytes   = runPutPacket 2 100 (afterCS `L.append` pkt) (putWord16be cs)
 
-  newHeader = beforeCS `L.append` csBytes
+  packet    = beforeCS `L.append` csBytes
 
 
 -- IP4 Options -----------------------------------------------------------------
@@ -348,6 +387,10 @@ getArpPacket  = label "ArpPacket" $
      arpTPA    <- getIP4
 
      return ArpPacket { .. }
+
+
+renderArpPacket :: ArpPacket -> L.ByteString
+renderArpPacket pkt = runPutPacket 28 100 L.empty (putArpPacket pkt)
 
 -- | Render an Arp packet, given a way to render hardware and protocol
 -- addresses.

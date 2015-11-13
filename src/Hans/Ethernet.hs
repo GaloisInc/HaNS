@@ -25,15 +25,13 @@ decodeEthernet InputPacket { .. } =
 
 
 -- | Send a message out via a device.
-sendEthernet :: Device -> Mac -> EtherType -> L.ByteString -> Hans ()
+sendEthernet :: Device -> Mac -> EtherType -> L.ByteString -> IO ()
 sendEthernet Device { .. } eDest eType payload =
   do let packet = runPutPacket 14 100 payload
                 $ putEthernetHeader EthernetHeader { eSource = devMac, .. }
 
      -- if the packet is too big for the device, throw it away
-     when (fromIntegral (L.length packet) > dcMtu devConfig) $
-       do io (updateError devStats)
-          escape
-
-     result <- io (tryWriteChan devSendQueue packet)
-     unless result (io (updateDropped devStats))
+     if (fromIntegral (L.length packet) > dcMtu devConfig)
+        then updateError devStats
+        else do queued <- tryWriteChan devSendQueue packet
+                unless queued (updateDropped devStats)
