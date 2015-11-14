@@ -116,7 +116,7 @@ tapRecvLoop :: Device -> Fd -> BoundedChan InputPacket -> IO ()
 tapRecvLoop dev @ Device { .. } fd queue = forever $
   do threadWaitRead fd
 
-     ipBytes <- S.createAndTrim 1514 $ \ ptr ->
+     ipBytes <- S.createUptoN 1514 $ \ ptr ->
        do actual <- c_read fd ptr 1514
           return (fromIntegral actual)
 
