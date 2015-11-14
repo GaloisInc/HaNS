@@ -183,7 +183,7 @@ renderIcmp4Packet includeCS pkt
   where
 
   -- buest guess mtu
-  mtu   = 1500 - 14 - 20
+  mtu   = 1500 - 20
 
   bytes = runPutPacket mtu mtu L.empty (putIcmp4Packet pkt)
   cs    = computeChecksumLazy 0 bytes
