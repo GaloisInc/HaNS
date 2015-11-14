@@ -178,8 +178,10 @@ splitPacket mtu hdr bs
 -- smaller ones.
 fragmentPacket :: Int64 -> IP4Header -> L.ByteString
                -> [(IP4Header,L.ByteString)]
-fragmentPacket mtu = loop
+fragmentPacket mtu0 hdr0 = loop hdr0
   where
+  mtu = mtu0 - fromIntegral (ip4HeaderSize hdr0)
+
   loop hdr bs
     | payloadLen <= mtu = [(noMoreFragments hdr, bs)]
     | otherwise         = frag : loop hdr' rest

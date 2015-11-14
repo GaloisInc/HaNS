@@ -35,10 +35,13 @@ propReassemble  = monadicIO $
                               }
 
          chunks = [ (hdr,L.toStrict body)
-                  | (hdr,body) <- splitPacket 1500 hdr bytes ]
+                  | (hdr,body) <- splitPacket 1480 hdr bytes ]
 
      incoming <- pick (shuffle chunks)
      table    <- run (newFragTable defaultConfig)
+
+     let dbgHdr (hdr,_) = (ip4Ident hdr, ip4FragmentOffset hdr)
+     run (print (map dbgHdr chunks))
 
      results <- run $ sequence [ runHansOnce (processFragment table fhdr body)
                                | (fhdr,body) <- incoming ]

@@ -31,7 +31,7 @@ sendEthernet Device { .. } eDest eType payload =
                 $ putEthernetHeader EthernetHeader { eSource = devMac, .. }
 
      -- if the packet is too big for the device, throw it away
-     if (fromIntegral (L.length packet) > dcMtu devConfig)
+     if (fromIntegral (L.length packet) > dcMtu devConfig + 14)
         then updateError devStats
         else do queued <- tryWriteChan devSendQueue packet
                 unless queued (updateDropped devStats)

@@ -12,7 +12,7 @@ import           Control.Concurrent.BoundedChan (BoundedChan)
 import qualified Control.Exception as X
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
+import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
 import           Data.Typeable (Typeable)
 
 
@@ -95,6 +95,18 @@ newDeviceStats  =
      statError   <- newIORef 0
      return DeviceStats { .. }
 
+dumpStats :: DeviceStats -> IO ()
+dumpStats DeviceStats { .. } =
+  do tx <- readIORef statTX
+     rx <- readIORef statRX
+     d  <- readIORef statDropped
+     e  <- readIORef statError
+     putStrLn $ unlines
+       [ "tx:      " ++ show tx
+       , "rx:      " ++ show rx
+       , "dropped: " ++ show d
+       , "errors:  " ++ show e ]
+
 -- | Add one to the count of dropped packets for this device.
 updateDropped :: DeviceStats -> IO ()
 updateDropped DeviceStats { .. } = incrementStat statDropped 
@@ -106,7 +118,7 @@ updateError DeviceStats { .. } = incrementStat statError
 -- | Update information about packets received.
 updateRX :: DeviceStats -> Bool -> IO ()
 updateRX stats success
-  | success   = incrementStat (statTX stats)
+  | success   = incrementStat (statRX stats)
   | otherwise = updateError stats
 
 -- | Update information about packets sent.

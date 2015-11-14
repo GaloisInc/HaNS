@@ -95,7 +95,7 @@ arpOutgoing ip4 dev src next packets =
   do res <- resolveAddr (ip4ArpTable ip4) next queueSend
      case res of
        Known dstMac ->
-         do mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
+         mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
 
        -- The mac wasn't present in the table. If this was the first request for
        -- this address, start a request thread.

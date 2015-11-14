@@ -90,6 +90,7 @@ purgeEntries lifetime entries = forever $
 -- together when possible. This makes it easier to check the state of the whole
 -- buffer.
 data Buffer = Buffer { bufExpire    :: !UTCTime
+                     , bufSize      :: !(Maybe Int)
                      , bufHeader    :: !(Maybe IP4Header)
                      , bufFragments :: ![Fragment]
                      }
@@ -97,7 +98,7 @@ data Buffer = Buffer { bufExpire    :: !UTCTime
 data Fragment = Fragment { fragStart   :: {-# UNPACK #-} !Int
                          , fragEnd     :: {-# UNPACK #-} !Int
                          , fragPayload ::                 [S.ByteString]
-                         }
+                         } deriving (Show)
 
 mkKey :: IP4Header -> Key
 mkKey IP4Header { .. } = (ip4SourceAddr,ip4DestAddr,ip4Protocol,ip4Ident)
@@ -118,6 +119,7 @@ mkBuffer :: UTCTime -> IP4Header -> Fragment -> Buffer
 mkBuffer bufExpire hdr frag =
   addFragment hdr frag
   Buffer { bufHeader    = Nothing
+         , bufSize      = Nothing
          , bufFragments = []
          , .. }
 
@@ -148,8 +150,10 @@ updateBuffer expire hdr frag Nothing =
 bufFull :: Buffer -> Maybe (IP4Header,S.ByteString)
 bufFull Buffer { .. }
 
-  | Just hdr <- bufHeader
-  , [Fragment { .. }] <- bufFragments =
+  | Just size <- bufSize
+  , Just hdr  <- bufHeader
+  , [Fragment { .. }] <- bufFragments
+  , fragEnd == size =
     Just (hdr, S.concat fragPayload)
 
   | otherwise =
@@ -160,6 +164,7 @@ bufFull Buffer { .. }
 addFragment :: IP4Header -> Fragment -> Buffer -> Buffer
 addFragment hdr frag buf =
   Buffer { bufExpire    = bufExpire buf
+         , bufSize      = size'
          , bufHeader    = case bufHeader buf of
                             Nothing | ip4FragmentOffset hdr == 0 -> Just hdr
                             _                                    -> bufHeader buf
@@ -169,11 +174,14 @@ addFragment hdr frag buf =
 
   where
 
+  size' | ip4MoreFragments hdr = bufSize buf
+        | otherwise            = Just $! fragEnd frag
+
   insertFragment frags@(f:fs)
-    | fragEnd   frag + 1 == fragStart f = mergeFragment frag f : fs
-    | fragStart frag + 1 == fragEnd f   = mergeFragment f frag : fs
-    | fragStart frag     <  fragStart f = frag : frags
-    | otherwise                         = f : insertFragment fs
+    | fragEnd   frag == fragStart f = mergeFragment frag f : fs
+    | fragStart frag == fragEnd f   = mergeFragment f frag : fs
+    | fragStart frag <  fragStart f = frag : frags
+    | otherwise                     = f : insertFragment fs
 
   insertFragment [] = [frag]
 

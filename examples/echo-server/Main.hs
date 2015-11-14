@@ -1,7 +1,10 @@
 module Main where
 
 import Hans
+import Hans.Device
 
+import           Control.Concurrent (forkIO,threadDelay)
+import           Control.Monad (forever)
 import qualified Data.ByteString.Char8 as S8
 import           System.Environment (getArgs)
 
@@ -29,5 +32,8 @@ main  =
 
      -- start receiving data
      startDevice dev
+
+     _ <- forkIO $ forever $ do threadDelay 1000000
+                                dumpStats (devStats dev)
 
      processPackets ns

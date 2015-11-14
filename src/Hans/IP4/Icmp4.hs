@@ -182,7 +182,7 @@ renderIcmp4Packet includeCS pkt
 
   where
 
-  -- buest guess mtu
+  -- best guess mtu
   mtu   = 1500 - 20
 
   bytes = runPutPacket mtu mtu L.empty (putIcmp4Packet pkt)
