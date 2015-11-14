@@ -60,7 +60,7 @@ openDevice devName devConfig devRecvQueue =
                    writeIORef threadIds (Just (recvThread,sendThread))
 
          devStop = withMVar lock $ \ () ->
-           do mb <- atomicModifyIORef' threadIds ( \mb -> (mb, Nothing) )
+           do mb <- atomicModifyIORef' threadIds ( \mb -> (Nothing, mb) )
               case mb of
                 Just (recvThread,sendThread) ->
                   do killThread recvThread
