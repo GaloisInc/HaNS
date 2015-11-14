@@ -3,7 +3,7 @@
 
 module Hans.IP4.Fragments (
     FragTable(),
-    newFragTable,
+    newFragTable, cleanupFragTable,
     processFragment,
   ) where
 
@@ -13,7 +13,7 @@ import           Hans.IP4.Packet
 import           Hans.Monad
 import           Hans.Time (toUSeconds)
 
-import           Control.Concurrent (forkIO,ThreadId,threadDelay)
+import           Control.Concurrent (forkIO,ThreadId,threadDelay,killThread)
 import           Control.Monad (forever)
 import qualified Data.ByteString as S
 import           Data.Time.Clock
@@ -36,6 +36,10 @@ newFragTable Config { .. } =
   do ftEntries     <- HT.newHashTable 31 -- XXX: is this the best table size?
      ftPurgeThread <- forkIO (purgeEntries cfgIP4FragTimeout ftEntries)
      return FragTable { ftDuration = cfgIP4FragTimeout, .. }
+
+
+cleanupFragTable :: FragTable -> IO ()
+cleanupFragTable FragTable { .. } = killThread ftPurgeThread
 
 
 -- | Handle an incoming fragment. If the fragment is buffered, but doesn't

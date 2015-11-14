@@ -1,6 +1,6 @@
 module Hans.Monad (
     Hans()
-  , runHans
+  , runHans, runHansOnce
   , setEscape, escape, dropPacket
   , io
   , decode, decode'
@@ -9,6 +9,7 @@ module Hans.Monad (
 import Hans.Device (DeviceStats(), updateDropped)
 
 import qualified Data.ByteString as S
+import           Data.IORef (newIORef,writeIORef,readIORef)
 import           Data.Serialize.Get (runGet,runGetState,Get)
 
 
@@ -36,6 +37,14 @@ instance Monad Hans where
 
   {-# INLINE return #-}
   {-# INLINE (>>=)  #-}
+
+
+-- | Run only one iteration of the Hans monad.
+runHansOnce :: Hans a -> IO (Maybe a)
+runHansOnce (Hans f) =
+  do res <- newIORef Nothing
+     f (writeIORef res Nothing) (\x -> writeIORef res (Just x))
+     readIORef res
 
 
 -- | Loop forever, running the underlying operation.
