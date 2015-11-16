@@ -2,7 +2,7 @@
 
 module Hans.IP4.Icmp4 where
 
-import Hans.Checksum (computeChecksumLazy)
+import Hans.Checksum (computeChecksum)
 import Hans.IP4.Packet (IP4,getIP4,putIP4)
 import Hans.Serialize (runPutPacket)
 
@@ -186,7 +186,7 @@ renderIcmp4Packet includeCS pkt
   mtu   = 1500 - 20
 
   bytes = runPutPacket mtu mtu L.empty (putIcmp4Packet pkt)
-  cs    = computeChecksumLazy 0 bytes
+  cs    = computeChecksum bytes
 
 
 putIcmp4Packet :: Putter Icmp4Packet

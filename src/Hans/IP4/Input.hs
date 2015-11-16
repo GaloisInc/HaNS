@@ -81,7 +81,7 @@ processIP4 _cfg ip4 dev payload =
 
      -- only validate the checkum if the device hasn't done that already
      let packetValid = dcChecksumOffload (devConfig dev)
-                    || 0 == computeChecksum 0 (S.take hdrLen payload)
+                    || 0 == computeChecksum (S.take hdrLen payload)
      unless packetValid (dropPacket (devStats dev))
 
      (hdr',body') <- processFragment (ip4Fragments ip4) hdr body
@@ -114,7 +114,7 @@ processICMP :: IP4State -> Device -> IP4Header -> S.ByteString -> Hans ()
 
 processICMP ip4 dev hdr body =
   do let packetValid = dcChecksumOffload (devConfig dev)
-                    || 0 == computeChecksum 0 body
+                    || 0 == computeChecksum body
 
      unless packetValid (dropPacket (devStats dev))
 

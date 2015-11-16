@@ -4,7 +4,7 @@
 
 module Hans.IP4.Packet where
 
-import Hans.Checksum (computeChecksumLazy)
+import Hans.Checksum (computeChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Serialize (runPutPacket)
 
@@ -193,6 +193,21 @@ fragmentPacket mtu0 hdr0 = loop hdr0
     frag       = (moreFragments hdr, as)
 
 
+ip4FragmentField :: Bool -> Bool -> Word16 -> Word16
+ip4FragmentField df mf off = fragBit (morefragsBit (off .&. 0x1fff))
+  where
+  fragBit      | df        = (`setBit` 14)
+               | otherwise = id
+
+  morefragsBit | mf        = (`setBit` 13)
+               | otherwise = id
+
+
+-- | Compute the value of the version/header length byte.
+ip4VersionIHL :: Int -> Word8
+ip4VersionIHL ihl = 4 `shiftL` 4 .|. fromIntegral (ihl `shiftR` 2)
+
+
 --  0                   1                   2                   3   
 --  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 
 -- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -241,22 +256,12 @@ putIP4Header :: IP4Header -> Int -> Put
 putIP4Header IP4Header { .. } pktlen = do
   let (optbs,optlen) = renderIP4Options ip4Options
   let ihl            = 20 + optlen
-  putWord8    (4 `shiftL` 4 .|. fromIntegral (ihl `div` 4))
+  putWord8    (ip4VersionIHL ihl)
   putWord8     ip4TypeOfService
 
   putWord16be (fromIntegral (pktlen + ihl))
   putWord16be ip4Ident
-
-  let frag      | ip4DontFragment = (`setBit` 1)
-                | otherwise       = id
-
-      morefrags | ip4MoreFragments = (`setBit` 0)
-                | otherwise        = id
-
-      flags = frag (morefrags 0)
-
-      off   = ip4FragmentOffset `div` 8
-  putWord16be (flags `shiftL` 13 .|. off .&. 0x1fff)
+  putWord16be (ip4FragmentField ip4DontFragment ip4MoreFragments ip4FragmentOffset)
 
   putWord8    ip4TimeToLive
   putWord8    ip4Protocol
@@ -274,13 +279,14 @@ putIP4Header IP4Header { .. } pktlen = do
 -- header, and the new checksum.
 renderIP4Packet :: Bool -> IP4Header -> L.ByteString -> L.ByteString
 renderIP4Packet includeCS hdr pkt
-  | not includeCS = bytes
+  | not includeCS = bytes `L.append` pkt
   | otherwise     = packet
   where
 
-  pktlen    = fromIntegral (L.length pkt)
-  bytes     = runPutPacket 20 40 L.empty (putIP4Header hdr pktlen)
-  cs        = computeChecksumLazy 0 bytes
+  pktlen    = L.length pkt
+
+  bytes     = runPutPacket 20 40 pkt (putIP4Header hdr (fromIntegral pktlen))
+  cs        = computeChecksum (L.take (L.length bytes - pktlen) bytes)
 
   beforeCS  = L.take 10 bytes
   afterCS   = L.drop 12 bytes
@@ -343,6 +349,14 @@ getIP4Option =
 
      return $! IP4Option { .. }
 
+
+ip4OptionType :: Bool -> Word8 -> Word8 -> Word8
+ip4OptionType copied cls num =
+  copiedFlag ((cls .&. 0x3 `shiftL` 5) .|. (num .&. 0x1f))
+  where
+  copiedFlag | copied    = (`setBit` 7)
+             | otherwise = id
+
 putIP4Option :: Putter IP4Option
 putIP4Option IP4Option { .. } =
   do let copied | ip4OptionCopied = bit 7
@@ -354,7 +368,7 @@ putIP4Option IP4Option { .. } =
      case ip4OptionNum of
        0 -> return ()
        1 -> return ()
-       _ -> do putWord8 (fromIntegral (Sh.length ip4OptionData))
+       _ -> do putWord8 (fromIntegral (Sh.length ip4OptionData + 2))
                putShortByteString ip4OptionData
 
 
@@ -366,7 +380,7 @@ data ArpPacket = ArpPacket { arpOper   :: {-# UNPACK #-} !ArpOper
                            , arpSPA    :: !IP4
                            , arpTHA    :: !Mac
                            , arpTPA    :: !IP4
-                           } deriving (Show)
+                           } deriving (Eq,Show)
 
 -- | Parse an Arp packet, given a way to parse hardware and protocol addresses.
 getArpPacket :: Get ArpPacket

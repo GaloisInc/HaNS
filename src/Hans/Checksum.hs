@@ -1,4 +1,6 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
+
 -- BANNERSTART
 -- - Copyright 2006-2008, Galois, Inc.
 -- - This software is distributed under a standard, three-clause BSD license.
@@ -13,28 +15,25 @@
 module Hans.Checksum(
     -- * Checksums
     computeChecksum,
-    computeChecksumLazy,
-    computePartialChecksumLazy,
-
-    -- ** Incremental interface
+    Checksum(..),
     PartialChecksum(),
     emptyPartialChecksum,
-    computePartialChecksum,
-    finalizeChecksum
+    finalizeChecksum,
+    stepChecksum,
   ) where
 
-import Data.Bits (Bits(shiftL,shiftR,complement,clearBit,(.&.)))
-import Data.List (foldl')
-import Data.Word (Word8,Word16,Word32)
-import qualified Data.ByteString.Lazy   as L
+import           Data.Bits (Bits(shiftL,shiftR,complement,clearBit,(.&.)))
+import           Data.List (foldl')
+import           Data.Word (Word8,Word16,Word32)
 import qualified Data.ByteString        as S
+import qualified Data.ByteString.Lazy   as L
+import qualified Data.ByteString.Short  as Sh
 import qualified Data.ByteString.Unsafe as S
 
 
-data PartialChecksum = PartialChecksum
-  { pcAccum :: {-# UNPACK #-} !Word32
-  , pcCarry :: !(Maybe Word8)
-  }
+data PartialChecksum = PartialChecksum { pcAccum :: {-# UNPACK #-} !Word32
+                                       , pcCarry ::                !(Maybe Word8)
+                                       } deriving (Eq,Show)
 
 emptyPartialChecksum :: PartialChecksum
 emptyPartialChecksum  = PartialChecksum
@@ -45,59 +44,66 @@ emptyPartialChecksum  = PartialChecksum
 finalizeChecksum :: PartialChecksum -> Word16
 finalizeChecksum pc = complement (fromIntegral (fold32 (fold32 result)))
   where
+  fold32 :: Word32 -> Word32
+  fold32 x = (x .&. 0xFFFF) + (x `shiftR` 16)
+
   result = case pcCarry pc of
     Nothing   -> pcAccum pc
-    Just prev -> step (pcAccum pc) prev 0
+    Just prev -> stepChecksum (pcAccum pc) prev 0
+{-# INLINE finalizeChecksum #-}
 
--- | Compute the final checksum, using the given initial value.
-computeChecksum :: Word32 -> S.ByteString -> Word16
-computeChecksum c0 bs = finalizeChecksum (computePartialChecksum pc bs)
-  where
-  pc = PartialChecksum { pcAccum = c0, pcCarry = Nothing }
 
-computeChecksumLazy :: Word32 -> L.ByteString -> Word16
-computeChecksumLazy c0 lbs =
-  finalizeChecksum (computePartialChecksumLazy pc lbs)
-  where
-  pc = PartialChecksum { pcAccum = c0, pcCarry = Nothing }
+computeChecksum :: Checksum a => a -> Word16
+computeChecksum a = finalizeChecksum (extendChecksum a emptyPartialChecksum)
+{-# INLINE computeChecksum #-}
 
--- | Compute the checksum of a lazy bytestring.
-computePartialChecksumLazy :: PartialChecksum -> L.ByteString -> PartialChecksum
-computePartialChecksumLazy c0 = foldl' computePartialChecksum c0 . L.toChunks
+-- | Incremental checksum computation interface.
+class Checksum a where
+  extendChecksum :: a -> PartialChecksum -> PartialChecksum
 
--- | Compute a partial checksum, yielding a value suitable to be passed to
--- computeChecksum.
-computePartialChecksum :: PartialChecksum -> S.ByteString -> PartialChecksum
-computePartialChecksum pc b
-  | S.null b  = pc
-  | otherwise = case pcCarry pc of
-      Nothing   -> result
-      Just prev -> computePartialChecksum (pc
-        { pcCarry = Nothing
-        , pcAccum = step (pcAccum pc) prev (S.unsafeIndex b 0)
-        }) (S.tail b)
-  where
+instance Checksum a => Checksum [a] where
+  extendChecksum as = \pc -> foldl' (flip extendChecksum) pc as
+  {-# INLINE extendChecksum #-}
 
-  !n' = S.length b
+instance Checksum L.ByteString where
+  extendChecksum lbs = \pc -> extendChecksum (L.toChunks lbs) pc
+  {-# INLINE extendChecksum #-}
 
-  result = PartialChecksum
-    { pcAccum = loop (fromIntegral (pcAccum pc)) 0
-    , pcCarry = carry
-    }
+-- XXX this could be faster if we could mirror the structure of the instance for
+-- S.ByteString
+instance Checksum Sh.ShortByteString where
+  extendChecksum shb = \ pc -> extendChecksum (Sh.fromShort shb) pc
 
-  carry
-    | odd n'    = Just (S.unsafeIndex b (n' - 1))
-    | otherwise = Nothing
 
-  loop !acc off
-    | off < n   = loop (step acc hi lo) (off + 2)
-    | otherwise = acc
-    where hi    = S.unsafeIndex b off
-          lo    = S.unsafeIndex b (off+1)
-          n     = clearBit n' 0
+instance Checksum S.ByteString where
+  extendChecksum b pc
+    | S.null b  = pc
+    | otherwise = case pcCarry pc of
+        Nothing   -> result
+        Just prev -> extendChecksum (S.tail b) PartialChecksum
+          { pcCarry = Nothing
+          , pcAccum = stepChecksum (pcAccum pc) prev (S.unsafeIndex b 0)
+          }
+    where
 
-step :: Word32 -> Word8 -> Word8 -> Word32
-step acc hi lo = acc + fromIntegral hi `shiftL` 8 + fromIntegral lo
+    n' = S.length b
+    n  = clearBit n' 0 -- aligned to two
 
-fold32 :: Word32 -> Word32
-fold32 x = (x .&. 0xFFFF) + (x `shiftR` 16)
+    result = PartialChecksum
+      { pcAccum = loop (pcAccum pc) 0
+      , pcCarry = carry
+      }
+
+    carry
+      | odd n'    = Just $! S.unsafeIndex b n
+      | otherwise = Nothing
+
+    loop !acc off
+      | off < n   = loop (stepChecksum acc hi lo) (off + 2)
+      | otherwise = acc
+      where hi    = S.unsafeIndex b off
+            lo    = S.unsafeIndex b (off+1)
+
+stepChecksum :: Word32 -> Word8 -> Word8 -> Word32
+stepChecksum acc hi lo = acc + fromIntegral hi `shiftL` 8 + fromIntegral lo
+{-# INLINE stepChecksum #-}
