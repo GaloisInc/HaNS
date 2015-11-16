@@ -8,6 +8,7 @@ import Hans.IP4.Packet
 import Hans.Monad (runHansOnce)
 
 import qualified Data.ByteString.Lazy as L
+import           Data.Maybe (catMaybes)
 import           Test.Tasty
 import           Test.Tasty.QuickCheck (testProperty)
 import           Test.QuickCheck
@@ -26,7 +27,11 @@ propReassemble  = monadicIO $
      dst   <- pick arbitraryIP4
      prot  <- pick arbitraryProtocol
      ident <- pick arbitraryIdent
-     bytes <- pick (arbitraryPayload 1481 4096)
+
+     -- XXX there's something funny going on when the MTU is particularly small
+     len   <- pick (choose (50,500))
+     mtu   <- pick (choose (40,len))
+     bytes <- pick (arbitraryPayload len)
 
      let hdr = emptyIP4Header { ip4DestAddr   = dst
                               , ip4SourceAddr = src
@@ -34,20 +39,18 @@ propReassemble  = monadicIO $
                               , ip4Ident      = ident
                               }
 
-         chunks = [ (hdr,L.toStrict body)
-                  | (hdr,body) <- splitPacket 1480 hdr bytes ]
+         chunks = [(h,L.toStrict body) | (h,body) <- splitPacket mtu hdr bytes]
 
      incoming <- pick (shuffle chunks)
      table    <- run (newFragTable defaultConfig)
-
-     let dbgHdr (hdr,_) = (ip4Ident hdr, ip4FragmentOffset hdr)
-     run (print (map dbgHdr chunks))
 
      results <- run $ sequence [ runHansOnce (processFragment table fhdr body)
                                | (fhdr,body) <- incoming ]
 
      run (cleanupFragTable table)
 
-     case last results of
-       Just (_,result) -> return (L.fromStrict result == bytes)
-       Nothing         -> return False
+     -- we should only get a single successful result here, otherwise something
+     -- is wrong with the way that fragments are being collected
+     case catMaybes results of
+       [(_,result)] -> return (L.fromStrict result == bytes)
+       _            -> return False

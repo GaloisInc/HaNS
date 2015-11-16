@@ -101,8 +101,15 @@ test-suite hans-tests
                                 tasty-quickcheck,
                                 tasty-ant-xml,
                                 QuickCheck,
+                                cereal,
                                 hans
+
+        ghc-options:            -Wall -threaded
 
         hs-source-dirs:         tests
         main-is:                Main.hs
-        ghc-options:            -Wall -threaded
+        other-modules:          Tests.Ethernet
+                                Tests.IP4
+                                Tests.IP4.Fragmentation
+                                Tests.IP4.Packet
+                                Tests.Utils
