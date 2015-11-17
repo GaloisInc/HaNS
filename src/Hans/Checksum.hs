@@ -20,6 +20,8 @@ module Hans.Checksum(
     emptyPartialChecksum,
     finalizeChecksum,
     stepChecksum,
+
+    Pair8(..),
   ) where
 
 import           Data.Bits (Bits(shiftL,shiftR,complement,clearBit,(.&.)))
@@ -61,6 +63,31 @@ computeChecksum a = finalizeChecksum (extendChecksum a emptyPartialChecksum)
 class Checksum a where
   extendChecksum :: a -> PartialChecksum -> PartialChecksum
 
+
+data Pair8 = Pair8 !Word8 !Word8
+
+instance Checksum Pair8 where
+  extendChecksum (Pair8 hi lo) = \ PartialChecksum { .. } ->
+    case pcCarry of
+      Nothing -> PartialChecksum { pcAccum = stepChecksum pcAccum hi lo
+                                 , pcCarry = Nothing }
+      Just c  -> PartialChecksum { pcAccum = stepChecksum pcAccum c hi
+                                 , pcCarry = Just lo }
+  {-# INLINE extendChecksum #-}
+
+instance Checksum Word16 where
+  extendChecksum w = \pc -> extendChecksum (Pair8 hi lo) pc
+    where
+    lo = fromIntegral (w `shiftR` 8)
+    hi = fromIntegral  w
+  {-# INLINE extendChecksum #-}
+
+instance Checksum Word32 where
+  extendChecksum w = \pc ->
+    extendChecksum (fromIntegral  w              :: Word16) $
+    extendChecksum (fromIntegral (w `shiftR` 16) :: Word16) pc
+  {-# INLINE extendChecksum #-}
+  
 instance Checksum a => Checksum [a] where
   extendChecksum as = \pc -> foldl' (flip extendChecksum) pc as
   {-# INLINE extendChecksum #-}

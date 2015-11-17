@@ -76,6 +76,8 @@ library
                                 Hans.Serialize
                                 Hans.Time
                                 Hans.Types
+                                Hans.UDP.Input
+                                Hans.UDP.Packet
 
 executable echo-server
         if flag(examples)

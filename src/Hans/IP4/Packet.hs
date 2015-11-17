@@ -4,7 +4,9 @@
 
 module Hans.IP4.Packet where
 
-import Hans.Checksum (computeChecksum)
+import Hans.Checksum
+           (computeChecksum,Checksum(..),PartialChecksum,Pair8(..)
+           ,emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Serialize (runPutPacket)
 
@@ -27,7 +29,7 @@ import           Data.Word (Word8,Word16,Word32)
 -- IP4 Addresses ---------------------------------------------------------------
 
 newtype IP4 = IP4 Word32
-              deriving (Eq,Ord,Show,Hashable)
+              deriving (Eq,Ord,Show,Hashable,Checksum)
 
 getIP4 :: Get IP4
 getIP4  =
@@ -96,11 +98,12 @@ broadcastAddress  = setHostBits
 -- +--------+--------+--------+--------+
 -- |  zero  |protocol|     length      |
 -- +--------+--------+--------+--------+
-mkIP4PseudoHeader :: IP4 -> IP4 -> IP4Protocol -> Int -> L.ByteString
-mkIP4PseudoHeader src dst prot len = runPutPacket 12 10 L.empty $ do
-  putIP4 src
-  putIP4 dst
-  putWord8 0 >> putWord8 prot >> putWord16be (fromIntegral len)
+ip4PseudoHeader :: IP4 -> IP4 -> IP4Protocol -> Int -> PartialChecksum
+ip4PseudoHeader src dst prot len =
+  extendChecksum (fromIntegral len :: Word16) $
+  extendChecksum (Pair8 0 prot)               $
+  extendChecksum dst                          $
+  extendChecksum src emptyPartialChecksum
 
 
 -- IP4 Packets -----------------------------------------------------------------
