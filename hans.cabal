@@ -113,5 +113,6 @@ test-suite hans-tests
         other-modules:          Tests.Ethernet
                                 Tests.IP4
                                 Tests.IP4.Fragmentation
+                                Tests.IP4.Icmp4
                                 Tests.IP4.Packet
                                 Tests.Utils
