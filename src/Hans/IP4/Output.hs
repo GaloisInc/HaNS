@@ -57,9 +57,9 @@ sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
 
 -- Special case for sending with the address 0.0.0.0. Only succeeds if the
 -- destination address is the broadcast IP4.
-sendIP4 ns (SourceBroadcast dev) dst prot payload =
+sendIP4 ns (SourceBroadcast dev src) dst prot payload =
   if dst == broadcastIP4
-     then do primSendIP4 ns dev currentNetworkIP4 broadcastIP4 broadcastIP4
+     then do primSendIP4 ns dev src broadcastIP4 broadcastIP4
                  prot payload
              return True
      else return False
