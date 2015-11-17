@@ -77,14 +77,14 @@ guardLocalAddress IP4State { .. } dst =
 
 processIP4 :: Config -> IP4State -> Device -> S.ByteString -> Hans ()
 processIP4 _cfg ip4 dev payload =
-  do ((hdr,hdrLen,_),body) <- decode' (devStats dev) getIP4Packet payload
+  do ((hdr,hdrLen,bodyLen),body) <- decode' (devStats dev) getIP4Packet payload
 
      -- only validate the checkum if the device hasn't done that already
      let packetValid = dcChecksumOffload (devConfig dev)
                     || 0 == computeChecksum (S.take hdrLen payload)
      unless packetValid (dropPacket (devStats dev))
 
-     (hdr',body') <- processFragment (ip4Fragments ip4) hdr body
+     (hdr',body') <- processFragment (ip4Fragments ip4) hdr (S.take bodyLen body)
 
      -- was this packet destined for a local address?
      routeLocal ip4 dev hdr' body'

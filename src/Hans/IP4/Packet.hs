@@ -194,7 +194,7 @@ fragmentPacket mtu0 hdr0 = loop hdr0
 
 
 ip4FragmentField :: Bool -> Bool -> Word16 -> Word16
-ip4FragmentField df mf off = fragBit (morefragsBit (off .&. 0x1fff))
+ip4FragmentField df mf off = fragBit (morefragsBit ((off `shiftR` 3) .&. 0x1fff))
   where
   fragBit      | df        = (`setBit` 14)
                | otherwise = id
@@ -234,9 +234,8 @@ getIP4Packet  = label "IP4 Header" $ do
           ip4Ident           <- getWord16be
 
           s1 <- getWord16be
-          let flags             = s1 `shiftR` 13
-              ip4DontFragment   = flags `testBit` 1
-              ip4MoreFragments  = flags `testBit` 0
+          let ip4DontFragment   = s1 `testBit` 14
+              ip4MoreFragments  = s1 `testBit` 13
               ip4FragmentOffset = (s1 .&. 0x1fff) * 8
 
           ip4TimeToLive <- getWord8
@@ -250,7 +249,7 @@ getIP4Packet  = label "IP4 Header" $ do
                                   $ getIP4Options optlen
 
           let hdr = IP4Header { .. }
-          hdr `seq` return (hdr, ihl, fromIntegral payloadLen)
+          hdr `seq` return (hdr, ihl, fromIntegral payloadLen - ihl)
 
 putIP4Header :: IP4Header -> Int -> Put
 putIP4Header IP4Header { .. } pktlen = do
@@ -290,7 +289,7 @@ renderIP4Packet includeCS hdr pkt
 
   beforeCS  = L.take 10 bytes
   afterCS   = L.drop 12 bytes
-  csBytes   = runPutPacket 2 100 (afterCS `L.append` pkt) (putWord16be cs)
+  csBytes   = runPutPacket 2 100 afterCS (putWord16be cs)
 
   packet    = beforeCS `L.append` csBytes
 
