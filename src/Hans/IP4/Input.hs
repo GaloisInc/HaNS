@@ -8,7 +8,6 @@ module Hans.IP4.Input (
   ) where
 
 import Hans.Checksum (computeChecksum)
-import Hans.Config (Config(..))
 import Hans.Device (Device(..),DeviceConfig(..))
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
 import Hans.IP4.ArpTable (addEntry,lookupEntry)
@@ -23,7 +22,6 @@ import Hans.Types
 import Hans.UDP.Input (processUDP)
 
 import           Control.Monad (when,unless)
-import           Data.IORef (readIORef)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 
