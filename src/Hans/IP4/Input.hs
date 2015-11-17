@@ -70,6 +70,7 @@ updateEntry ns sha spa =
 
 -- IP4 Processing --------------------------------------------------------------
 
+-- | Process a packet that has arrived from a device.
 processIP4 :: NetworkStack -> Device -> S.ByteString -> Hans ()
 processIP4 ns dev payload =
   do ((hdr,hdrLen,bodyLen),body) <- decode' (devStats dev) getIP4Packet payload
@@ -89,8 +90,8 @@ processIP4 ns dev payload =
 
 
 -- | The processing stage after the packet has been decoded and validated. It's
--- exposed here so that routing to the loopback device can skip encoding the IP
--- packet, and feed it back through the input path.
+-- exposed here so that routing to an address that's managed by the network
+-- stack can skip the device layer.
 handleIP4 :: NetworkStack -> Device -> IP4Header -> S.ByteString -> Hans ()
 handleIP4 ns dev hdr body =
   do (IP4Header { .. },body') <-

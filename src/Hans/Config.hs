@@ -5,6 +5,7 @@ module Hans.Config (
   ) where
 
 import Data.Time.Clock (NominalDiffTime)
+import Data.Word (Word8)
 
 
 -- | General network stack configuration.
@@ -24,6 +25,8 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                        -- retransmission.
 
                      , cfgIP4FragTimeout :: !NominalDiffTime
+
+                     , cfgIP4InitialTTL :: {-# UNPACK #-} !Word8
                      }
 
 defaultConfig :: Config
@@ -33,6 +36,7 @@ defaultConfig  = Config { cfgInputQueueSize   = 128
                         , cfgArpRetry         = 10
                         , cfgArpRetryDelay    = 2000 -- 2 seconds
                         , cfgIP4FragTimeout   = 30
+                        , cfgIP4InitialTTL    = 128
                         }
 
 class HasConfig cfg where

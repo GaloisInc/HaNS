@@ -8,7 +8,9 @@ module Hans.IP4.Output (
     responder,
   ) where
 
-import Hans.Device (Device(..),DeviceConfig(..),DeviceStats(..),updateError)
+import Hans.Config (getConfig,Config(..))
+import Hans.Device
+           (Device(..),DeviceConfig(..),DeviceStats(..),updateError,updateTX)
 import Hans.Ethernet
            ( Mac,sendEthernet,pattern ETYPE_IPV4, pattern ETYPE_ARP
            , pattern BroadcastMac)
@@ -55,14 +57,19 @@ queueIP4 ns stats mbSrc dst prot payload =
 sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
         -> IO Bool
 
--- Special case for sending with the address 0.0.0.0. Only succeeds if the
--- destination address is the broadcast IP4.
-sendIP4 ns (SourceBroadcast dev src) dst prot payload =
-  if dst == broadcastIP4
-     then do primSendIP4 ns dev src broadcastIP4 broadcastIP4
-                 prot payload
-             return True
-     else return False
+-- A special case for when the sender knows that this is the right device, and
+-- source address. The routing table is still queried to find the next hop, and
+-- if the route found doesn't use the device provided, the packets aren't sent.
+sendIP4 ns (SourceDev dev src) dst prot payload =
+  do mbRoute <- lookupRoute ns dst
+     case mbRoute of
+       Just (src,next,dev') | devName dev == devName dev' ->
+         do primSendIP4 ns dev src dst next prot payload
+            return True
+
+       _ ->
+         do updateError (devStats dev)
+            return False
 
 -- sending from a specific device
 sendIP4 ns (SourceIP4 src) dst prot payload =
@@ -85,18 +92,22 @@ sendIP4 ns SourceAny dst prot payload =
        Nothing             -> return False
 
 
+prepareHeader :: NetworkStack -> IP4 -> IP4 -> IP4Protocol -> IO IP4Header
+prepareHeader ns src dst prot =
+  do ident <- nextIdent ns
+     return $! emptyIP4Header { ip4Ident      = ident
+                              , ip4SourceAddr = src
+                              , ip4DestAddr   = dst
+                              , ip4Protocol   = prot
+                              , ip4TimeToLive = cfgIP4InitialTTL (getConfig ns)
+                              }
+
 
 -- | Prepare IP4 fragments to be sent.
 prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4Protocol -> L.ByteString
            -> IO [L.ByteString]
 prepareIP4 ns dev src dst prot payload =
-  do ident <- nextIdent ns
-
-     let hdr = emptyIP4Header { ip4Ident      = ident
-                              , ip4SourceAddr = src
-                              , ip4DestAddr   = dst
-                              , ip4Protocol   = prot
-                              }
+  do hdr <- prepareHeader ns src dst prot
 
      let DeviceConfig { .. } = devConfig dev
 
@@ -107,14 +118,20 @@ prepareIP4 ns dev src dst prot payload =
 -- | Send an IP4 packet to the given destination. This assumes that routing has
 -- already taken place, and that the source and destination addresses are
 -- correct.
---
--- XXX: if the destination is an address managed by us, re-inject the packet
--- into the network stack without rendering it.
 primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> IP4Protocol
              -> L.ByteString -> IO ()
-primSendIP4 ns dev src dst next prot payload =
-  do packets <- prepareIP4 ns dev src dst prot payload
-     arpOutgoing ns dev src next packets
+primSendIP4 ns dev src dst next prot payload
+    -- when the source and next hop are the same, re-queue in the network stack
+    -- after fragment reassembly
+  | src == next =
+    do hdr     <- prepareHeader ns src dst prot
+       written <- BC.tryWriteChan (nsInput ns) $! FromIP4 dev hdr (L.toStrict payload)
+       updateTX (devStats dev) written
+
+    -- the packet is leaving the network stack so encode it and send
+  | otherwise =
+    do packets <- prepareIP4 ns dev src dst prot payload
+       arpOutgoing ns dev src next packets
 
 
 -- | Retrieve the outgoing address for this IP4 packet, and send along all

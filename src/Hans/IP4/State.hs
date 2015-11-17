@@ -35,7 +35,7 @@ data SendSource = SourceAny
                 | SourceIP4 !IP4
                   -- ^ The interface with this address
 
-                | SourceBroadcast !Device !IP4
+                | SourceDev !Device !IP4
                   -- ^ Broadcast from this device
 
 
