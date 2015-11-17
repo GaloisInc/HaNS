@@ -17,7 +17,7 @@ main  =
                _      -> fail "Expected a device name"
 
      ns  <- newNetworkStack defaultConfig
-     dev <- addDevice name defaultDeviceConfig ns
+     dev <- addDevice ns name defaultDeviceConfig
 
      addIP4Route ns False
          Route { routeNetwork = IP4Mask (packIP4 192 168 71 10) 24

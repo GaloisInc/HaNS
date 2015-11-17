@@ -44,6 +44,8 @@ packIP4 a b c d = IP4 $ fromIntegral a `shiftL` 24
                     .|. fromIntegral b `shiftL` 16
                     .|. fromIntegral c `shiftL`  8
                     .|. fromIntegral d
+{-# INLINE packIP4 #-}
+
 
 unpackIP4 :: IP4 -> (Word8,Word8,Word8,Word8)
 unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
@@ -51,6 +53,14 @@ unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
                     , fromIntegral (w `shiftR`  8)
                     , fromIntegral  w
                     )
+{-# INLINE unpackIP4 #-}
+
+
+broadcastIP4 :: IP4
+broadcastIP4  = IP4 0xffffffff
+
+currentNetworkIP4 :: IP4
+currentNetworkIP4  = IP4 0x0
 
 
 -- IP4 Masks -------------------------------------------------------------------

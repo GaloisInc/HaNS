@@ -1,12 +1,25 @@
-module Hans.Types where
+{-# LANGUAGE RecordWildCards #-}
 
-import Hans.Config (Config)
-import Hans.Device (Device,InputPacket)
-import Hans.IP4.State (IP4State)
+module Hans.Types (
+    module Hans.Types,
+    module Exports
+  ) where
 
-import Control.Concurrent (ThreadId)
-import Control.Concurrent.BoundedChan (BoundedChan)
-import Data.IORef (IORef)
+import Hans.Config (Config,HasConfig(..))
+import Hans.Device.Types (Device)
+import Hans.IP4.ArpTable as Exports (ArpTable)
+import Hans.IP4.Packet
+import Hans.IP4.State as Exports
+import Hans.IP4.RoutingTable as Exports (RoutingTable)
+
+import           Control.Concurrent (ThreadId)
+import           Control.Concurrent.BoundedChan (BoundedChan)
+import qualified Data.ByteString as S
+import           Data.IORef (IORef)
+
+
+data InputPacket = FromDevice !Device !S.ByteString
+                 | FromIP4 !Device !IP4Header !S.ByteString
 
 
 data NetworkStack = NetworkStack { nsConfig :: !Config
@@ -25,3 +38,11 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                  , nsIP4Responder :: !ThreadId
                                    -- ^ Internal IP4 responder
                                  }
+
+instance HasConfig NetworkStack where
+  getConfig = nsConfig
+  {-# INLINE getConfig #-}
+
+instance HasIP4State NetworkStack where
+  getIP4State = nsIP4State
+  {-# INLINE getIP4State #-}

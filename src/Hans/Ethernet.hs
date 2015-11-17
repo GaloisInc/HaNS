@@ -16,14 +16,6 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 
 
--- | Decode an ethernet frame, or fail trying.
-decodeEthernet :: InputPacket -> Hans (DeviceStats,EthernetHeader,S.ByteString)
-decodeEthernet InputPacket { .. } =
-  do let stats = devStats ipDevice
-     (hdr,payload) <- decode' stats getEthernetHeader ipBytes
-     return (stats,hdr,payload)
-
-
 -- | Send a message out via a device.
 sendEthernet :: Device -> Mac -> EtherType -> L.ByteString -> IO ()
 sendEthernet Device { .. } eDest eType payload =

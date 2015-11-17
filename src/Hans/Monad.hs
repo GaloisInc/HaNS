@@ -6,7 +6,7 @@ module Hans.Monad (
   , decode, decode'
   ) where
 
-import Hans.Device (DeviceStats(), updateDropped)
+import Hans.Device.Types (DeviceStats(), updateDropped)
 
 import qualified Data.ByteString as S
 import           Data.IORef (newIORef,writeIORef,readIORef)

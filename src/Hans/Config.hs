@@ -1,4 +1,8 @@
-module Hans.Config where
+module Hans.Config (
+    Config(..),
+    defaultConfig,
+    HasConfig(..),
+  ) where
 
 import Data.Time.Clock (NominalDiffTime)
 
@@ -30,3 +34,11 @@ defaultConfig  = Config { cfgInputQueueSize   = 128
                         , cfgArpRetryDelay    = 2000 -- 2 seconds
                         , cfgIP4FragTimeout   = 30
                         }
+
+class HasConfig cfg where
+  getConfig :: cfg -> Config
+
+instance HasConfig Config where
+  getConfig = id
+  {-# INLINE getConfig #-}
+

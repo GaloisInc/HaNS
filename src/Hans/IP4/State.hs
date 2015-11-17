@@ -3,18 +3,19 @@
 module Hans.IP4.State (
     IP4State(..), ResponderRequest(..),
     newIP4State,
+    HasIP4State(..),
     addRoute,
     lookupRoute,
-    nextRandom
+    isLocalAddr,
+    nextIdent,
   ) where
 
 import           Hans.Config (Config(..))
-import           Hans.Device (Device)
-import           Hans.Ethernet (Mac,EtherType)
+import           Hans.Device.Types (Device)
+import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
-import           Hans.IP4.Icmp4 (Icmp4Packet)
-import           Hans.IP4.Packet (IP4,IP4Protocol)
+import           Hans.IP4.Packet (IP4,IP4Protocol,IP4Ident)
 import qualified Hans.IP4.RoutingTable as RT
 
 
@@ -29,7 +30,7 @@ import           System.Random (StdGen,newStdGen,Random(random))
 data ResponderRequest = Finish !Device !Mac [L.ByteString]
                         -- ^ Finish sending these IP4 packets
 
-                      | Send !IP4 !IP4Protocol L.ByteString
+                      | Send !(Maybe IP4) !IP4 !IP4Protocol L.ByteString
                        -- ^ Send this IP4 payload to this address
 
 
@@ -63,22 +64,46 @@ newIP4State cfg =
                      , ip4ArpRetryDelay = cfgArpRetryDelay cfg * 1000
                      , .. }
 
-addRoute :: IP4State -> Bool -> RT.Route -> IO ()
-addRoute IP4State { .. } defRoute route =
+class HasIP4State state where
+  getIP4State :: state -> IP4State
+
+instance HasIP4State IP4State where
+  getIP4State = id
+  {-# INLINE getIP4State #-}
+
+
+addRoute :: HasIP4State state => state -> Bool -> RT.Route -> IO ()
+addRoute state = \ defRoute route ->
   atomicModifyIORef' ip4Routes (\ table -> (RT.addRule defRoute route table, ()))
+  where
+  IP4State { .. } = getIP4State state
+
 
 -- | Lookup the source address, as well as the next hop and device.
-lookupRoute :: IP4State -> IP4 -> IO (Maybe (IP4,IP4,Device))
-lookupRoute IP4State { .. } dest =
+lookupRoute :: HasIP4State state => state -> IP4 -> IO (Maybe (IP4,IP4,Device))
+lookupRoute state = \ dest ->
   do routes <- readIORef ip4Routes
      case RT.lookupRoute dest routes of
        Just route -> return (Just ( RT.routeSource route
                                   , RT.routeNextHop dest route
                                   , RT.routeDevice route))
        Nothing    -> return Nothing
+  where
+  IP4State { .. } = getIP4State state
+
+
+-- | Is this an address that's assigned to a device in the network stack?
+isLocalAddr :: HasIP4State state => state -> IP4 -> IO (Maybe RT.Route)
+isLocalAddr state = \ dst ->
+  do rt <- readIORef ip4Routes
+     return $! RT.isLocal dst rt
+  where
+  IP4State { .. } = getIP4State state
 
 
 -- | Give back the result of using the 'random' function on the internal state.
-nextRandom :: Random a => IP4State -> IO a
-nextRandom IP4State { .. } =
+nextIdent :: HasIP4State state => state -> IO IP4Ident
+nextIdent state =
   atomicModifyIORef' ip4RandomSeed (\g -> case random g of (a,g') -> (g',a) )
+  where
+  IP4State { .. } = getIP4State state

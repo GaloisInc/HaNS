@@ -11,7 +11,7 @@ module Hans.IP4.RoutingTable (
     isLocal,
   ) where
 
-import Hans.Device (Device)
+import Hans.Device.Types (Device)
 import Hans.IP4.Packet
 
 import Control.Monad (guard)
@@ -22,6 +22,7 @@ import Data.Word (Word32)
 
 data RouteType = Direct
                | Indirect !IP4
+               | Loopback
 
 data Route = Route { routeNetwork :: {-# UNPACK #-} !IP4Mask
                    , routeType    ::                !RouteType
@@ -32,10 +33,11 @@ routeSource :: Route -> IP4
 routeSource Route { routeNetwork = IP4Mask addr _ } = addr
 
 routeNextHop :: IP4 -> Route -> IP4
-routeNextHop dest Route { .. } =
-  case routeType of
+routeNextHop dest route =
+  case routeType route of
     Direct           -> dest
     Indirect nextHop -> nextHop
+    Loopback         -> routeSource route
 
 
 data Rule = Rule { ruleMask   :: {-# UNPACK #-} !Word32
@@ -116,9 +118,9 @@ lookupRoute dest RoutingTable { .. } = foldr findRoute rtDefault rtRules
 
 -- | If the address given is the source address for a rule in the table, return
 -- the associated 'Device'.
-isLocal :: IP4 -> RoutingTable -> Maybe Device
+isLocal :: IP4 -> RoutingTable -> Maybe Route
 isLocal addr RoutingTable { .. } = foldr hasSource Nothing rtRules
   where
   hasSource rule continue
-    | ruleSource rule == addr = Just (ruleDevice rule)
+    | ruleSource rule == addr = Just (ruleRoute rule)
     | otherwise               = continue

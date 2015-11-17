@@ -25,10 +25,7 @@ import           Hans.Time (toUSeconds)
 import           Control.Concurrent
                      (threadDelay,MVar,newEmptyMVar,forkIO,ThreadId,tryPutMVar)
 import qualified Control.Concurrent.BoundedChan as BC
-import qualified Control.Exception as X
 import           Control.Monad (forever)
-import qualified Data.Foldable as F
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
 import           Data.Time.Clock
                      (UTCTime,NominalDiffTime,addUTCTime,getCurrentTime)
 

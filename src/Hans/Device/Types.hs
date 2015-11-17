@@ -66,14 +66,6 @@ data DeviceException = FailedToOpen !DeviceName
 instance X.Exception DeviceException
 
 
--- Packets ---------------------------------------------------------------------
-
--- | Packets received from a specific device.
-data InputPacket = InputPacket { ipDevice :: !Device
-                               , ipBytes  :: !S.ByteString
-                               }
-
-
 -- Statistics ------------------------------------------------------------------
 
 type Stat = IORef Int
@@ -109,11 +101,11 @@ dumpStats DeviceStats { .. } =
 
 -- | Add one to the count of dropped packets for this device.
 updateDropped :: DeviceStats -> IO ()
-updateDropped DeviceStats { .. } = incrementStat statDropped 
+updateDropped DeviceStats { .. } = incrementStat statDropped
 
 -- | Add one to the error count for this device.
 updateError :: DeviceStats -> IO ()
-updateError DeviceStats { .. } = incrementStat statError 
+updateError DeviceStats { .. } = incrementStat statError
 
 -- | Update information about packets received.
 updateRX :: DeviceStats -> Bool -> IO ()

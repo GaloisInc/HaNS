@@ -17,8 +17,9 @@ import Hans.IP4.ArpTable
            ,writeChanStrategy)
 import Hans.IP4.Icmp4 (Icmp4Packet)
 import Hans.IP4.Packet
-import Hans.IP4.State
+import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Monad
+import Hans.Types
 
 import           Control.Concurrent (takeMVar,forkIO,ThreadId,threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
@@ -27,44 +28,62 @@ import qualified Data.ByteString.Lazy as L
 
 
 
-responder :: IP4State -> IO ()
-responder ip4 = forever $
-  do req <- BC.readChan (ip4ResponderQueue ip4)
+responder :: NetworkStack -> IO ()
+responder ns = forever $
+  do req <- BC.readChan (ip4ResponderQueue (getIP4State ns))
      case req of
 
-       Send dst prot payload ->
-         do _ <- sendIP4 ip4 dst prot payload
+       Send mbSrc dst prot payload ->
+         do _ <- sendIP4 ns mbSrc dst prot payload
             return ()
 
        Finish dev mac frames ->
-         mapM_ (sendEthernet dev mac ETYPE_IPV4) frames
+            sendIP4Frames dev mac frames
 
 
 -- | Queue a message on the responder queue instead of attempting to send it
 -- directly.
-queueIP4 :: IP4State -> DeviceStats -> IP4 -> IP4Protocol -> L.ByteString -> IO ()
-queueIP4 ip4 stats dst prot payload =
-  do written <- BC.tryWriteChan (ip4ResponderQueue ip4) (Send dst prot payload)
+queueIP4 :: NetworkStack -> DeviceStats
+         -> Maybe IP4 -> IP4 -> IP4Protocol -> L.ByteString
+         -> IO ()
+queueIP4 ns stats mbSrc dst prot payload =
+  do written <- BC.tryWriteChan (ip4ResponderQueue (getIP4State ns))
+                    (Send mbSrc dst prot payload)
      unless written (updateError stats)
 
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
 -- route to the destination, return False.
-sendIP4 :: IP4State -> IP4 -> IP4Protocol -> L.ByteString -> IO Bool
-sendIP4 ip4 dst prot payload =
-  do mbRoute <- lookupRoute ip4 dst
+sendIP4 :: NetworkStack -> Maybe IP4 -> IP4 -> IP4Protocol -> L.ByteString
+        -> IO Bool
+
+-- sending from a specific device
+sendIP4 ns (Just src) dst prot payload =
+  do mbRoute <- isLocalAddr ns src
      case mbRoute of
-       Just (src,next,dev) -> do primSendIP4 ip4 dev src dst next prot payload
+       Just route ->
+         do primSendIP4 ns (routeDevice route) (routeSource route)
+                dst (routeNextHop dst route) prot payload
+            return True
+
+       Nothing ->
+            return False
+
+-- find the right path out
+sendIP4 ns Nothing dst prot payload =
+  do mbRoute <- lookupRoute ns dst
+     case mbRoute of
+       Just (src,next,dev) -> do primSendIP4 ns dev src dst next prot payload
                                  return True
        Nothing             -> return False
 
 
 
 -- | Prepare IP4 fragments to be sent.
-prepareIP4 :: IP4State -> Device -> IP4 -> IP4 -> IP4Protocol -> L.ByteString
+prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4Protocol -> L.ByteString
            -> IO [L.ByteString]
-prepareIP4 ip4 dev src dst prot payload =
-  do ident <- nextRandom ip4
+prepareIP4 ns dev src dst prot payload =
+  do ident <- nextIdent ns
 
      let hdr = emptyIP4Header { ip4Ident      = ident
                               , ip4SourceAddr = src
@@ -81,43 +100,57 @@ prepareIP4 ip4 dev src dst prot payload =
 -- | Send an IP4 packet to the given destination. This assumes that routing has
 -- already taken place, and that the source and destination addresses are
 -- correct.
-primSendIP4 :: IP4State -> Device -> IP4 -> IP4 -> IP4 -> IP4Protocol
+--
+-- XXX: if the destination is an address managed by us, re-inject the packet
+-- into the network stack without rendering it.
+primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> IP4Protocol
              -> L.ByteString -> IO ()
-primSendIP4 ip4 dev src dst next prot payload =
-  do packets <- prepareIP4 ip4 dev src dst prot payload
-     arpOutgoing ip4 dev src next packets
+primSendIP4 ns dev src dst next prot payload =
+  do packets <- prepareIP4 ns dev src dst prot payload
+     arpOutgoing ns dev src next packets
 
 
 -- | Retrieve the outgoing address for this IP4 packet, and send along all
 -- fragments.
-arpOutgoing :: IP4State -> Device -> IP4 -> IP4 -> [L.ByteString] -> IO ()
-arpOutgoing ip4 dev src next packets =
-  do res <- resolveAddr (ip4ArpTable ip4) next queueSend
-     case res of
-       Known dstMac ->
-         mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
+arpOutgoing :: NetworkStack -> Device -> IP4 -> IP4 -> [L.ByteString] -> IO ()
+arpOutgoing ns dev src next packets
+  | next == broadcastIP4 =
+    sendIP4Frames dev BroadcastMac packets
 
-       -- The mac wasn't present in the table. If this was the first request for
-       -- this address, start a request thread.
-       Unknown newRequest () ->
-         when newRequest $ do _ <- forkIO (arpRequestThread ip4 dev src next)
-                              return ()
+  | otherwise =
+    do res <- resolveAddr (ip4ArpTable (getIP4State ns)) next queueSend
+       case res of
+         Known dstMac ->
+           sendIP4Frames dev dstMac packets
+
+         -- The mac wasn't present in the table. If this was the first request for
+         -- this address, start a request thread.
+         Unknown newRequest () ->
+           when newRequest $ do _ <- forkIO (arpRequestThread ns dev src next)
+                                return ()
 
   where
 
   queueSend =
-    writeChanStrategy (Just (devStats dev)) mkFinish (ip4ResponderQueue ip4)
+    writeChanStrategy (Just (devStats dev)) mkFinish
+        (ip4ResponderQueue (getIP4State ns))
 
   mkFinish mbMac =
     do dstMac <- mbMac
        return $! Finish dev dstMac packets
 
 
+sendIP4Frames :: Device -> Mac -> [L.ByteString] -> IO ()
+sendIP4Frames dev dstMac packets =
+  mapM_ (sendEthernet dev dstMac ETYPE_IPV4) packets
+
+
 -- | Make an Arp request for the given IP address, until the maximum retries
 -- have been exhausted, or the entry made it into the table.
-arpRequestThread :: IP4State -> Device -> IP4 -> IP4 -> IO ()
-arpRequestThread IP4State { .. } dev src dst = loop 0
+arpRequestThread :: NetworkStack -> Device -> IP4 -> IP4 -> IO ()
+arpRequestThread ns dev src dst = loop 0
   where
+  IP4State { ..} = getIP4State ns
 
   request = renderArpPacket ArpPacket { arpOper   = ArpRequest
                                       , arpSHA    = devMac dev

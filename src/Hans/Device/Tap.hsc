@@ -9,6 +9,7 @@ module Hans.Device.Tap (listDevices,openDevice) where
 
 import           Hans.Ethernet.Types (Mac(..))
 import           Hans.Device.Types
+import           Hans.Types (NetworkStack(..),InputPacket(..))
 
 import           Control.Concurrent
                      (threadWaitRead,forkIO,killThread,newMVar,withMVar)
@@ -35,8 +36,8 @@ import           System.Posix.Types (Fd(..))
 listDevices :: IO [DeviceName]
 listDevices  = return []
 
-openDevice :: DeviceName -> DeviceConfig -> BoundedChan InputPacket -> IO Device
-openDevice devName devConfig devRecvQueue =
+openDevice :: NetworkStack -> DeviceName -> DeviceConfig -> IO Device
+openDevice ns devName devConfig =
   do (fd,devMac) <- initTapDevice devName
 
      -- The `starting` lock makes sure that only one set of threads will be
@@ -55,7 +56,7 @@ openDevice devName devConfig devRecvQueue =
            do mbTids <- readIORef threadIds
 
               when (mbTids == Nothing) $
-                do recvThread <- forkIO (tapRecvLoop dev      fd devRecvQueue)
+                do recvThread <- forkIO (tapRecvLoop ns dev fd)
                    sendThread <- forkIO (tapSendLoop devStats fd devSendQueue)
                    writeIORef threadIds (Just (recvThread,sendThread))
 
@@ -112,19 +113,18 @@ tapSendLoop stats fd queue = forever $
 
 
 -- | Receive a packet from the tap device.
-tapRecvLoop :: Device -> Fd -> BoundedChan InputPacket -> IO ()
-tapRecvLoop dev @ Device { .. } fd queue = forever $
+tapRecvLoop :: NetworkStack -> Device -> Fd -> IO ()
+tapRecvLoop ns dev @ Device { .. } fd = forever $
   do threadWaitRead fd
 
-     ipBytes <- S.createUptoN 1514 $ \ ptr ->
+     bytes <- S.createUptoN 1514 $ \ ptr ->
        do actual <- c_read fd ptr 1514
           return (fromIntegral actual)
 
      -- tap devices don't appear to pad received packets out to the minimum size
      -- of 60 bytes, so just don't do that check here.
 
-     let input = InputPacket { ipDevice = dev, .. }
-     success <- tryWriteChan queue $! input
+     success <- tryWriteChan (nsInput ns) $! FromDevice dev bytes
      updateRX devStats success
 
 

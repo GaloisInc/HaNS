@@ -59,6 +59,7 @@ library
                                 Hans.Checksum
                                 Hans.Config
                                 Hans.Device
+                                Hans.Device.Loopback
                                 Hans.Device.Types
                                 Hans.Ethernet
                                 Hans.Ethernet.Types
