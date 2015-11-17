@@ -1,7 +1,9 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Hans.IP4.State (
-    IP4State(..), ResponderRequest(..),
+    IP4State(..),
+    SendSource(..),
+    ResponderRequest(..),
     newIP4State,
     HasIP4State(..),
     addRoute,
@@ -27,10 +29,20 @@ import           System.Random (StdGen,newStdGen,Random(random))
 
 -- IP4 State -------------------------------------------------------------------
 
+data SendSource = SourceAny
+                  -- ^ Any interface that will route the message
+
+                | SourceIP4 !IP4
+                  -- ^ The interface with this address
+
+                | SourceBroadcast !Device
+                  -- ^ Broadcast from this device
+
+
 data ResponderRequest = Finish !Device !Mac [L.ByteString]
                         -- ^ Finish sending these IP4 packets
 
-                      | Send !(Maybe IP4) !IP4 !IP4Protocol L.ByteString
+                      | Send !SendSource !IP4 !IP4Protocol L.ByteString
                        -- ^ Send this IP4 payload to this address
 
 

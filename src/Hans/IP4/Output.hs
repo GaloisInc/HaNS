@@ -15,13 +15,11 @@ import Hans.Ethernet
 import Hans.IP4.ArpTable
            (lookupEntry,resolveAddr,QueryResult(..),markUnreachable
            ,writeChanStrategy)
-import Hans.IP4.Icmp4 (Icmp4Packet)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
-import Hans.Monad
 import Hans.Types
 
-import           Control.Concurrent (takeMVar,forkIO,ThreadId,threadDelay)
+import           Control.Concurrent (forkIO,threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (when,forever,unless)
 import qualified Data.ByteString.Lazy as L
@@ -44,7 +42,7 @@ responder ns = forever $
 -- | Queue a message on the responder queue instead of attempting to send it
 -- directly.
 queueIP4 :: NetworkStack -> DeviceStats
-         -> Maybe IP4 -> IP4 -> IP4Protocol -> L.ByteString
+         -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
          -> IO ()
 queueIP4 ns stats mbSrc dst prot payload =
   do written <- BC.tryWriteChan (ip4ResponderQueue (getIP4State ns))
@@ -54,11 +52,20 @@ queueIP4 ns stats mbSrc dst prot payload =
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
 -- route to the destination, return False.
-sendIP4 :: NetworkStack -> Maybe IP4 -> IP4 -> IP4Protocol -> L.ByteString
+sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
         -> IO Bool
 
+-- Special case for sending with the address 0.0.0.0. Only succeeds if the
+-- destination address is the broadcast IP4.
+sendIP4 ns (SourceBroadcast dev) dst prot payload =
+  if dst == broadcastIP4
+     then do primSendIP4 ns dev currentNetworkIP4 broadcastIP4 broadcastIP4
+                 prot payload
+             return True
+     else return False
+
 -- sending from a specific device
-sendIP4 ns (Just src) dst prot payload =
+sendIP4 ns (SourceIP4 src) dst prot payload =
   do mbRoute <- isLocalAddr ns src
      case mbRoute of
        Just route ->
@@ -70,7 +77,7 @@ sendIP4 ns (Just src) dst prot payload =
             return False
 
 -- find the right path out
-sendIP4 ns Nothing dst prot payload =
+sendIP4 ns SourceAny dst prot payload =
   do mbRoute <- lookupRoute ns dst
      case mbRoute of
        Just (src,next,dev) -> do primSendIP4 ns dev src dst next prot payload

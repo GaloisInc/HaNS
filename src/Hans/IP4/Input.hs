@@ -142,7 +142,7 @@ processICMP ns dev src dst body =
          do let packet = renderIcmp4Packet
                              (not (dcChecksumOffload (devConfig dev)))
                              (EchoReply ident seqNum bytes)
-            io (queueIP4 ns (devStats dev) (Just dst) src IP4_PROT_ICMP packet)
+            io (queueIP4 ns (devStats dev) (SourceIP4 dst) src IP4_PROT_ICMP packet)
             escape
 
 
