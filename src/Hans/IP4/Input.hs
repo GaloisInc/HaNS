@@ -79,6 +79,12 @@ processIP4 ns dev payload =
                     || 0 == computeChecksum (S.take hdrLen payload)
      unless packetValid (dropPacket (devStats dev))
 
+     -- Drop packets that weren't destined for an address that this device
+     -- holds.
+     -- XXX: if we ever want to use HaNS as a router, this would be where IP
+     -- routing would happen
+     checkDestination ns dev (ip4DestAddr hdr)
+
      handleIP4 ns dev hdr (S.take bodyLen body)
 
 
@@ -87,35 +93,30 @@ processIP4 ns dev payload =
 -- packet, and feed it back through the input path.
 handleIP4 :: NetworkStack -> Device -> IP4Header -> S.ByteString -> Hans ()
 handleIP4 ns dev hdr body =
-  do (hdr',body') <- processFragment (ip4Fragments (getIP4State ns)) hdr body
-
-     -- was this packet destined for a local address?
-     routeLocal ns dev hdr' body'
-       -- XXX: as routeLocal can fail, add in support for conditional routing
-       -- based on network stack config.
-       -- XXX: do we ever want to support using HaNS as a router?
-
-
--- | Make sure that the destination of this packet is a device that we manage,
--- then pass it on to the appropriate layer for further processing.
-routeLocal :: NetworkStack -> Device -> IP4Header -> S.ByteString -> Hans ()
-routeLocal ns inDev IP4Header { .. } body =
-  do checkDestination ns ip4DestAddr
+  do (IP4Header { .. },body') <-
+         processFragment (ip4Fragments (getIP4State ns)) hdr body
 
      case ip4Protocol of
-       IP4_PROT_ICMP -> processICMP ns inDev ip4SourceAddr ip4DestAddr body
-       IP4_PROT_UDP  -> processUDP  ns inDev ip4SourceAddr ip4DestAddr body
-       _             -> dropPacket (devStats inDev)
+       IP4_PROT_ICMP -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
+       IP4_PROT_UDP  -> processUDP  ns dev ip4SourceAddr ip4DestAddr body'
+       _             -> dropPacket (devStats dev)
 
 
 -- | Validate the destination of this packet.
-checkDestination :: NetworkStack -> IP4 -> Hans ()
-checkDestination ns dest
+checkDestination :: NetworkStack -> Device -> IP4 -> Hans ()
+checkDestination ns dev dest
+
+    -- always accept broadcast messages
   | dest == broadcastIP4 = return ()
-  | otherwise            = do mb <- io (isLocalAddr ns dest)
-                              case mb of
-                                Just {} -> return ()
-                                Nothing -> escape
+
+    -- require that the input device has the destination address
+  | otherwise =
+    do mb <- io (isLocalAddr ns dest)
+       case mb of
+         Just Route { .. } | devName routeDevice == devName dev -> return ()
+         _                                                      -> escape
+
+
 
 
 -- ICMP Processing -------------------------------------------------------------
