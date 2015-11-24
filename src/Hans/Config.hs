@@ -27,16 +27,19 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                      , cfgIP4FragTimeout :: !NominalDiffTime
 
                      , cfgIP4InitialTTL :: {-# UNPACK #-} !Word8
+
+                     , cfgUdpSocketTableSize :: {-# UNPACK #-} !Int
                      }
 
 defaultConfig :: Config
-defaultConfig  = Config { cfgInputQueueSize   = 128
-                        , cfgArpTableSize     = 67
-                        , cfgArpTableLifetime = 60 -- 60 seconds
-                        , cfgArpRetry         = 10
-                        , cfgArpRetryDelay    = 2000 -- 2 seconds
-                        , cfgIP4FragTimeout   = 30
-                        , cfgIP4InitialTTL    = 128
+defaultConfig  = Config { cfgInputQueueSize     = 128
+                        , cfgArpTableSize       = 67
+                        , cfgArpTableLifetime   = 60 -- 60 seconds
+                        , cfgArpRetry           = 10
+                        , cfgArpRetryDelay      = 2000 -- 2 seconds
+                        , cfgIP4FragTimeout     = 30
+                        , cfgIP4InitialTTL      = 128
+                        , cfgUdpSocketTableSize = 31
                         }
 
 class HasConfig cfg where

@@ -9,6 +9,7 @@ module Hans.IP4.RoutingTable (
     deleteRule,
     lookupRoute,
     isLocal,
+    getRoutes,
   ) where
 
 import Hans.Device.Types (Device)
@@ -76,6 +77,9 @@ data RoutingTable = RoutingTable { rtRules :: [Rule]
 
 empty :: RoutingTable
 empty  = RoutingTable { rtRules = [], rtDefault = Nothing }
+
+getRoutes :: RoutingTable -> [Route]
+getRoutes RoutingTable { .. } = map ruleRoute rtRules
 
 addRule :: Bool -> Route -> RoutingTable -> RoutingTable
 addRule isDefault route RoutingTable { .. } =

@@ -33,6 +33,7 @@ import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Types
+import qualified Hans.Udp.State as Udp
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.BoundedChan (newBoundedChan)
@@ -45,6 +46,7 @@ newNetworkStack nsConfig =
   do nsInput        <- newBoundedChan (cfgInputQueueSize nsConfig)
      nsDevices      <- newIORef []
      nsIP4State     <- IP4.newIP4State nsConfig
+     nsUdpState     <- Udp.newUdpState nsConfig
 
      rec nsIP4Responder <- forkIO (IP4.responder ns)
          let ns = NetworkStack { .. }

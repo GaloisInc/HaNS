@@ -13,7 +13,7 @@ module Hans.IP4.State (
   ) where
 
 import           Hans.Config (Config(..))
-import           Hans.Device.Types (Device)
+import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
@@ -119,3 +119,25 @@ nextIdent state =
   atomicModifyIORef' ip4RandomSeed (\g -> case random g of (a,g') -> (g',a) )
   where
   IP4State { .. } = getIP4State state
+
+
+-- | Give back routes that can be used to route the source of an IP packet.
+routesFor :: HasIP4State state => state -> SendSource -> IO [RT.Route]
+routesFor state src =
+  case src of
+
+    SourceAny ->
+      do rt <- readIORef (ip4Routes (getIP4State state))
+         return (RT.getRoutes rt)
+
+    SourceIP4 addr ->
+      do mb <- isLocalAddr state addr
+         case mb of
+           Just r  -> return [r]
+           Nothing -> return []
+
+    SourceDev dev addr ->
+      do mb <- isLocalAddr state addr
+         case mb of
+           Just r | devName (RT.routeDevice r) == devName dev -> return [r]
+           _                                                  -> return []

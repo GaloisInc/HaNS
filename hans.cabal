@@ -56,6 +56,7 @@ library
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
+                                Hans.Buffer.Datagram
                                 Hans.Checksum
                                 Hans.Config
                                 Hans.Device
@@ -75,10 +76,12 @@ library
                                 Hans.Input
                                 Hans.Monad
                                 Hans.Serialize
+                                Hans.Socket
                                 Hans.Time
                                 Hans.Types
-                                Hans.UDP.Input
-                                Hans.UDP.Packet
+                                Hans.Udp.Input
+                                Hans.Udp.Packet
+                                Hans.Udp.State
 
 executable echo-server
         if flag(examples)

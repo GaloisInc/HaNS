@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 
-module Hans.UDP.Packet where
+module Hans.Udp.Packet where
 
 import Hans.Checksum (finalizeChecksum,extendChecksum)
 import Hans.IP4.Packet (IP4,ip4PseudoHeader,pattern IP4_PROT_UDP)
@@ -31,6 +31,11 @@ data UdpHeader = UdpHeader { udpSourcePort :: {-# UNPACK #-} !UdpPort
                            , udpDestPort   :: {-# UNPACK #-} !UdpPort
                            , udpChecksum   :: {-# UNPACK #-} !Word16
                            } deriving (Eq,Show)
+
+emptyUdpHeader :: UdpHeader
+emptyUdpHeader  = UdpHeader { udpSourcePort = 0
+                            , udpDestPort   = 0
+                            , udpChecksum   = 0 }
 
 udpHeaderSize :: Int
 udpHeaderSize  = 8

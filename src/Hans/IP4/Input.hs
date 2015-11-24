@@ -19,7 +19,7 @@ import Hans.IP4.RoutingTable (Route(..))
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
 import Hans.Serialize (runPutPacket)
 import Hans.Types
-import Hans.UDP.Input (processUDP)
+import Hans.Udp.Input (processUdp4)
 
 import           Control.Monad (when,unless)
 import qualified Data.ByteString as S
@@ -99,23 +99,22 @@ handleIP4 ns dev hdr body =
 
      case ip4Protocol of
        IP4_PROT_ICMP -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
-       IP4_PROT_UDP  -> processUDP  ns dev ip4SourceAddr ip4DestAddr body'
+       IP4_PROT_UDP  -> processUdp4 ns dev ip4SourceAddr ip4DestAddr body'
        _             -> dropPacket (devStats dev)
 
 
 -- | Validate the destination of this packet.
 checkDestination :: NetworkStack -> Device -> IP4 -> Hans ()
-checkDestination ns dev dest
 
-    -- always accept broadcast messages
-  | dest == broadcastIP4 = return ()
+-- always accept broadcast messages
+checkDestination ns dev BroadcastIP4 = return ()
 
-    -- require that the input device has the destination address
-  | otherwise =
-    do mb <- io (isLocalAddr ns dest)
-       case mb of
-         Just Route { .. } | devName routeDevice == devName dev -> return ()
-         _                                                      -> escape
+-- require that the input device has the destination address
+checkDestination ns dev dest =
+  do mb <- io (isLocalAddr ns dest)
+     case mb of
+       Just Route { .. } | devName routeDevice == devName dev -> return ()
+       _                                                      -> escape
 
 
 

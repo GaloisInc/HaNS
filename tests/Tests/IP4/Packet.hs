@@ -5,12 +5,10 @@ module Tests.IP4.Packet where
 import Tests.Ethernet (arbitraryMac)
 import Tests.Utils (encodeDecodeIdentity)
 
-import Hans.Checksum (computeChecksum)
 import Hans.IP4.Packet
 
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Short as Sh
-import           Data.Serialize (runPut)
 import           Data.Word (Word8)
 import           Test.QuickCheck
 import           Test.Tasty (testGroup,TestTree)

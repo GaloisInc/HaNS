@@ -137,21 +137,20 @@ primSendIP4 ns dev src dst next prot payload
 -- | Retrieve the outgoing address for this IP4 packet, and send along all
 -- fragments.
 arpOutgoing :: NetworkStack -> Device -> IP4 -> IP4 -> [L.ByteString] -> IO ()
-arpOutgoing ns dev src next packets
-  | next == broadcastIP4 =
+arpOutgoing ns dev src BroadcastIP4 packets =
     sendIP4Frames dev BroadcastMac packets
 
-  | otherwise =
-    do res <- resolveAddr (ip4ArpTable (getIP4State ns)) next queueSend
-       case res of
-         Known dstMac ->
-           sendIP4Frames dev dstMac packets
+arpOutgoing ns dev src next packets =
+  do res <- resolveAddr (ip4ArpTable (getIP4State ns)) next queueSend
+     case res of
+       Known dstMac ->
+         sendIP4Frames dev dstMac packets
 
-         -- The mac wasn't present in the table. If this was the first request for
-         -- this address, start a request thread.
-         Unknown newRequest () ->
-           when newRequest $ do _ <- forkIO (arpRequestThread ns dev src next)
-                                return ()
+       -- The mac wasn't present in the table. If this was the first request for
+       -- this address, start a request thread.
+       Unknown newRequest () ->
+         when newRequest $ do _ <- forkIO (arpRequestThread ns dev src next)
+                              return ()
 
   where
 

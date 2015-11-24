@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Hans.IP4.Packet where
 
@@ -23,13 +24,14 @@ import           Data.Serialize
                     ,label,isolate
                     ,Putter,Put,putWord8,putWord16be,putWord32be
                     ,putLazyByteString,putShortByteString)
+import           Data.Typeable (Typeable)
 import           Data.Word (Word8,Word16,Word32)
 
 
 -- IP4 Addresses ---------------------------------------------------------------
 
 newtype IP4 = IP4 Word32
-              deriving (Eq,Ord,Show,Hashable,Checksum)
+              deriving (Eq,Ord,Show,Hashable,Checksum,Typeable)
 
 getIP4 :: Get IP4
 getIP4  =
@@ -56,11 +58,11 @@ unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
 {-# INLINE unpackIP4 #-}
 
 
-broadcastIP4 :: IP4
-broadcastIP4  = IP4 0xffffffff
+pattern BroadcastIP4 = IP4 0xffffffff
 
-currentNetworkIP4 :: IP4
-currentNetworkIP4  = IP4 0x0
+pattern CurrentNetworkIP4 = IP4 0x0
+
+pattern WildcardIP4 = IP4 0x0
 
 
 -- IP4 Masks -------------------------------------------------------------------
