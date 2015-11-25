@@ -8,7 +8,7 @@ module Hans.Socket where
 
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device(devName))
-import           Hans.IP4.Packet (IP4,pattern WildcardIP4)
+import           Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
 import           Hans.Types (NetworkStack,registerRecv4,UdpBuffer,lookupRoute)
 import           Hans.Udp.Input ()
 import           Hans.Udp.Output (primSendUdp4)
@@ -208,7 +208,13 @@ sendto4 sock @ DatagramSocket { .. } = \ dst dstPort bytes ->
                   do _ <- primSendUdp4 dgNS dev src' srcPort dst dstPort next bytes
                      return ()
 
-              _ -> throwSocketExceptionIO sock NoRouteToHost
+              Nothing
+                | Just dev <- mbDev, dst == BroadcastIP4 ->
+                  do _ <- primSendUdp4 dgNS dev src srcPort dst dstPort dst bytes
+                     return ()
+
+              _ ->
+                  throwSocketExceptionIO sock NoRouteToHost
 
        -- we can't use sendto if sConnect has been used already
        KnownRoute {} ->
