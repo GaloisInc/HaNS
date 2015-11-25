@@ -78,8 +78,8 @@ instance Checksum Pair8 where
 instance Checksum Word16 where
   extendChecksum w = \pc -> extendChecksum (Pair8 hi lo) pc
     where
-    lo = fromIntegral (w `shiftR` 8)
-    hi = fromIntegral  w
+    lo = fromIntegral  w
+    hi = fromIntegral (w `shiftR` 8)
   {-# INLINE extendChecksum #-}
 
 instance Checksum Word32 where

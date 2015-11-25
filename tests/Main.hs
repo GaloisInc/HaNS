@@ -1,5 +1,6 @@
 module Main where
 
+import Tests.Checksum
 import Tests.Ethernet
 import Tests.IP4
 
@@ -11,6 +12,7 @@ import Test.Tasty.Runners.AntXML (antXMLRunner)
 main :: IO ()
 main  = defaultMainWithIngredients [antXMLRunner,consoleTestReporter] $
   testGroup "Properties"
-    [ ethernetTests
+    [ checksumTests
+    , ethernetTests
     , ip4Tests
     ]

@@ -119,7 +119,8 @@ test-suite hans-tests
 
         hs-source-dirs:         tests
         main-is:                Main.hs
-        other-modules:          Tests.Ethernet
+        other-modules:          Tests.Checksum
+                                Tests.Ethernet
                                 Tests.IP4
                                 Tests.IP4.Fragmentation
                                 Tests.IP4.Icmp4
