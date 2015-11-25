@@ -54,3 +54,11 @@ instance HasIP4State NetworkStack where
 instance HasUdpState NetworkStack where
   getUdpState = nsUdpState
   {-# INLINE getUdpState #-}
+
+class HasNetworkStack a where
+  getNetworkStack :: a -> NetworkStack
+
+instance HasNetworkStack NetworkStack where
+  getNetworkStack = id
+  {-# INLINE getNetworkStack #-}
+

@@ -23,6 +23,9 @@ processUdp4 ns dev src dst bytes =
                                      $ ip4PseudoHeader src dst IP4_PROT_UDP
                                      $ S.length bytes
 
+
+     io (print ("cs",checksum))
+
      unless (dcChecksumOffload (devConfig dev) || checksum == 0)
          (dropPacket (devStats dev))
 

@@ -9,16 +9,22 @@ module Hans.IP4.Dhcp.Client (
   ) where
 
 import Hans.Device.Types (Device(devMac))
+import Hans.IP4.Dhcp.Codec (SubnetMask(..))
 import Hans.IP4.Dhcp.Packet
-import Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
+import Hans.IP4.Dhcp.Options
+import Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4,IP4Mask(..))
+import Hans.IP4.RoutingTable(Route(..),RouteType(..))
 import Hans.Socket
            (DatagramSocket,sOpen,sClose,sendto4,recvfrom4,SockPort
            ,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
 import Hans.Time (toUSeconds)
-import Hans.Types (NetworkStack)
+import Hans.Types (NetworkStack,getNetworkStack,addRoute)
 
+import           Control.Concurrent (forkIO,threadDelay,killThread)
+import           Control.Monad (when,guard)
 import qualified Data.ByteString.Lazy as L
+import           Data.Maybe (fromMaybe)
 import           Data.Serialize.Get (runGetLazy)
 import           Data.Time.Clock (NominalDiffTime)
 import           System.Random (randomIO,randomRIO)
@@ -103,7 +109,7 @@ dhcpDiscover cfg dev sock =
 
      mb <- waitResponse cfg (sendto4 sock BroadcastIP4 bootps msg) (awaitOffer sock)
      case mb of
-       Just offer -> dhcpRequest cfg sock offer
+       Just offer -> dhcpRequest cfg dev sock offer
        Nothing    -> do sClose sock
                         return Nothing
 
@@ -128,8 +134,8 @@ awaitOffer sock = go
 
 -- | Respond to an offer with a request, and configure the network stack if an
 -- acknowledgement is received.
-dhcpRequest :: DhcpConfig -> DatagramSocket IP4 -> Offer -> IO (Maybe DhcpLease)
-dhcpRequest cfg sock offer =
+dhcpRequest :: DhcpConfig -> Device -> DatagramSocket IP4 -> Offer -> IO (Maybe DhcpLease)
+dhcpRequest cfg dev sock offer =
   do let req = renderMessage (requestToMessage (offerToRequest offer))
      mb <- waitResponse cfg (sendto4 sock BroadcastIP4 bootps req) (awaitAck sock)
      sClose sock
@@ -138,7 +144,9 @@ dhcpRequest cfg sock offer =
        Nothing  -> return Nothing
 
        -- XXX apply all the routing information
-       Just ack -> undefined
+       Just ack ->
+         do lease <- handleAck (getNetworkStack sock) cfg dev offer ack
+            return (Just lease)
 
 
 awaitAck :: DatagramSocket IP4 -> IO Ack
@@ -158,10 +166,74 @@ awaitAck sock = go
                  _ -> go
 
 
+
 -- | Perform a DHCP Renew.
 renew :: NetworkStack -> DhcpConfig -> Device -> Offer -> IO ()
 renew ns cfg dev offer =
   do sock <- sOpen ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootps)
-     _    <- dhcpRequest cfg sock offer
+     _    <- dhcpRequest cfg dev sock offer
 
      return ()
+
+
+-- Ack Management --------------------------------------------------------------
+
+-- | Apply the information in the Ack to the NetworkStack, and Device. Returns
+-- information about the lease, as well as an IO action that can be used to
+-- renew it.
+handleAck :: NetworkStack -> DhcpConfig -> Device -> Offer -> Ack -> IO DhcpLease
+handleAck ns cfg dev offer Ack { .. } =
+  do let mac      = devMac dev
+         addr     = ackYourAddr
+         opts     = ackOptions
+         mask     = fromMaybe 24 (lookupSubnet ackOptions)
+         (ty,def) = case lookupGateway ackOptions of
+                      Just gw -> (Indirect gw,dcDefaultRoute cfg)
+                      Nothing -> (Direct,False)
+
+     addRoute ns False Route
+       { routeNetwork = IP4Mask addr mask
+       , routeType    = ty
+       , routeDevice  = dev
+       }
+
+     when def $
+       addRoute ns True Route
+         { routeNetwork = IP4Mask addr 0
+         , routeType    = ty
+         , routeDevice  = dev
+         }
+
+     dhcpRenew <-
+       if dcAutoRenew cfg
+          then -- wait for half of the lease time, then automatically renew
+               -- XXX: what happens on a 32-bit system here?
+               do tid <- forkIO $
+                         do threadDelay (fromIntegral ackLeaseTime * 500000)
+                            renew ns cfg dev offer
+
+                  return $ do killThread tid
+                              renew ns cfg dev offer
+
+          else return (renew ns cfg dev offer)
+
+     return $! DhcpLease { dhcpAddr = addr, .. }
+
+  -- let nameServers = concat (mapMaybe getNameServers (ackOptions ack))
+  -- mapM_ (addNameServer ns) nameServers
+
+lookupGateway :: [Dhcp4Option] -> Maybe IP4
+lookupGateway  = foldr p Nothing
+  where
+  p (OptRouters rs) _ = guard (not (null rs)) >> Just (head rs)
+  p _               a = a
+
+lookupSubnet :: [Dhcp4Option] -> Maybe Int
+lookupSubnet  = foldr p Nothing
+  where
+  p (OptSubnetMask (SubnetMask i)) _ = Just i
+  p _                              a = a
+
+-- getNameServers :: Dhcp4Option -> Maybe [IP4]
+-- getNameServers (OptNameServers addrs) = Just addrs
+-- getNameServers _                      = Nothing

@@ -60,6 +60,19 @@ data Device = Device { devName :: !DeviceName
                        -- ^ Statistics about this device
                      }
 
+-- Devices are compared by mac address
+instance Eq Device where
+  a == b = devMac a == devMac b
+  a /= b = devMac a == devMac b
+
+  {-# INLINE (==) #-}
+  {-# INLINE (/=) #-}
+
+instance Ord Device where
+  compare a b = compare (devMac a) (devMac b)
+  {-# INLINE compare #-}
+
+
 data DeviceException = FailedToOpen !DeviceName
                        deriving (Typeable,Show)
 

@@ -9,7 +9,9 @@ module Hans.Socket where
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device(devName))
 import           Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
-import           Hans.Types (NetworkStack,registerRecv4,UdpBuffer,lookupRoute)
+import           Hans.Types
+                     (HasNetworkStack(..),NetworkStack,registerRecv4,UdpBuffer
+                     ,lookupRoute)
 import           Hans.Udp.Input ()
 import           Hans.Udp.Output (primSendUdp4)
 
@@ -103,6 +105,10 @@ data DatagramSocket addr =
                  , dgState    :: {-# UNPACK #-} !(IORef (SockState addr))
                  , dgClose    ::                 IO ()
                  }
+
+instance HasNetworkStack (DatagramSocket addr) where
+  getNetworkStack DatagramSocket { .. } = dgNS
+  {-# INLINE getNetworkStack #-}
 
 instance Socket DatagramSocket IP4 where
 

@@ -113,8 +113,19 @@ checkDestination ns dev BroadcastIP4 = return ()
 checkDestination ns dev dest =
   do mb <- io (isLocalAddr ns dest)
      case mb of
-       Just Route { .. } | devName routeDevice == devName dev -> return ()
-       _                                                      -> escape
+       Just Route { .. }
+         | routeDevice == dev -> return ()
+
+           -- A route was found, and it didn't involve the device the packet
+           -- arrived on
+         | otherwise          -> escape
+
+       -- No route was found. Check to see if there are any routes for this
+       -- device, and forward the packet on if there are none (in order to
+       -- support things like unicast DHCP).
+       Nothing ->
+         do routes <- io (routesForDev ns dev)
+            unless (null routes) escape
 
 
 

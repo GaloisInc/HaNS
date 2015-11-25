@@ -29,7 +29,7 @@ primSendUdp4 ns dev src udpSourcePort dst udpDestPort next payload
 
   | otherwise =
     do let hdr   = UdpHeader { udpChecksum = 0, .. }
-       let bytes = renderUdpPacket (dcChecksumOffload (devConfig dev))
+       let bytes = renderUdpPacket (not (dcChecksumOffload (devConfig dev)))
                        src dst hdr payload
 
        primSendIP4 ns dev src dst next IP4_PROT_UDP bytes

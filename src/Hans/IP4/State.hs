@@ -10,6 +10,7 @@ module Hans.IP4.State (
     lookupRoute,
     isLocalAddr,
     nextIdent,
+    routesForDev,
   ) where
 
 import           Hans.Config (Config(..))
@@ -121,23 +122,8 @@ nextIdent state =
   IP4State { .. } = getIP4State state
 
 
--- | Give back routes that can be used to route the source of an IP packet.
-routesFor :: HasIP4State state => state -> SendSource -> IO [RT.Route]
-routesFor state src =
-  case src of
-
-    SourceAny ->
-      do rt <- readIORef (ip4Routes (getIP4State state))
-         return (RT.getRoutes rt)
-
-    SourceIP4 addr ->
-      do mb <- isLocalAddr state addr
-         case mb of
-           Just r  -> return [r]
-           Nothing -> return []
-
-    SourceDev dev addr ->
-      do mb <- isLocalAddr state addr
-         case mb of
-           Just r | devName (RT.routeDevice r) == devName dev -> return [r]
-           _                                                  -> return []
+-- | Give back the list of routing rules associated with this device.
+routesForDev :: HasIP4State state => state -> Device -> IO [RT.Route]
+routesForDev state dev =
+  do routes <- readIORef (ip4Routes (getIP4State state))
+     return $! RT.routesForDev dev routes

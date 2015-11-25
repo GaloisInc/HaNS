@@ -10,6 +10,7 @@ module Hans.IP4.RoutingTable (
     lookupRoute,
     isLocal,
     getRoutes,
+    routesForDev,
   ) where
 
 import Hans.Device.Types (Device)
@@ -18,6 +19,7 @@ import Hans.IP4.Packet
 import Control.Monad (guard)
 import Data.Bits ((.&.))
 import Data.List (insertBy)
+import Data.Maybe (mapMaybe)
 import Data.Word (Word32)
 
 
@@ -128,3 +130,10 @@ isLocal addr RoutingTable { .. } = foldr hasSource Nothing rtRules
   hasSource rule continue
     | ruleSource rule == addr = Just (ruleRoute rule)
     | otherwise               = continue
+
+-- | Give back routes that involve this device.
+routesForDev :: Device -> RoutingTable -> [Route]
+routesForDev dev RoutingTable { .. } = mapMaybe usesDev rtRules
+  where
+  usesDev rule | ruleDevice rule == dev = Just (ruleRoute rule)
+               | otherwise              = Nothing

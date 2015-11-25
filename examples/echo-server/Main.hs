@@ -2,6 +2,7 @@ module Main where
 
 import Hans
 import Hans.Device
+import Hans.IP4.Packet (unpackIP4)
 import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
 
 import           Control.Concurrent (forkIO,threadDelay)
@@ -30,6 +31,12 @@ main  =
 
      mbLease <- dhcpClient ns defaultDhcpConfig dev
      case mbLease of
-       Just lease -> putStrLn ("Assigned IP: " ++ show (dhcpAddr lease))
-       Nothing    -> putStrLn "Dhcp failed"
+
+       Just lease ->
+         do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
+            threadDelay (1000000 * 20)
+
+       Nothing ->
+            putStrLn "Dhcp failed"
+
 
