@@ -84,6 +84,9 @@ data BufContents a = BufContents { bufAvail :: {-# UNPACK #-} !Int
 emptyBufContents :: Int -> BufContents a
 emptyBufContents bufAvail = BufContents { bufChunks = Seq.empty, .. }
 
+chunksAvailable :: BufContents a -> Bool
+chunksAvailable BufContents { .. } = not (Seq.null bufChunks)
+
 -- | The return value is as follows:
 --
 --  The first element is 'True' when the chunk has been written to the queue
@@ -99,7 +102,7 @@ queueChunk a chunk buf
                  , bufChunks = bufChunks buf Seq.|> (a,chunk) }, (True,True))
 
   | otherwise =
-    (buf, (False,Seq.null (bufChunks buf)))
+    (buf, (False,chunksAvailable buf))
 
   where
   chunkLen = S.length chunk
@@ -107,8 +110,10 @@ queueChunk a chunk buf
 dequeueChunk :: BufContents a -> (BufContents a, ((a,S.ByteString),Bool))
 dequeueChunk buf =
   case Seq.viewl (bufChunks buf) of
-    c Seq.:< cs -> (BufContents { bufAvail  = bufAvail buf - S.length (snd c)
-                                , bufChunks = cs }, (c, Seq.null cs))
+    c Seq.:< cs ->
+      let buf' = BufContents { bufAvail  = bufAvail buf + S.length (snd c)
+                             , bufChunks = cs }
+       in (buf', (c, chunksAvailable buf'))
 
     _ -> error $ unlines
          [ "PANIC: Hans.Buffer.Datagram.dequeueChunk:"
