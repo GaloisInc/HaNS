@@ -11,7 +11,7 @@ import           Hans.Device.Types (Device(devName))
 import           Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
 import           Hans.Types
                      (HasNetworkStack(..),NetworkStack,registerRecv4,UdpBuffer
-                     ,lookupRoute)
+                     ,lookupRoute,nextUdpPort4)
 import           Hans.Udp.Input ()
 import           Hans.Udp.Output (primSendUdp4)
 
@@ -88,11 +88,13 @@ data SocketException addr = AlreadyOpen !addr !SockPort
                           | NoConnection
                             -- ^ No information about the other end of the
                             -- socket was present.
+
+                          | NoPortAvailable
+                            -- ^ All ports are in use.
                             deriving (Show,Typeable)
 
-throwSocketExceptionIO :: (Show addr, Typeable addr)
-                       => f addr -> SocketException addr -> IO a
-throwSocketExceptionIO _ e = X.throwIO e
+throwIO4 :: SocketException IP4 -> IO a
+throwIO4  = X.throwIO
 
 instance (Show addr, Typeable addr) => X.Exception (SocketException addr)
 
@@ -100,10 +102,10 @@ instance (Show addr, Typeable addr) => X.Exception (SocketException addr)
 -- Datagram Sockets ------------------------------------------------------------
 
 data DatagramSocket addr =
-  DatagramSocket { dgNS       ::                !NetworkStack
-                 , dgBuffer   ::                !(UdpBuffer addr)
-                 , dgState    :: {-# UNPACK #-} !(IORef (SockState addr))
-                 , dgClose    ::                 IO ()
+  DatagramSocket { dgNS       :: !NetworkStack
+                 , dgBuffer   :: !(UdpBuffer addr)
+                 , dgState    :: !(IORef (SockState addr))
+                 , dgClose    ::  IO ()
                  }
 
 instance HasNetworkStack (DatagramSocket addr) where
@@ -114,7 +116,11 @@ instance Socket DatagramSocket IP4 where
 
   sOpen dgNS SocketConfig { .. } mbDev src port =
     do srcPort <- case port of
-                   Nothing -> error "sSocket: pickUdpPort" -- pickUdpPort ns
+                   Nothing -> do mb <- nextUdpPort4 dgNS src
+                                 case mb of
+                                   Just port -> return port
+                                   Nothing   -> throwIO4 NoPortAvailable
+
                    Just p  -> return p
 
        dgState  <- newIORef (KnownSource mbDev src srcPort)
@@ -126,7 +132,7 @@ instance Socket DatagramSocket IP4 where
        mbClose <- registerRecv4 dgNS src srcPort dgBuffer
        dgClose <- case mbClose of
                     Just unreg -> return unreg
-                    Nothing    -> X.throwIO (AlreadyOpen src srcPort)
+                    Nothing    -> throwIO4 (AlreadyOpen src srcPort)
 
        return $! DatagramSocket { .. }
 
@@ -156,9 +162,9 @@ instance Socket DatagramSocket IP4 where
               mbEx <- atomicModifyIORef' dgState connect
               case mbEx of
                 Nothing -> return ()
-                Just e  -> throwSocketExceptionIO sock e
+                Just e  -> throwIO4 e
 
-         Nothing -> throwSocketExceptionIO sock NoRouteToHost
+         Nothing -> throwIO4 NoRouteToHost
 
   sWrite sock @ DatagramSocket { .. } bytes =
     do path <- readIORef dgState
@@ -171,7 +177,7 @@ instance Socket DatagramSocket IP4 where
                  else return (-1)
 
          KnownSource{} ->
-              throwSocketExceptionIO sock NoConnection
+              throwIO4 NoConnection
 
   sRead DatagramSocket { .. } len =
     do (_,buf) <- DGram.readChunk dgBuffer
@@ -220,10 +226,10 @@ sendto4 sock @ DatagramSocket { .. } = \ dst dstPort bytes ->
                      return ()
 
               _ ->
-                  throwSocketExceptionIO sock NoRouteToHost
+                  throwIO4 NoRouteToHost
 
        -- we can't use sendto if sConnect has been used already
        KnownRoute {} ->
-         throwSocketExceptionIO sock AlreadyConnected
+         throwIO4 AlreadyConnected
 {-# INLINE sendto4 #-}
 

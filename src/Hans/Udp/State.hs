@@ -8,6 +8,7 @@ module Hans.Udp.State (
     UdpBuffer,
     lookupRecv4, Receiver(..),
     registerRecv4,
+    nextUdpPort4,
   ) where
 
 import qualified Hans.Buffer.Datagram as DG
@@ -17,8 +18,9 @@ import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet (IP4, pattern CurrentNetworkIP4)
 import           Hans.Udp.Packet (UdpPort)
 
+import           Control.Concurrent (MVar,newMVar,modifyMVar)
 import           Data.Hashable (Hashable)
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
+import qualified Data.Set as Set
 import           GHC.Generics (Generic)
 
 
@@ -32,12 +34,15 @@ type UdpBuffer addr = DG.Buffer (Device,addr,UdpPort,addr,UdpPort)
 
 data Receiver = Receiver4 !(UdpBuffer IP4)
 
-data UdpState = UdpState { udpRecv :: HT.HashTable Key Receiver
+data UdpState = UdpState { udpRecv  :: !(HT.HashTable Key Receiver)
+                         , udpPorts :: !(MVar UdpPort)
                          }
+
 
 newUdpState :: Config -> IO UdpState
 newUdpState Config { .. } =
-  do udpRecv <- HT.newHashTable cfgUdpSocketTableSize
+  do udpRecv  <- HT.newHashTable cfgUdpSocketTableSize
+     udpPorts <- newMVar 32767
      return $! UdpState { .. }
 
 
@@ -76,3 +81,26 @@ registerRecv4 state src srcPort buf =
 
   update mb@Just{} = (mb,False)
   update Nothing   = (Just (Receiver4 buf),True)
+
+
+-- Port Management -------------------------------------------------------------
+
+nextUdpPort4 :: HasUdpState state => state -> IP4 -> IO (Maybe UdpPort)
+nextUdpPort4 state addr =
+  modifyMVar udpPorts (pickFreshPort udpRecv (Key4 addr))
+  where
+  UdpState { .. } = getUdpState state
+
+pickFreshPort :: HT.HashTable Key Receiver -> (UdpPort -> Key) -> UdpPort
+              -> IO (UdpPort, Maybe UdpPort)
+pickFreshPort ht mkKey p0 = go 0 p0
+  where
+
+  go :: Int -> UdpPort -> IO (UdpPort,Maybe UdpPort)
+  go i _ | i > 65535 = return (p0, Nothing)
+  go i 0             = go (i+1) 1025
+  go i port          =
+    do used <- HT.hasKey (mkKey port) ht
+       if not used
+          then return (port, Just port)
+          else go (i + 1) (port + 1)

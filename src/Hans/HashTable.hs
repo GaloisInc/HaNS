@@ -9,6 +9,8 @@ module Hans.HashTable (
     mapHashTable,
     filterHashTable,
     alter,
+    keys,
+    hasKey,
   ) where
 
 import           Prelude hiding (lookup)
@@ -121,3 +123,19 @@ alter f k ht = modifyBucket ht k (update id)
       (Just a, b) -> (mkBucket ((k,a):rest), b)
       (Nothing,b) -> (mkBucket        rest , b)
 {-# INLINE alter #-}
+
+
+-- | Gives back an (unsorted) list of all the keys present in the hash table.
+keys :: HashTable k a -> IO [k]
+keys HashTable { .. } = go [] 0
+  where
+  go acc ix | ix < htSize = do bucket <- readIORef (htBuckets ! ix)
+                               go (map fst bucket ++ acc) (ix + 1)
+
+            | otherwise   = return acc
+
+hasKey :: (Eq k, Hashable k) => k -> HashTable k a -> IO Bool
+hasKey k ht =
+  do b <- readIORef (getBucket ht k)
+     return $! any (\ (k',_) -> k == k') b
+{-# INLINE hasKey #-}
