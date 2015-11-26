@@ -50,7 +50,8 @@ library
                                 hashable,
                                 array,
                                 BoundedChan,
-                                random
+                                random,
+                                monadLib
 
         ghc-prof-options:       -fprof-auto-top
 
@@ -62,6 +63,7 @@ library
                                 Hans.Device
                                 Hans.Device.Loopback
                                 Hans.Device.Types
+                                Hans.Dns.Packet
                                 Hans.Ethernet
                                 Hans.Ethernet.Types
                                 Hans.HashTable
