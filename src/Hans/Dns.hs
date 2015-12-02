@@ -83,8 +83,12 @@ sendRequest ns src =
 
      mbResp <- queryServers4 sock req nameServers
      case mbResp of
-       Just DNSPacket { .. } -> return (Just (parseHostEntry src dnsAnswers))
-       Nothing               -> return Nothing
+       Just DNSPacket { .. }
+         | DNSHeader { .. } <- dnsHeader
+         , dnsRC == RespNoError ->
+           return (Just (parseHostEntry src dnsAnswers))
+       _ ->
+         return Nothing
 
 
 queryServers4 :: DatagramSocket IP4 -> L.ByteString -> [IP4] -> IO (Maybe DNSPacket)
@@ -95,14 +99,16 @@ queryServers4 sock req = go
        mbRes <- timeout (cfgDnsResolveTimeout (getConfig (getNetworkStack sock)))
                     (recvfrom4 sock)
 
+       -- require that the server we sent a request to is the one that responded
        case mbRes of
-         Just (dev,_,_,bytes) ->
-           case runGetLazy getDNSPacket bytes of
-             Right res -> return (Just res)
-             Left err  -> do updateError (devStats dev)
-                             return Nothing
+         Just (dev,srcIp,srcPort,bytes)
+           | srcIp == addr, srcPort == 53 ->
+             case runGetLazy getDNSPacket bytes of
+               Right res -> return (Just res)
+               Left err  -> do updateError (devStats dev)
+                               return Nothing
 
-         Nothing -> go addrs
+         _ -> go addrs
 
   go [] = return Nothing
 
