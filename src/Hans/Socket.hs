@@ -41,7 +41,8 @@ class Socket (sock :: * -> *) addr where
 
   -- | Open a socket. This is the functionality of `socket` and `bind` in the
   -- same operation.
-  sOpen :: NetworkStack
+  sOpen :: HasNetworkStack ns
+        => ns
         -> SocketConfig
         -> Maybe Device -> addr -> Maybe SockPort -> IO (sock addr)
 
@@ -114,8 +115,9 @@ instance HasNetworkStack (DatagramSocket addr) where
 
 instance Socket DatagramSocket IP4 where
 
-  sOpen dgNS SocketConfig { .. } mbDev src port =
-    do srcPort <- case port of
+  sOpen ns SocketConfig { .. } mbDev src port =
+    do let dgNS = getNetworkStack ns
+       srcPort <- case port of
                    Nothing -> do mb <- nextUdpPort4 dgNS src
                                  case mb of
                                    Just port -> return port

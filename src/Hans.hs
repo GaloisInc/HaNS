@@ -47,6 +47,7 @@ newNetworkStack nsConfig =
      nsDevices      <- newIORef []
      nsIP4State     <- IP4.newIP4State nsConfig
      nsUdpState     <- Udp.newUdpState nsConfig
+     nsNameServers4 <- newIORef []
 
      rec nsIP4Responder <- forkIO (IP4.responder ns)
          let ns = NetworkStack { .. }

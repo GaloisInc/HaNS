@@ -19,12 +19,12 @@ import Hans.Socket
            ,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
 import Hans.Time (toUSeconds)
-import Hans.Types (NetworkStack,getNetworkStack,addRoute)
+import Hans.Types (NetworkStack,getNetworkStack,addRoute,addNameServer4)
 
 import           Control.Concurrent (forkIO,threadDelay,killThread)
 import           Control.Monad (when,guard)
 import qualified Data.ByteString.Lazy as L
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe,mapMaybe)
 import           Data.Serialize.Get (runGetLazy)
 import           Data.Time.Clock (NominalDiffTime)
 import           System.Random (randomIO,randomRIO)
@@ -191,6 +191,9 @@ handleAck ns cfg dev offer Ack { .. } =
                       Just gw -> (Indirect gw,dcDefaultRoute cfg)
                       Nothing -> (Direct,False)
 
+     let nameServers = concat (mapMaybe getNameServers ackOptions)
+     mapM_ (addNameServer4 ns) nameServers
+
      addRoute ns False Route
        { routeNetwork = IP4Mask addr mask
        , routeType    = ty
@@ -219,8 +222,6 @@ handleAck ns cfg dev offer Ack { .. } =
 
      return $! DhcpLease { dhcpAddr = addr, .. }
 
-  -- let nameServers = concat (mapMaybe getNameServers (ackOptions ack))
-  -- mapM_ (addNameServer ns) nameServers
 
 lookupGateway :: [Dhcp4Option] -> Maybe IP4
 lookupGateway  = foldr p Nothing
@@ -234,6 +235,6 @@ lookupSubnet  = foldr p Nothing
   p (OptSubnetMask (SubnetMask i)) _ = Just i
   p _                              a = a
 
--- getNameServers :: Dhcp4Option -> Maybe [IP4]
--- getNameServers (OptNameServers addrs) = Just addrs
--- getNameServers _                      = Nothing
+getNameServers :: Dhcp4Option -> Maybe [IP4]
+getNameServers (OptNameServers addrs) = Just addrs
+getNameServers _                      = Nothing

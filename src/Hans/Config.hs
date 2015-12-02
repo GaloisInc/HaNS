@@ -25,10 +25,16 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                        -- retransmission.
 
                      , cfgIP4FragTimeout :: !NominalDiffTime
+                       -- ^ Number of seconds to wait before expiring a
+                       -- partially reassembled IP4 packet
 
                      , cfgIP4InitialTTL :: {-# UNPACK #-} !Word8
 
                      , cfgUdpSocketTableSize :: {-# UNPACK #-} !Int
+                       -- ^ Number of buckets in the udp socket table
+
+                     , cfgDnsResolveTimeout :: !Int
+                       -- ^ In microseconds
                      }
 
 defaultConfig :: Config
@@ -40,6 +46,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgIP4FragTimeout     = 30
                         , cfgIP4InitialTTL      = 128
                         , cfgUdpSocketTableSize = 31
+                        , cfgDnsResolveTimeout  = 5000000
                         }
 
 class HasConfig cfg where

@@ -16,7 +16,7 @@ import Hans.Udp.State as Exports
 import           Control.Concurrent (ThreadId)
 import           Control.Concurrent.BoundedChan (BoundedChan)
 import qualified Data.ByteString as S
-import           Data.IORef (IORef)
+import           Data.IORef (IORef,atomicModifyIORef',readIORef)
 
 
 data InputPacket = FromDevice !Device !S.ByteString
@@ -41,6 +41,8 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
 
                                  , nsUdpState :: !UdpState
                                    -- ^ State for UDP processing
+
+                                 , nsNameServers4 :: !(IORef [IP4])
                                  }
 
 instance HasConfig NetworkStack where
@@ -62,3 +64,11 @@ instance HasNetworkStack NetworkStack where
   getNetworkStack = id
   {-# INLINE getNetworkStack #-}
 
+
+addNameServer4 :: HasNetworkStack ns => ns -> IP4 -> IO ()
+addNameServer4 ns addr =
+  atomicModifyIORef' (nsNameServers4 (getNetworkStack ns))
+      (\addrs -> (addr:addrs,()))
+
+getNameServers4 :: HasNetworkStack ns => ns -> IO [IP4]
+getNameServers4 ns = readIORef (nsNameServers4 (getNetworkStack ns))

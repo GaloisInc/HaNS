@@ -1,6 +1,8 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import Hans
+import Hans.Dns
 import Hans.Device
 import Hans.IP4.Packet (unpackIP4)
 import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
@@ -34,6 +36,7 @@ main  =
 
        Just lease ->
          do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
+            print =<< getHostByName ns "galois.com"
             threadDelay (1000000 * 20)
 
        Nothing ->

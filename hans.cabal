@@ -63,6 +63,7 @@ library
                                 Hans.Device
                                 Hans.Device.Loopback
                                 Hans.Device.Types
+                                Hans.Dns
                                 Hans.Dns.Packet
                                 Hans.Ethernet
                                 Hans.Ethernet.Types
