@@ -105,7 +105,7 @@ queryServers4 sock req = go
            | srcIp == addr, srcPort == 53 ->
              case runGetLazy getDNSPacket bytes of
                Right res -> return (Just res)
-               Left err  -> do updateError (devStats dev)
+               Left _    -> do updateError (devStats dev)
                                return Nothing
 
          _ -> go addrs
