@@ -81,9 +81,11 @@ library
                                 Hans.IP4.RoutingTable
                                 Hans.IP4.State
                                 Hans.Input
+                                Hans.Lens
                                 Hans.Monad
                                 Hans.Serialize
                                 Hans.Socket
+                                Hans.Tcp.Packet
                                 Hans.Time
                                 Hans.Types
                                 Hans.Udp.Input
