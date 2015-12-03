@@ -4,7 +4,6 @@
 module Hans.Lens where
 
 import qualified Data.Bits as B
-import           Data.Word (Word16)
 
 
 -- Lenses ----------------------------------------------------------------------
@@ -13,7 +12,7 @@ import           Data.Word (Word16)
 type Lens s t a b = forall f. Functor f => (a -> f b) -> (s -> f t)
 
 lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
-lens get set = \ f s -> set s `fmap` f (get s)
+lens get upd = \ f s -> upd s `fmap` f (get s)
 
 
 -- | Lenses that don't change type.
@@ -34,9 +33,9 @@ set l b = \ s -> runSet (l (\ _ -> Set b) s)
 {-# INLINE set #-}
 
 
-modify :: Lens s t a b -> (a -> b) -> (s -> t)
-modify l f = \ s -> set l (f (view l s)) s
-{-# INLINE modify #-}
+over :: Lens s t a b -> (a -> b) -> (s -> t)
+over l f = \ s -> set l (f (view l s)) s
+{-# INLINE over #-}
 
 
 -- Utility Lenses --------------------------------------------------------------
@@ -54,9 +53,9 @@ modify l f = \ s -> set l (f (view l s)) s
 -- together constants, which would allow only one final use of or# after
 -- simplification.
 bit :: B.Bits a => Int -> Lens' a Bool
-bit n = lens get set
+bit n = lens get upd
   where
   get a       = B.testBit a n
 
-  set a True  = B.setBit   a n
-  set a False = B.clearBit a n
+  upd a True  = B.setBit   a n
+  upd a False = B.clearBit a n

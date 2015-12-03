@@ -3,11 +3,27 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module Hans.Message.Tcp (
+module Hans.Tcp.Packet (
+
+    -- * Header
     TcpHeader(..),
     TcpPort,
     TcpSeqNum,
+    emptyTcpHeader,
+
+    -- ** Header Flags
+    tcpNs, tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn,
+    tcpFin,
+
+    -- ** Serialization
+    getTcpHeader, putTcpHeader,
+    renderTcpPacket4,
+
+    -- ** Options
     HasTcpOptions(..),
+    findTcpOption,
+    setTcpOption,
+    setTcpOptions,
     TcpOption(..),
     TcpOptionTag(..), tcpOptionTag,
     SackBlock(..),
@@ -19,7 +35,7 @@ import Hans.Lens
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (replicateM,replicateM_,unless)
-import           Data.Bits (testBit,setBit,clearBit,(.|.),(.&.),shiftL,shiftR)
+import           Data.Bits ((.|.),(.&.),shiftL,shiftR)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
@@ -91,7 +107,7 @@ data TcpHeader = TcpHeader { tcpSourcePort    :: !TcpPort
                            , tcpWindow        :: !Word16
                            , tcpChecksum      :: !Word16
                            , tcpUrgentPointer :: !Word16
-                           , tcpOptions       :: [TcpOption]
+                           , tcpOptions_      :: [TcpOption]
                            } deriving (Eq,Show)
 
 emptyTcpHeader :: TcpHeader
@@ -103,7 +119,7 @@ emptyTcpHeader  = TcpHeader { tcpSourcePort    = 0
                             , tcpWindow        = 0
                             , tcpChecksum      = 0
                             , tcpUrgentPointer = 0
-                            , tcpOptions       = []
+                            , tcpOptions_      = []
                             }
 
 tcpFlags :: Lens' TcpHeader Word16
@@ -140,17 +156,17 @@ tcpFixedHeaderLength  = 5
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
 putTcpHeader :: Putter TcpHeader
-putTcpHeader hdr @ TcpHeader { .. } =
+putTcpHeader TcpHeader { .. } =
   do putTcpPort tcpSourcePort
      putTcpPort tcpDestPort
      putTcpSeqNum tcpSeqNum
      putTcpAckNum tcpAckNum
-     let (optLen,padding) = tcpOptionsLength tcpOptions
+     let (optLen,padding) = tcpOptionsLength tcpOptions_
      putTcpControl (tcpFixedHeaderLength + optLen) tcpFlags_
      putWord16be tcpWindow
      putWord16be 0
      putWord16be tcpUrgentPointer
-     mapM_ putTcpOption tcpOptions
+     mapM_ putTcpOption tcpOptions_
      replicateM_ padding (putTcpOptionTag OptTagEndOfOptions)
 
 -- | Parse a TcpHeader.
@@ -172,7 +188,7 @@ getTcpHeader  = label "TcpHeader" $
      -- options, not including the end-of-list option
      let optsLen = dataOff - tcpFixedHeaderLength
      opts <- label "options" (isolate (optsLen `shiftL` 2) getTcpOptions)
-     let tcpOptions = filter (/= OptEndOfOptions) opts
+     let tcpOptions_ = filter (/= OptEndOfOptions) opts
 
      return $! TcpHeader { .. }
 
@@ -185,27 +201,31 @@ putTcpControl hdrLenWords flags =
 -- Tcp Options -----------------------------------------------------------------
 
 class HasTcpOptions a where
-  findTcpOption :: TcpOptionTag -> a -> Maybe TcpOption
-  setTcpOption  :: TcpOption    -> a -> a
-
-instance HasTcpOptions [TcpOption] where
-  findTcpOption tag = find p
-    where
-    p opt = tag == tcpOptionTag opt
-
-  setTcpOption opt = loop
-    where
-    tag           = tcpOptionTag opt
-    loop []       = [opt]
-    loop (o:opts)
-      | tcpOptionTag o == tag = opt : opts
-      | otherwise             = o : loop opts
+  tcpOptions :: Lens' a [TcpOption]
 
 instance HasTcpOptions TcpHeader where
-  findTcpOption tag hdr = findTcpOption tag (tcpOptions hdr)
-  setTcpOption  opt hdr = hdr { tcpOptions = setTcpOption opt (tcpOptions hdr) }
+  tcpOptions f TcpHeader { .. } =
+    fmap (\opts -> TcpHeader { tcpOptions_ = opts, .. }) (f tcpOptions_)
 
-setTcpOptions :: HasTcpOptions a => [TcpOption] -> a -> a
+instance HasTcpOptions [TcpOption] where
+  tcpOptions = id
+
+findTcpOption :: HasTcpOptions opts => TcpOptionTag -> opts -> Maybe TcpOption
+findTcpOption tag opts = find p (view tcpOptions opts)
+  where
+  p opt = tag == tcpOptionTag opt
+
+setTcpOption :: HasTcpOptions opts => TcpOption -> opts -> opts
+setTcpOption opt = over tcpOptions loop
+  where
+  tag = tcpOptionTag opt
+
+  loop [] = [opt]
+  loop (o:opts)
+    | tcpOptionTag o == tag = opt : opts
+    | otherwise             = o : loop opts
+
+setTcpOptions :: HasTcpOptions opts => [TcpOption] -> opts -> opts
 setTcpOptions opts a = foldr setTcpOption a opts
 
 data TcpOptionTag = OptTagEndOfOptions
