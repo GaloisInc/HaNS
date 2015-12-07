@@ -4,6 +4,8 @@ module Hans.Config (
     HasConfig(..),
   ) where
 
+import Hans.Lens
+
 import Data.Time.Clock (NominalDiffTime)
 import Data.Word (Word8)
 
@@ -50,9 +52,9 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         }
 
 class HasConfig cfg where
-  getConfig :: cfg -> Config
+  config :: Getting r cfg Config
 
 instance HasConfig Config where
-  getConfig = id
-  {-# INLINE getConfig #-}
+  config = id
+  {-# INLINE config #-}
 

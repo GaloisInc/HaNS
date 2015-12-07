@@ -16,11 +16,11 @@ import           Hans.Config
 import           Hans.Device.Types (Device)
 import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet (IP4, pattern CurrentNetworkIP4)
+import           Hans.Lens
 import           Hans.Udp.Packet (UdpPort)
 
 import           Control.Concurrent (MVar,newMVar,modifyMVar)
 import           Data.Hashable (Hashable)
-import qualified Data.Set as Set
 import           GHC.Generics (Generic)
 
 
@@ -47,22 +47,22 @@ newUdpState Config { .. } =
 
 
 class HasUdpState udp where
-  getUdpState :: udp -> UdpState
+  udpState :: Getting r udp UdpState
 
 instance HasUdpState UdpState where
-  getUdpState = id
-  {-# INLINE getUdpState #-}
+  udpState = id
+  {-# INLINE udpState #-}
 
 lookupRecv4 :: HasUdpState state => state -> IP4 -> UdpPort -> IO (Maybe Receiver)
 lookupRecv4 state dst dstPort =
-  do mb <- HT.lookup (Key4 dst dstPort) (udpRecv (getUdpState state))
+  do mb <- HT.lookup (Key4 dst dstPort) (udpRecv (view udpState state))
      case mb of
 
        -- there was a receiver waiting on this address and port
        Just _  -> return mb
 
        -- try the generic receiver for that port
-       Nothing -> HT.lookup (Key4 CurrentNetworkIP4 dstPort) (udpRecv (getUdpState state))
+       Nothing -> HT.lookup (Key4 CurrentNetworkIP4 dstPort) (udpRecv (view udpState state))
 
 
 -- | Register a listener for messages to this address and port, returning 'Just'
@@ -75,7 +75,7 @@ registerRecv4 state src srcPort buf =
         then return (Just (HT.delete key table))
         else return Nothing
   where
-  table = udpRecv (getUdpState state)
+  table = udpRecv (view udpState state)
 
   key = Key4 src srcPort
 
@@ -89,7 +89,7 @@ nextUdpPort4 :: HasUdpState state => state -> IP4 -> IO (Maybe UdpPort)
 nextUdpPort4 state addr =
   modifyMVar udpPorts (pickFreshPort udpRecv (Key4 addr))
   where
-  UdpState { .. } = getUdpState state
+  UdpState { .. } = view udpState state
 
 pickFreshPort :: HT.HashTable Key Receiver -> (UdpPort -> Key) -> UdpPort
               -> IO (UdpPort, Maybe UdpPort)

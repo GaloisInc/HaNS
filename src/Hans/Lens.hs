@@ -1,9 +1,29 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE DeriveFunctor #-}
 
-module Hans.Lens where
+module Hans.Lens (
+
+    -- * Lenses
+    Lens, Lens',
+    lens,
+
+    -- ** Getters
+    Getting,
+    view,
+    to,
+
+    -- ** Setters
+    ASetter, ASetter',
+    set,
+    over,
+
+    -- * Utility Lenses
+    bit,
+
+  ) where
 
 import qualified Data.Bits as B
+import           MonadLib (Id,runId)
 
 
 -- Lenses ----------------------------------------------------------------------
@@ -11,30 +31,49 @@ import qualified Data.Bits as B
 -- | General lenses that allow for the type of the inner field to change.
 type Lens s t a b = forall f. Functor f => (a -> f b) -> (s -> f t)
 
-lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
-lens get upd = \ f s -> upd s `fmap` f (get s)
-
-
 -- | Lenses that don't change type.
 type Lens' s a = Lens s s a a
 
+lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
+lens get upd = \ f s -> upd s `fmap` f (get s)
+{-# INLINE lens #-}
 
-newtype View b a = Get { runGet :: b } deriving Functor
 
-view :: Lens s t a b -> s -> a
-view l = \ s -> runGet (l (\ a -> Get a ) s)
+-- Getters ---------------------------------------------------------------------
+
+type Getting r s a = (a -> Const r a) -> (s -> Const r s)
+
+newtype Const r a = Const { runConst :: r } deriving Functor
+
+-- | This is just a handy way of not exposing a Contrafunctor class, as we only
+-- really need it for the definition of `to`.
+castConst' :: (b -> a) -> Const r a -> Const r b
+castConst' _ (Const r) = Const r
+{-# INLINE castConst' #-}
+
+-- NOTE: the @(s -> a)@ part could be generalized to @ReaderM m s@.
+view :: Getting a s a -> s -> a
+view l = \ s -> runConst (l Const s)
 {-# INLINE view #-}
 
+to :: (s -> a) -> Getting r s a
+to f = \ l s -> castConst' f (l (f s))
+{-# INLINE to #-}
 
-newtype Set a = Set { runSet :: a } deriving Functor
+
+
+-- Setters ---------------------------------------------------------------------
+
+type ASetter s t a b = (a -> Id b) -> (s -> Id t)
+
+type ASetter' s a = ASetter s s a a
 
 set :: Lens s t a b -> b -> s -> t
-set l b = \ s -> runSet (l (\ _ -> Set b) s)
+set l b = \ s -> runId (l (\ _ -> pure b) s)
 {-# INLINE set #-}
 
-
-over :: Lens s t a b -> (a -> b) -> (s -> t)
-over l f = \ s -> set l (f (view l s)) s
+over :: ASetter s t a b -> (a -> b) -> (s -> t)
+over l f s = runId (l (pure . f) s)
 {-# INLINE over #-}
 
 

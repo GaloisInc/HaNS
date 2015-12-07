@@ -20,6 +20,7 @@ import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
 import           Hans.IP4.Packet (IP4,IP4Protocol,IP4Ident)
 import qualified Hans.IP4.RoutingTable as RT
+import           Hans.Lens
 
 
 import qualified Control.Concurrent.BoundedChan as BC
@@ -78,18 +79,18 @@ newIP4State cfg =
                      , .. }
 
 class HasIP4State state where
-  getIP4State :: state -> IP4State
+  ip4State :: Getting r state IP4State
 
 instance HasIP4State IP4State where
-  getIP4State = id
-  {-# INLINE getIP4State #-}
+  ip4State = id
+  {-# INLINE ip4State #-}
 
 
 addRoute :: HasIP4State state => state -> Bool -> RT.Route -> IO ()
 addRoute state = \ defRoute route ->
   atomicModifyIORef' ip4Routes (\ table -> (RT.addRule defRoute route table, ()))
   where
-  IP4State { .. } = getIP4State state
+  IP4State { .. } = view ip4State state
 
 
 -- | Lookup the source address, as well as the next hop and device.
@@ -102,7 +103,7 @@ lookupRoute state = \ dest ->
                                   , RT.routeDevice route))
        Nothing    -> return Nothing
   where
-  IP4State { .. } = getIP4State state
+  IP4State { .. } = view ip4State state
 
 
 -- | Is this an address that's assigned to a device in the network stack?
@@ -111,7 +112,7 @@ isLocalAddr state = \ dst ->
   do rt <- readIORef ip4Routes
      return $! RT.isLocal dst rt
   where
-  IP4State { .. } = getIP4State state
+  IP4State { .. } = view ip4State state
 
 
 -- | Give back the result of using the 'random' function on the internal state.
@@ -119,11 +120,11 @@ nextIdent :: HasIP4State state => state -> IO IP4Ident
 nextIdent state =
   atomicModifyIORef' ip4RandomSeed (\g -> case random g of (a,g') -> (g',a) )
   where
-  IP4State { .. } = getIP4State state
+  IP4State { .. } = view ip4State state
 
 
 -- | Give back the list of routing rules associated with this device.
 routesForDev :: HasIP4State state => state -> Device -> IO [RT.Route]
 routesForDev state dev =
-  do routes <- readIORef (ip4Routes (getIP4State state))
+  do routes <- readIORef (ip4Routes (view ip4State state))
      return $! RT.routesForDev dev routes

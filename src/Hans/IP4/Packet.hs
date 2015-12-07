@@ -9,10 +9,11 @@ import Hans.Checksum
            (computeChecksum,Checksum(..),PartialChecksum,Pair8(..)
            ,emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
+import Hans.Lens as L
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (unless,guard)
-import           Data.Bits
+import           Data.Bits as B
                      ((.|.),(.&.),testBit,shiftL,shiftR,bit,setBit,bit
                      ,complement)
 import qualified Data.ByteString.Short as Sh
@@ -76,7 +77,7 @@ instance Eq IP4Mask where
           && clearHostBits m1 == clearHostBits m2
 
 hostmask :: Int -> Word32
-hostmask bits = bit (32 - bits) - 1
+hostmask bits = B.bit (32 - bits) - 1
 
 netmask :: Int -> Word32
 netmask bits = complement (hostmask bits)
@@ -132,9 +133,8 @@ pattern IP4_PROT_UDP  = 0x11
 data IP4Header = IP4Header
   { ip4TypeOfService  :: {-# UNPACK #-} !Word8
   , ip4Ident          :: {-# UNPACK #-} !IP4Ident
-  , ip4DontFragment   :: !Bool
-  , ip4MoreFragments  :: !Bool
-  , ip4FragmentOffset :: {-# UNPACK #-} !Word16
+  , ip4Fragment_      :: {-# UNPACK #-} !Word16
+    -- ^ This includes the flags, and the fragment offset.
   , ip4TimeToLive     :: {-# UNPACK #-} !Word8
   , ip4Protocol       :: {-# UNPACK #-} !IP4Protocol
   , ip4Checksum       :: {-# UNPACK #-} !Word16
@@ -147,9 +147,7 @@ emptyIP4Header :: IP4Header
 emptyIP4Header  = IP4Header
   { ip4TypeOfService  = 0
   , ip4Ident          = 0
-  , ip4DontFragment   = False
-  , ip4MoreFragments  = False
-  , ip4FragmentOffset = 0
+  , ip4Fragment_      = 0
   , ip4TimeToLive     = 127
   , ip4Protocol       = 0
   , ip4Checksum       = 0
@@ -159,14 +157,36 @@ emptyIP4Header  = IP4Header
   }
 
 
+ip4Fragment :: Lens' IP4Header Word16
+ip4Fragment f IP4Header { .. } =
+  fmap (\flags' -> IP4Header { ip4Fragment_ = flags', .. }) (f ip4Fragment_)
+{-# INLINE ip4Fragment #-}
+
+ip4DontFragment :: Lens' IP4Header Bool
+ip4DontFragment  = ip4Fragment . L.bit 14
+{-# INLINE ip4DontFragment #-}
+
+ip4MoreFragments :: Lens' IP4Header Bool
+ip4MoreFragments  = ip4Fragment . L.bit 13
+{-# INLINE ip4MoreFragments #-}
+
+-- | The fragment offset, in bytes.
+ip4FragmentOffset :: Lens' IP4Header Word16
+ip4FragmentOffset  = ip4Fragment . lens f g
+  where
+  f frag     = (frag .&. 0x1fff) `shiftL` 3
+  g frag len = frag .|. ((len `shiftR` 3) .&. 0x1fff)
+{-# INLINE ip4FragmentOffset #-}
+
+
 noMoreFragments :: IP4Header -> IP4Header
-noMoreFragments hdr = hdr { ip4MoreFragments = False }
+noMoreFragments  = set ip4MoreFragments False
 
 moreFragments :: IP4Header -> IP4Header
-moreFragments hdr = hdr { ip4MoreFragments = True }
+moreFragments  = set ip4MoreFragments True
 
 addOffset :: Word16 -> IP4Header -> IP4Header
-addOffset off hdr = hdr { ip4FragmentOffset = ip4FragmentOffset hdr + off }
+addOffset off = over ip4FragmentOffset (+ off)
 
 setIdent :: IP4Ident -> IP4Header -> IP4Header
 setIdent i hdr = hdr { ip4Ident = i }
@@ -208,16 +228,6 @@ fragmentPacket mtu0 hdr0 = loop hdr0
     frag       = (moreFragments hdr, as)
 
 
-ip4FragmentField :: Bool -> Bool -> Word16 -> Word16
-ip4FragmentField df mf off = fragBit (morefragsBit ((off `shiftR` 3) .&. 0x1fff))
-  where
-  fragBit      | df        = (`setBit` 14)
-               | otherwise = id
-
-  morefragsBit | mf        = (`setBit` 13)
-               | otherwise = id
-
-
 -- | Compute the value of the version/header length byte.
 ip4VersionIHL :: Int -> Word8
 ip4VersionIHL ihl = 4 `shiftL` 4 .|. fromIntegral (ihl `shiftR` 2)
@@ -247,17 +257,12 @@ getIP4Packet  = label "IP4 Header" $ do
        do ip4TypeOfService   <- getWord8
           payloadLen         <- getWord16be
           ip4Ident           <- getWord16be
-
-          s1 <- getWord16be
-          let ip4DontFragment   = s1 `testBit` 14
-              ip4MoreFragments  = s1 `testBit` 13
-              ip4FragmentOffset = (s1 .&. 0x1fff) * 8
-
-          ip4TimeToLive <- getWord8
-          ip4Protocol   <- getWord8
-          ip4Checksum   <- getWord16be
-          ip4SourceAddr <- getIP4
-          ip4DestAddr   <- getIP4
+          ip4Fragment_       <- getWord16be
+          ip4TimeToLive      <- getWord8
+          ip4Protocol        <- getWord8
+          ip4Checksum        <- getWord16be
+          ip4SourceAddr      <- getIP4
+          ip4DestAddr        <- getIP4
           let optlen = ihl - 20
           ip4Options <-
               label "IP4 Options" $ isolate optlen
@@ -275,7 +280,7 @@ putIP4Header IP4Header { .. } pktlen = do
 
   putWord16be (fromIntegral (pktlen + ihl))
   putWord16be ip4Ident
-  putWord16be (ip4FragmentField ip4DontFragment ip4MoreFragments ip4FragmentOffset)
+  putWord16be ip4Fragment_
 
   putWord8    ip4TimeToLive
   putWord8    ip4Protocol
@@ -373,7 +378,7 @@ ip4OptionType copied cls num =
 
 putIP4Option :: Putter IP4Option
 putIP4Option IP4Option { .. } =
-  do let copied | ip4OptionCopied = bit 7
+  do let copied | ip4OptionCopied = B.bit 7
                 | otherwise       = 0
 
      putWord8 $ copied .|. ((ip4OptionClass .&. 0x3) `shiftL` 5)

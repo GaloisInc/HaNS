@@ -9,6 +9,7 @@ import Hans.Config
 import Hans.Device.Types (Device(..),updateError)
 import Hans.Dns.Packet
 import Hans.IP4.Packet
+import Hans.Lens
 import Hans.Serialize (runPutPacket)
 import Hans.Socket
 import Hans.Types
@@ -96,7 +97,7 @@ queryServers4 sock req = go
   where
   go (addr:addrs) =
     do sendto4 sock addr 53 req
-       mbRes <- timeout (cfgDnsResolveTimeout (getConfig (getNetworkStack sock)))
+       mbRes <- timeout (cfgDnsResolveTimeout (view config (view networkStack sock)))
                     (recvfrom4 sock)
 
        -- require that the server we sent a request to is the one that responded

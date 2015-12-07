@@ -11,6 +11,7 @@ import Hans.IP4.ArpTable as Exports (ArpTable)
 import Hans.IP4.Packet
 import Hans.IP4.State as Exports
 import Hans.IP4.RoutingTable as Exports (RoutingTable)
+import Hans.Lens
 import Hans.Udp.State as Exports
 
 import           Control.Concurrent (ThreadId)
@@ -46,29 +47,29 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                  }
 
 instance HasConfig NetworkStack where
-  getConfig = nsConfig
-  {-# INLINE getConfig #-}
+  config = to nsConfig
+  {-# INLINE config #-}
 
 instance HasIP4State NetworkStack where
-  getIP4State = nsIP4State
-  {-# INLINE getIP4State #-}
+  ip4State = to nsIP4State
+  {-# INLINE ip4State #-}
 
 instance HasUdpState NetworkStack where
-  getUdpState = nsUdpState
-  {-# INLINE getUdpState #-}
+  udpState = to nsUdpState
+  {-# INLINE udpState #-}
 
-class HasNetworkStack a where
-  getNetworkStack :: a -> NetworkStack
+class HasNetworkStack ns where
+  networkStack :: Getting r ns NetworkStack
 
 instance HasNetworkStack NetworkStack where
-  getNetworkStack = id
-  {-# INLINE getNetworkStack #-}
+  networkStack = id
+  {-# INLINE networkStack #-}
 
 
 addNameServer4 :: HasNetworkStack ns => ns -> IP4 -> IO ()
 addNameServer4 ns addr =
-  atomicModifyIORef' (nsNameServers4 (getNetworkStack ns))
+  atomicModifyIORef' (nsNameServers4 (view networkStack ns))
       (\addrs -> (addr:addrs,()))
 
 getNameServers4 :: HasNetworkStack ns => ns -> IO [IP4]
-getNameServers4 ns = readIORef (nsNameServers4 (getNetworkStack ns))
+getNameServers4 ns = readIORef (nsNameServers4 (view networkStack ns))

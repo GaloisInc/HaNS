@@ -10,6 +10,7 @@ module Hans.IP4.Fragments (
 import           Hans.Config
 import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet
+import           Hans.Lens (view)
 import           Hans.Monad
 import           Hans.Time (toUSeconds)
 
@@ -50,7 +51,7 @@ processFragment :: FragTable -> IP4Header -> S.ByteString
 processFragment FragTable { .. } hdr body
 
     -- no fragments
-  | not (ip4MoreFragments hdr) && ip4FragmentOffset hdr == 0 =
+  | not (view ip4MoreFragments hdr) && view ip4FragmentOffset hdr == 0 =
     return (hdr,body)
 
     -- fragment
@@ -107,7 +108,7 @@ mkKey IP4Header { .. } = (ip4SourceAddr,ip4DestAddr,ip4Protocol,ip4Ident)
 mkFragment :: IP4Header -> S.ByteString -> Fragment
 mkFragment hdr body = Fragment { .. }
   where
-  fragStart   = fromIntegral (ip4FragmentOffset hdr)
+  fragStart   = fromIntegral (view ip4FragmentOffset hdr)
   fragEnd     = fragStart + S.length body
   fragPayload = [body]
 
@@ -166,16 +167,16 @@ addFragment hdr frag buf =
   Buffer { bufExpire    = bufExpire buf
          , bufSize      = size'
          , bufHeader    = case bufHeader buf of
-                            Nothing | ip4FragmentOffset hdr == 0 -> Just hdr
-                            _                                    -> bufHeader buf
+                            Nothing | view ip4FragmentOffset hdr == 0 -> Just hdr
+                            _                                         -> bufHeader buf
 
          , bufFragments = insertFragment (bufFragments buf)
          }
 
   where
 
-  size' | ip4MoreFragments hdr = bufSize buf
-        | otherwise            = Just $! fragEnd frag
+  size' | view ip4MoreFragments hdr = bufSize buf
+        | otherwise                 = Just $! fragEnd frag
 
   insertFragment frags@(f:fs)
     | fragEnd   frag == fragStart f = mergeFragment frag f : fs

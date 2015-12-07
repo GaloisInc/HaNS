@@ -9,6 +9,7 @@ module Hans.Socket where
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device(devName))
 import           Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
+import           Hans.Lens
 import           Hans.Types
                      (HasNetworkStack(..),NetworkStack,registerRecv4,UdpBuffer
                      ,lookupRoute,nextUdpPort4)
@@ -110,14 +111,14 @@ data DatagramSocket addr =
                  }
 
 instance HasNetworkStack (DatagramSocket addr) where
-  getNetworkStack DatagramSocket { .. } = dgNS
-  {-# INLINE getNetworkStack #-}
+  networkStack = to dgNS
+  {-# INLINE networkStack #-}
 
 instance Socket DatagramSocket IP4 where
 
-  sOpen ns SocketConfig { .. } mbDev src port =
-    do let dgNS = getNetworkStack ns
-       srcPort <- case port of
+  sOpen ns SocketConfig { .. } mbDev src mbPort =
+    do let dgNS = view networkStack ns
+       srcPort <- case mbPort of
                    Nothing -> do mb <- nextUdpPort4 dgNS src
                                  case mb of
                                    Just port -> return port
@@ -138,7 +139,7 @@ instance Socket DatagramSocket IP4 where
 
        return $! DatagramSocket { .. }
 
-  sConnect sock @ DatagramSocket { .. } dst dstPort =
+  sConnect DatagramSocket { .. } dst dstPort =
     do mbRoute <- lookupRoute dgNS dst
        case mbRoute of
 
@@ -168,7 +169,7 @@ instance Socket DatagramSocket IP4 where
 
          Nothing -> throwIO4 NoRouteToHost
 
-  sWrite sock @ DatagramSocket { .. } bytes =
+  sWrite DatagramSocket { .. } bytes =
     do path <- readIORef dgState
        case path of
 
@@ -206,7 +207,7 @@ recvfrom4 DatagramSocket { .. } =
 
 -- | Send to a specific end host.
 sendto4 :: DatagramSocket IP4 -> IP4 -> SockPort -> L.ByteString -> IO ()
-sendto4 sock @ DatagramSocket { .. } = \ dst dstPort bytes ->
+sendto4 DatagramSocket { .. } = \ dst dstPort bytes ->
   do state <- readIORef dgState
      case state of
 

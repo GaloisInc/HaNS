@@ -16,6 +16,7 @@ import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet,renderIcmp4Packet)
 import Hans.IP4.Output (queueIP4)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..))
+import Hans.Lens (view)
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
 import Hans.Serialize (runPutPacket)
 import Hans.Types
@@ -44,7 +45,7 @@ processArp ns dev payload =
      let lha = devMac dev'
 
      -- add the entry if it didn't already exist
-     unless merge (io (addEntry (ip4ArpTable (getIP4State ns)) arpSPA arpSHA))
+     unless merge (io (addEntry (ip4ArpTable (view ip4State ns)) arpSPA arpSHA))
 
      -- respond if the packet was a who-has request for our mac
      when (arpOper == ArpRequest)
@@ -59,10 +60,10 @@ processArp ns dev payload =
 -- | Update an entry in the arp table, if it exists already.
 updateEntry :: NetworkStack -> Mac -> IP4 -> IO Bool
 updateEntry ns sha spa =
-  do mb <- lookupEntry (ip4ArpTable (getIP4State ns)) spa
+  do mb <- lookupEntry (ip4ArpTable (view ip4State ns)) spa
      case mb of
 
-       Just _  -> do addEntry (ip4ArpTable (getIP4State ns)) spa sha
+       Just _  -> do addEntry (ip4ArpTable (view ip4State ns)) spa sha
                      return True
 
        Nothing -> return False
@@ -95,7 +96,7 @@ processIP4 ns dev payload =
 handleIP4 :: NetworkStack -> Device -> IP4Header -> S.ByteString -> Hans ()
 handleIP4 ns dev hdr body =
   do (IP4Header { .. },body') <-
-         processFragment (ip4Fragments (getIP4State ns)) hdr body
+         processFragment (ip4Fragments (view ip4State ns)) hdr body
 
      case ip4Protocol of
        IP4_PROT_ICMP -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
@@ -107,7 +108,7 @@ handleIP4 ns dev hdr body =
 checkDestination :: NetworkStack -> Device -> IP4 -> Hans ()
 
 -- always accept broadcast messages
-checkDestination ns dev BroadcastIP4 = return ()
+checkDestination _ _ BroadcastIP4 = return ()
 
 -- require that the input device has the destination address
 checkDestination ns dev dest =

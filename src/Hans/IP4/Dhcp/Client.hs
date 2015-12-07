@@ -14,12 +14,13 @@ import Hans.IP4.Dhcp.Packet
 import Hans.IP4.Dhcp.Options
 import Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4,IP4Mask(..))
 import Hans.IP4.RoutingTable(Route(..),RouteType(..))
+import Hans.Lens
 import Hans.Socket
            (DatagramSocket,sOpen,sClose,sendto4,recvfrom4,SockPort
            ,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
 import Hans.Time (toUSeconds)
-import Hans.Types (NetworkStack,getNetworkStack,addRoute,addNameServer4)
+import Hans.Types (NetworkStack,networkStack,addRoute,addNameServer4)
 
 import           Control.Concurrent (forkIO,threadDelay,killThread)
 import           Control.Monad (when,guard)
@@ -75,9 +76,9 @@ waitResponse :: DhcpConfig -> IO () -> IO a -> IO (Maybe a)
 waitResponse DhcpConfig { .. } send recv =
   go dcRetries (toUSeconds dcInitialTimeout)
   where
-  go retries to =
+  go retries toVal =
     do send
-       mb <- timeout to recv
+       mb <- timeout toVal recv
        case mb of
 
          Just{} -> return mb
@@ -85,7 +86,7 @@ waitResponse DhcpConfig { .. } send recv =
          -- adjust the timeout by two, and add some slack before trying again
          Nothing | retries > 0 ->
            do slack <- randomRIO (500,1000)
-              go (retries - 1) (to * 2 + slack * 1000)
+              go (retries - 1) (toVal * 2 + slack * 1000)
 
          _ -> return Nothing
 
@@ -145,7 +146,7 @@ dhcpRequest cfg dev sock offer =
 
        -- XXX apply all the routing information
        Just ack ->
-         do lease <- handleAck (getNetworkStack sock) cfg dev offer ack
+         do lease <- handleAck (view networkStack sock) cfg dev offer ack
             return (Just lease)
 
 
@@ -183,9 +184,7 @@ renew ns cfg dev offer =
 -- renew it.
 handleAck :: NetworkStack -> DhcpConfig -> Device -> Offer -> Ack -> IO DhcpLease
 handleAck ns cfg dev offer Ack { .. } =
-  do let mac      = devMac dev
-         addr     = ackYourAddr
-         opts     = ackOptions
+  do let addr     = ackYourAddr
          mask     = fromMaybe 24 (lookupSubnet ackOptions)
          (ty,def) = case lookupGateway ackOptions of
                       Just gw -> (Indirect gw,dcDefaultRoute cfg)

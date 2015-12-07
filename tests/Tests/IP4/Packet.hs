@@ -6,6 +6,7 @@ import Tests.Ethernet (arbitraryMac)
 import Tests.Utils (encodeDecodeIdentity)
 
 import Hans.IP4.Packet
+import Hans.Lens
 
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Short as Sh
@@ -49,13 +50,6 @@ arbitraryIP4Header :: Gen IP4Header
 arbitraryIP4Header  =
   do ip4TypeOfService <- arbitraryBoundedRandom
      ip4Ident         <- arbitraryIdent
-     ip4DontFragment  <- arbitraryBoundedRandom
-     ip4MoreFragments <- arbitraryBoundedRandom
-
-     -- offset MUST always be a multiple of 8
-     off <- choose (0,0x1fff)
-     let ip4FragmentOffset = off * 8
-
      ip4TimeToLive    <- arbitraryBoundedRandom
      ip4Protocol      <- arbitraryProtocol
      ip4SourceAddr    <- arbitraryIP4
@@ -68,7 +62,15 @@ arbitraryIP4Header  =
      -- available
      let ip4Options = []
 
-     return IP4Header { .. }
+     -- set the members of the ip4Fragment_ field on the final header
+     df  <- arbitraryBoundedRandom
+     mf  <- arbitraryBoundedRandom
+     off <- choose (0,0x1fff)
+     let hdr = IP4Header { ip4Fragment_ = 0, .. }
+
+     return $! set ip4DontFragment df
+            $! set ip4MoreFragments mf
+            $! set ip4FragmentOffset off hdr
 
 
 arbitraryIP4Option :: Gen IP4Option

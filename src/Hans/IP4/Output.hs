@@ -8,7 +8,7 @@ module Hans.IP4.Output (
     responder,
   ) where
 
-import Hans.Config (getConfig,Config(..))
+import Hans.Config (config,Config(..))
 import Hans.Device
            (Device(..),DeviceConfig(..),DeviceStats(..),updateError,updateTX)
 import Hans.Ethernet
@@ -19,6 +19,7 @@ import Hans.IP4.ArpTable
            ,writeChanStrategy)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
+import Hans.Lens
 import Hans.Types
 
 import           Control.Concurrent (forkIO,threadDelay)
@@ -30,7 +31,7 @@ import qualified Data.ByteString.Lazy as L
 
 responder :: NetworkStack -> IO ()
 responder ns = forever $
-  do req <- BC.readChan (ip4ResponderQueue (getIP4State ns))
+  do req <- BC.readChan (ip4ResponderQueue (view ip4State ns))
      case req of
 
        Send mbSrc dst prot payload ->
@@ -47,7 +48,7 @@ queueIP4 :: NetworkStack -> DeviceStats
          -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
          -> IO ()
 queueIP4 ns stats mbSrc dst prot payload =
-  do written <- BC.tryWriteChan (ip4ResponderQueue (getIP4State ns))
+  do written <- BC.tryWriteChan (ip4ResponderQueue (view ip4State ns))
                     (Send mbSrc dst prot payload)
      unless written (updateError stats)
 
@@ -57,13 +58,13 @@ queueIP4 ns stats mbSrc dst prot payload =
 sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
         -> IO Bool
 
--- A special case for when the sender knows that this is the right device, and
+-- A special case for when the sender knows that this is the right device and
 -- source address. The routing table is still queried to find the next hop, and
 -- if the route found doesn't use the device provided, the packets aren't sent.
 sendIP4 ns (SourceDev dev src) dst prot payload =
   do mbRoute <- lookupRoute ns dst
      case mbRoute of
-       Just (src,next,dev') | devName dev == devName dev' ->
+       Just (_,next,dev') | devName dev == devName dev' ->
          do primSendIP4 ns dev src dst next prot payload
             return True
 
@@ -99,7 +100,7 @@ prepareHeader ns src dst prot =
                               , ip4SourceAddr = src
                               , ip4DestAddr   = dst
                               , ip4Protocol   = prot
-                              , ip4TimeToLive = cfgIP4InitialTTL (getConfig ns)
+                              , ip4TimeToLive = cfgIP4InitialTTL (view config ns)
                               }
 
 
@@ -137,11 +138,11 @@ primSendIP4 ns dev src dst next prot payload
 -- | Retrieve the outgoing address for this IP4 packet, and send along all
 -- fragments.
 arpOutgoing :: NetworkStack -> Device -> IP4 -> IP4 -> [L.ByteString] -> IO ()
-arpOutgoing ns dev src BroadcastIP4 packets =
+arpOutgoing _ dev _ BroadcastIP4 packets =
     sendIP4Frames dev BroadcastMac packets
 
 arpOutgoing ns dev src next packets =
-  do res <- resolveAddr (ip4ArpTable (getIP4State ns)) next queueSend
+  do res <- resolveAddr (ip4ArpTable (view ip4State ns)) next queueSend
      case res of
        Known dstMac ->
          sendIP4Frames dev dstMac packets
@@ -156,7 +157,7 @@ arpOutgoing ns dev src next packets =
 
   queueSend =
     writeChanStrategy (Just (devStats dev)) mkFinish
-        (ip4ResponderQueue (getIP4State ns))
+        (ip4ResponderQueue (view ip4State ns))
 
   mkFinish mbMac =
     do dstMac <- mbMac
@@ -173,7 +174,7 @@ sendIP4Frames dev dstMac packets =
 arpRequestThread :: NetworkStack -> Device -> IP4 -> IP4 -> IO ()
 arpRequestThread ns dev src dst = loop 0
   where
-  IP4State { ..} = getIP4State ns
+  IP4State { ..} = view ip4State ns
 
   request = renderArpPacket ArpPacket { arpOper   = ArpRequest
                                       , arpSHA    = devMac dev
