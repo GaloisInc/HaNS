@@ -156,6 +156,17 @@ emptyIP4Header  = IP4Header
   , ip4Options        = []
   }
 
+ip4DCSP :: Lens' IP4Header Word8
+ip4DCSP f IP4Header { .. } =
+  fmap (\ w -> IP4Header { ip4TypeOfService = ip4TypeOfService .|. (w `shiftL` 2), .. })
+       (f (ip4TypeOfService `shiftR` 2))
+{-# INLINE ip4DCSP #-}
+
+ip4ECN :: Lens' IP4Header Word8
+ip4ECN f IP4Header { .. } =
+  fmap (\ w -> IP4Header { ip4TypeOfService = ip4TypeOfService .|. (w .&. 0x3), .. })
+       (f (ip4TypeOfService .&. 0x3))
+{-# INLINE ip4ECN #-}
 
 ip4Fragment :: Lens' IP4Header Word16
 ip4Fragment f IP4Header { .. } =
