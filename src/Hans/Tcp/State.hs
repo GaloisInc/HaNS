@@ -23,6 +23,8 @@ import           GHC.Generics (Generic)
 
 data Key = Listen4 !IP4 !TcpPort
            -- ^ Listening connections
+           --
+           -- XXX: allow for the remote side to be specified
 
          | Conn4 !IP4 !TcpPort !IP4 !TcpPort
            -- ^ Open connections
@@ -51,9 +53,15 @@ newTcpState Config { .. } =
      return TcpState { .. }
 
 
+registerSocket :: HasTcpState state => state -> Key -> TcbState -> IO ()
+registerSocket state key val =
+  HT.insert key val (tcpSockets (view tcpState state))
+
+
 -- Tcb -------------------------------------------------------------------------
 
 data TcbState = Listen !ListenTcb
+              | SynReceived !Tcb
               | Established !Tcb
               | Closed
 
@@ -115,8 +123,8 @@ newTcb tcbDev tcbSrc4 tcbDst4 tcbNext4 =
      return Tcb { .. }
 
 
-addCounter :: (IORef TcpSeqNum) -> TcpSeqNum -> IO ()
-addCounter ref n = atomicModifyIORef' ref (\ c -> (c + n, ()))
+incVar :: IORef TcpSeqNum -> TcpSeqNum -> IO ()
+incVar ref n = atomicModifyIORef' ref (\ c -> (c + n, ()))
 
 
 -- | Lookup the Tcb for an established connection.
@@ -149,21 +157,3 @@ findTcb4 state src srcPort dst dstPort =
                       case mb' of
                         Just tcb -> return tcb
                         Nothing  -> return Closed
-
-
-
--- | Generate a Tcb from a ListenTcb
-fromListen :: HasIP4State state
-           => state -> IP4 -> TcpPort -> IP4 -> TcpPort -> ListenTcb
-           -> IO (Maybe Tcb)
-fromListen state src srcPort dst dstPort ltcb =
-  do mb <- lookupRoute state dst
-     case mb of
-       Just (src',next,dev) | src == src' ->
-         do tcb <- newTcb dev src' dst next
-            iss <- nextIss ltcb
-            atomicWriteIORef (tcbIss tcb) $! iss
-
-            return (Just tcb)
-
-       Nothing -> return Nothing

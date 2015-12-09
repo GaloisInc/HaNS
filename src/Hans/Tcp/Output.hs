@@ -49,7 +49,6 @@ sendTcp4 ns dev src dst next hdr payload
        return True
 
 
-
 -- $notes
 -- #no-retransmit-queue#
 --

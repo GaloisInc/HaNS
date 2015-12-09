@@ -9,13 +9,14 @@ import Hans.Device.Types (Device(..),DeviceConfig(..))
 import Hans.IP4 (IP4,ip4PseudoHeader,pattern IP4_PROT_TCP)
 import Hans.Lens
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
-import Hans.Tcp.Output (routeTcp4)
+import Hans.Tcp.Output (routeTcp4,sendTcp4)
 import Hans.Tcp.Packet
 import Hans.Types
 
 import           Control.Monad (unless,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import           Data.IORef (atomicWriteIORef)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
 
 
@@ -96,21 +97,21 @@ respondListen :: NetworkStack
               -> Device -> IP4 -> IP4 -> TcpHeader -> S.ByteString
               -> ListenTcb -> Hans ()
 respondListen ns dev src dst hdr payload ltcb =
---       first check for an RST
+--   first check for an RST
 --
---         An incoming RST should be ignored.  Return.
+--     An incoming RST should be ignored.  Return.
   do when (view tcpRst hdr) escape
 
---       second check for an ACK
+--   second check for an ACK
 --
---         Any acknowledgment is bad if it arrives on a connection still in
---         the LISTEN state.  An acceptable reset segment should be formed
---         for any arriving ACK-bearing segment.  The RST should be
---         formatted as follows:
+--     Any acknowledgment is bad if it arrives on a connection still in
+--     the LISTEN state.  An acceptable reset segment should be formed
+--     for any arriving ACK-bearing segment.  The RST should be
+--     formatted as follows:
 --
---           <SEQ=SEG.ACK><CTL=RST>
+--       <SEQ=SEG.ACK><CTL=RST>
 --
---         Return.
+--     Return.
      when (view tcpAck hdr) $
        do let hdr' = set tcpRst True
                    $ emptyTcpHeader { tcpDestPort   = tcpSourcePort hdr
@@ -118,140 +119,173 @@ respondListen ns dev src dst hdr payload ltcb =
                                     , tcpSeqNum     = tcpAckNum hdr
                                     , tcpAckNum     = 0
                                     }
-                                    p
 
           _ <- io (routeTcp4 ns dev src dst hdr' L.empty)
           escape
 
---       third check for a SYN
+--   third check for a SYN
 --
---         If the SYN bit is set, check the security.  If the
---         security/compartment on the incoming segment does not exactly
---         match the security/compartment in the TCB then send a reset and
---         return.
+--     If the SYN bit is set, check the security.  If the
+--     security/compartment on the incoming segment does not exactly
+--     match the security/compartment in the TCB then send a reset and
+--     return.
 --
---           <SEQ=SEG.ACK><CTL=RST>
+--       <SEQ=SEG.ACK><CTL=RST>
 --
---        If the SEG.PRC is greater than the TCB.PRC then if allowed by
---        the user and the system set TCB.PRC<-SEG.PRC, if not allowed
---        send a reset and return.
+--    If the SEG.PRC is greater than the TCB.PRC then if allowed by
+--    the user and the system set TCB.PRC<-SEG.PRC, if not allowed
+--    send a reset and return.
 --
---          <SEQ=SEG.ACK><CTL=RST>
+--      <SEQ=SEG.ACK><CTL=RST>
 --
---        If the SEG.PRC is less than the TCB.PRC then continue.
+--    If the SEG.PRC is less than the TCB.PRC then continue.
 --
---        Set RCV.NXT to SEG.SEQ+1, IRS is set to SEG.SEQ and any other
---        control or text should be queued for processing later.  ISS
---        should be selected and a SYN segment sent of the form:
+--    Set RCV.NXT to SEG.SEQ+1, IRS is set to SEG.SEQ and any other
+--    control or text should be queued for processing later.  ISS
+--    should be selected and a SYN segment sent of the form:
 --
---          <SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>
+--      <SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>
 --
---        SND.NXT is set to ISS+1 and SND.UNA to ISS.  The connection
---        state should be changed to SYN-RECEIVED.  Note that any other
---        incoming control or data (combined with SYN) will be processed
---        in the SYN-RECEIVED state, but processing of SYN and ACK should
---        not be repeated.  If the listen was not fully specified (i.e.,
---        the foreign socket was not fully specified), then the
---        unspecified fields should be filled in now.
+--    SND.NXT is set to ISS+1 and SND.UNA to ISS.  The connection
+--    state should be changed to SYN-RECEIVED.  Note that any other
+--    incoming control or data (combined with SYN) will be processed
+--    in the SYN-RECEIVED state, but processing of SYN and ACK should
+--    not be repeated.  If the listen was not fully specified (i.e.,
+--    the foreign socket was not fully specified), then the
+--    unspecified fields should be filled in now.
 
      when (view tcpSyn hdr) $
-       do cookie <- mkSynCookie
+       do mbRoute <- io (lookupRoute ns dst)
+          nxt     <- case mbRoute of
 
+                       Just (src',nxt,dev')
+                         | src == src' && dev == dev' -> return nxt
+
+                       _ -> escape
+
+          io $ do tcb <- newTcb dev src dst nxt
+                  iss <- nextIss ltcb
+
+                  atomicWriteIORef (tcbRcvNxt tcb) (tcpSeqNum hdr + 1)
+                  atomicWriteIORef (tcbIrs    tcb) (tcpSeqNum hdr    )
+                  atomicWriteIORef (tcbIss    tcb)  iss
+
+                  let hdr' = set tcpSyn True
+                           $ set tcpAck True
+                           $ emptyTcpHeader
+                             { tcpSourcePort = tcpDestPort hdr
+                             , tcpDestPort   = tcpSourcePort hdr
+                             , tcpSeqNum     = iss
+                             , tcpAckNum     = tcpSeqNum hdr + 1
+                             }
+                  _ <- sendTcp4 ns dev src dst nxt hdr' L.empty
+
+                  atomicWriteIORef (tcbSndNxt tcb) (iss + 1)
+                  atomicWriteIORef (tcbSndUna tcb)  iss
+
+                  registerSocket ns
+                      (Conn4 src (tcpSourcePort hdr) dst (tcpDestPort hdr))
+                      (SynReceived tcb)
+
+--   fourth other text or control
 --
---      fourth other text or control
+--     Any other control or text-bearing segment (not containing SYN)
+--     must have an ACK and thus would be discarded by the ACK
+--     processing.  An incoming RST segment could not be valid, since
+--     it could not have been sent in response to anything sent by this
+--     incarnation of the connection.  So you are unlikely to get here,
+--     but if you do, drop the segment, and return.
+
+     escape
+
+
+
+
+-- If the state is SYN-SENT then
 --
---        Any other control or text-bearing segment (not containing SYN)
---        must have an ACK and thus would be discarded by the ACK
---        processing.  An incoming RST segment could not be valid, since
---        it could not have been sent in response to anything sent by this
---        incarnation of the connection.  So you are unlikely to get here,
---        but if you do, drop the segment, and return.
+--   first check the ACK bit
 --
---    If the state is SYN-SENT then
+--     If the ACK bit is set
 --
---      first check the ACK bit
+--       If SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send a reset (unless
+--       the RST bit is set, if so drop the segment and return)
 --
---        If the ACK bit is set
+--         <SEQ=SEG.ACK><CTL=RST>
 --
---          If SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send a reset (unless
---          the RST bit is set, if so drop the segment and return)
+--       and discard the segment.  Return.
 --
---            <SEQ=SEG.ACK><CTL=RST>
+--       If SND.UNA =< SEG.ACK =< SND.NXT then the ACK is acceptable.
 --
---          and discard the segment.  Return.
+--   second check the RST bit
+--   If the RST bit is set
 --
---          If SND.UNA =< SEG.ACK =< SND.NXT then the ACK is acceptable.
+--       If the ACK was acceptable then signal the user "error:
+--       connection reset", drop the segment, enter CLOSED state,
+--       delete TCB, and return.  Otherwise (no ACK) drop the segment
+--       and return.
 --
---      second check the RST bit
---      If the RST bit is set
+--   third check the security and precedence
 --
---          If the ACK was acceptable then signal the user "error:
---          connection reset", drop the segment, enter CLOSED state,
---          delete TCB, and return.  Otherwise (no ACK) drop the segment
---          and return.
+--     If the security/compartment in the segment does not exactly
+--     match the security/compartment in the TCB, send a reset
 --
---      third check the security and precedence
+--       If there is an ACK
 --
---        If the security/compartment in the segment does not exactly
---        match the security/compartment in the TCB, send a reset
+--         <SEQ=SEG.ACK><CTL=RST>
 --
---          If there is an ACK
+--       Otherwise
 --
---            <SEQ=SEG.ACK><CTL=RST>
+--         <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
 --
---          Otherwise
+--     If there is an ACK
 --
---            <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+--       The precedence in the segment must match the precedence in the
+--       TCB, if not, send a reset
 --
---        If there is an ACK
+--         <SEQ=SEG.ACK><CTL=RST>
 --
---          The precedence in the segment must match the precedence in the
---          TCB, if not, send a reset
+--     If there is no ACK
 --
---            <SEQ=SEG.ACK><CTL=RST>
+--       If the precedence in the segment is higher than the precedence
+--       in the TCB then if allowed by the user and the system raise
+--       the precedence in the TCB to that in the segment, if not
+--       allowed to raise the prec then send a reset.
 --
---        If there is no ACK
+--         <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
 --
---          If the precedence in the segment is higher than the precedence
---          in the TCB then if allowed by the user and the system raise
---          the precedence in the TCB to that in the segment, if not
---          allowed to raise the prec then send a reset.
+--       If the precedence in the segment is lower than the precedence
+--       in the TCB continue.
 --
---            <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+--     If a reset was sent, discard the segment and return.
 --
---          If the precedence in the segment is lower than the precedence
---          in the TCB continue.
+--   fourth check the SYN bit
 --
---        If a reset was sent, discard the segment and return.
+--     This step should be reached only if the ACK is ok, or there is
+--     no ACK, and it the segment did not contain a RST.
 --
---      fourth check the SYN bit
+--     If the SYN bit is on and the security/compartment and precedence
+--     are acceptable then, RCV.NXT is set to SEG.SEQ+1, IRS is set to
+--     SEG.SEQ.  SND.UNA should be advanced to equal SEG.ACK (if there
+--     is an ACK), and any segments on the retransmission queue which
+--     are thereby acknowledged should be removed.
 --
---        This step should be reached only if the ACK is ok, or there is
---        no ACK, and it the segment did not contain a RST.
+--     If SND.UNA > ISS (our SYN has been ACKed), change the connection
+--     state to ESTABLISHED, form an ACK segment
 --
---        If the SYN bit is on and the security/compartment and precedence
---        are acceptable then, RCV.NXT is set to SEG.SEQ+1, IRS is set to
---        SEG.SEQ.  SND.UNA should be advanced to equal SEG.ACK (if there
---        is an ACK), and any segments on the retransmission queue which
---        are thereby acknowledged should be removed.
+--       <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
 --
---        If SND.UNA > ISS (our SYN has been ACKed), change the connection
---        state to ESTABLISHED, form an ACK segment
+--     and send it.  Data or controls which were queued for
+--     transmission may be included.  If there are other controls or
+--     text in the segment then continue processing at the sixth step
+--     below where the URG bit is checked, otherwise return.
 --
---          <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
+--     Otherwise enter SYN-RECEIVED, form a SYN,ACK segment
 --
---        and send it.  Data or controls which were queued for
---        transmission may be included.  If there are other controls or
---        text in the segment then continue processing at the sixth step
---        below where the URG bit is checked, otherwise return.
+--       <SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>
 --
---        Otherwise enter SYN-RECEIVED, form a SYN,ACK segment
+--     and send it.  If there are other controls or text in the
+--     segment, queue them for processing after the ESTABLISHED state
+--     has been reached, return.
 --
---          <SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>
---
---        and send it.  If there are other controls or text in the
---        segment, queue them for processing after the ESTABLISHED state
---        has been reached, return.
---
---      fifth, if neither of the SYN or RST bits is set then drop the
---      segment and return.
+--   fifth, if neither of the SYN or RST bits is set then drop the
+--   segment and return.
