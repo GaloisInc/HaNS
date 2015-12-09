@@ -19,16 +19,27 @@ import           Data.Typeable (Typeable)
 
 type DeviceName = S.ByteString
 
+data ChecksumOffload = ChecksumOffload { coIP4   :: !Bool
+                                       , coUdp   :: !Bool
+                                       , coTcp   :: !Bool
+                                       , coIcmp4 :: !Bool
+                                       } deriving (Show)
+
+defaultChecksumOffload :: ChecksumOffload
+defaultChecksumOffload  = ChecksumOffload { coIP4   = False
+                                          , coUdp   = False
+                                          , coTcp   = False
+                                          , coIcmp4 = False }
+
 -- | Static configuration data for creating a device.
 data DeviceConfig = DeviceConfig { dcSendQueueLen :: {-# UNPACK #-} !Int
                                    -- ^ How large the send queue should be.
 
-                                 , dcChecksumOffload :: !Bool
-                                   -- ^ Whether or not the checksum calculation
-                                   -- has been offloaded to the device.
+                                 , dcTxOffload :: !ChecksumOffload
+                                 , dcRxOffload :: !ChecksumOffload
 
                                  , dcMtu :: !Int
-                                 }
+                                 } deriving (Show)
 
 class HasDeviceConfig cfg where
   deviceConfig :: Getting r cfg DeviceConfig
@@ -41,14 +52,19 @@ instance HasDeviceConfig Device where
   deviceConfig = to devConfig
   {-# INLINE deviceConfig #-}
 
+-- | The TX checksum offload config.
+txOffload :: HasDeviceConfig cfg => Getting r cfg ChecksumOffload
+txOffload  = deviceConfig . to dcTxOffload
 
-checksumOffload :: HasDeviceConfig cfg => cfg -> Bool
-checksumOffload cfg = dcChecksumOffload (view deviceConfig cfg)
+-- | The RX checksum offload config.
+rxOffload :: HasDeviceConfig cfg => Getting r cfg ChecksumOffload
+rxOffload  = deviceConfig . to dcRxOffload
 
 defaultDeviceConfig :: DeviceConfig
-defaultDeviceConfig  = DeviceConfig { dcSendQueueLen    = 128
-                                    , dcChecksumOffload = False
-                                    , dcMtu             = 1500
+defaultDeviceConfig  = DeviceConfig { dcSendQueueLen = 128
+                                    , dcTxOffload    = defaultChecksumOffload
+                                    , dcRxOffload    = defaultChecksumOffload
+                                    , dcMtu          = 1500
                                     }
 
 data Device = Device { devName :: !DeviceName

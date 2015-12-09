@@ -7,10 +7,10 @@
 module Hans.IP4.Packet where
 
 import Hans.Checksum
-           (computeChecksum,Checksum(..),PartialChecksum,Pair8(..)
-           ,emptyPartialChecksum)
+           (Checksum(..),PartialChecksum,Pair8(..),emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Lens as L
+import Hans.Network.Types (NetworkProtocol)
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (unless,guard)
@@ -113,7 +113,7 @@ broadcastAddress  = setHostBits
 -- +--------+--------+--------+--------+
 -- |  zero  |protocol|     length      |
 -- +--------+--------+--------+--------+
-ip4PseudoHeader :: IP4 -> IP4 -> IP4Protocol -> Int -> PartialChecksum
+ip4PseudoHeader :: IP4 -> IP4 -> NetworkProtocol -> Int -> PartialChecksum
 ip4PseudoHeader src dst prot len =
   extendChecksum (fromIntegral len :: Word16) $
   extendChecksum (Pair8 0 prot)               $
@@ -125,12 +125,6 @@ ip4PseudoHeader src dst prot len =
 
 type IP4Ident = Word16
 
-type IP4Protocol = Word8
-
-pattern IP4_PROT_ICMP = 0x1
-pattern IP4_PROT_TCP  = 0x6
-pattern IP4_PROT_UDP  = 0x11
-
 
 data IP4Header = IP4Header
   { ip4TypeOfService  :: {-# UNPACK #-} !Word8
@@ -138,7 +132,7 @@ data IP4Header = IP4Header
   , ip4Fragment_      :: {-# UNPACK #-} !Word16
     -- ^ This includes the flags, and the fragment offset.
   , ip4TimeToLive     :: {-# UNPACK #-} !Word8
-  , ip4Protocol       :: {-# UNPACK #-} !IP4Protocol
+  , ip4Protocol       :: {-# UNPACK #-} !NetworkProtocol
   , ip4Checksum       :: {-# UNPACK #-} !Word16
   , ip4SourceAddr     :: {-# UNPACK #-} !IP4
   , ip4DestAddr       :: {-# UNPACK #-} !IP4
@@ -303,28 +297,6 @@ putIP4Header IP4Header { .. } pktlen = do
   putIP4 ip4DestAddr
 
   putLazyByteString optbs
-
-
--- | The final step to render an IP header and its payload out as a lazy
--- 'ByteString'. Compute the checksum over the packet with its checksum zeroed,
--- then reconstruct a new lazy 'ByteString' that contains chunks from the old
--- header, and the new checksum.
-renderIP4Packet :: Bool -> IP4Header -> L.ByteString -> L.ByteString
-renderIP4Packet includeCS hdr pkt
-  | not includeCS = bytes `L.append` pkt
-  | otherwise     = packet
-  where
-
-  pktlen    = L.length pkt
-
-  bytes     = runPutPacket 20 40 pkt (putIP4Header hdr (fromIntegral pktlen))
-  cs        = computeChecksum (L.take (L.length bytes - pktlen) bytes)
-
-  beforeCS  = L.take 10 bytes
-  afterCS   = L.drop 12 bytes
-  csBytes   = runPutPacket 2 100 afterCS (putWord16be cs)
-
-  packet    = beforeCS `L.append` csBytes
 
 
 -- IP4 Options -----------------------------------------------------------------

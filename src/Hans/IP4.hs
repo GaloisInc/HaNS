@@ -6,8 +6,7 @@ module Hans.IP4 (
 
 import Hans.IP4.Packet as Exports
            (IP4,packIP4,unpackIP4,pattern BroadcastIP4,pattern WildcardIP4
-           ,ip4PseudoHeader
-           ,pattern IP4_PROT_ICMP, pattern IP4_PROT_TCP, pattern IP4_PROT_UDP)
+           ,ip4PseudoHeader)
 
 import Hans.IP4.Output as Exports
 

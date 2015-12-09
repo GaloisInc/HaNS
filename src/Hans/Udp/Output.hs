@@ -6,9 +6,8 @@ module Hans.Udp.Output (
   ) where
 
 import Hans.Checksum (finalizeChecksum,extendChecksum)
-import Hans.Device.Types (checksumOffload)
-import Hans.IP4.Output (primSendIP4)
-import Hans.IP4.Packet (IP4,pattern IP4_PROT_UDP)
+import Hans.Device.Types (ChecksumOffload(..),txOffload)
+import Hans.Lens (view)
 import Hans.Network
 import Hans.Serialize (runPutPacket)
 import Hans.Udp.Packet
@@ -34,21 +33,21 @@ primSendUdp ns ri dst udpSourcePort udpDestPort payload
 
   | otherwise =
     do let hdr   = UdpHeader { udpChecksum = 0, .. }
-       let bytes = renderUdpPacket (not (checksumOffload ri))
+       let bytes = renderUdpPacket (view txOffload ri)
                        (riSource ri) dst hdr payload
 
-       sendDatagram ns ri dst IP4_PROT_UDP bytes
+       sendDatagram ns ri dst PROT_UDP bytes
 
        return True
 
 
 -- | Given a way to make the pseudo header, render the UDP packet.
 renderUdpPacket :: Network addr
-                => Bool -> addr -> addr -> UdpHeader -> L.ByteString
+                => ChecksumOffload -> addr -> addr -> UdpHeader -> L.ByteString
                 -> L.ByteString
-renderUdpPacket includeCS src dst hdr body
-  | not includeCS = bytes
-  | otherwise     = beforeCS `L.append` withCS
+renderUdpPacket ChecksumOffload { .. } src dst hdr body
+  | coUdp     = bytes
+  | otherwise = beforeCS `L.append` withCS
 
   where
 
@@ -58,7 +57,7 @@ renderUdpPacket includeCS src dst hdr body
   udplen = udpHeaderSize + pktlen
   cs     = finalizeChecksum
          $ extendChecksum bytes
-         $ pseudoHeader src dst IP4_PROT_UDP udplen
+         $ pseudoHeader src dst PROT_UDP udplen
 
   beforeCS = L.take (fromIntegral udpHeaderSize - 2) bytes
   afterCS  = L.drop (fromIntegral udpHeaderSize    ) bytes

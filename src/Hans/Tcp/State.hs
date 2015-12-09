@@ -4,29 +4,27 @@
 
 module Hans.Tcp.State where
 
+import           Hans.Addr (Addr,wildcardAddr)
 import           Hans.Config (Config(..))
-import           Hans.Device.Types (Device)
-import           Hans.IP4.Packet (IP4,pattern WildcardIP4)
-import           Hans.IP4.State (HasIP4State,lookupRoute4)
 import qualified Hans.HashTable as HT
 import           Hans.Lens
+import           Hans.Network.Types (RouteInfo)
 import           Hans.Tcp.Packet
 
 import           Data.Hashable (Hashable)
-import           Data.IORef
-                     (IORef,newIORef,atomicModifyIORef',atomicWriteIORef)
+import           Data.IORef (IORef,newIORef,atomicModifyIORef')
 import           Data.Time.Clock (getCurrentTime,UTCTime,diffUTCTime)
 import           GHC.Generics (Generic)
 
 
 -- General State ---------------------------------------------------------------
 
-data Key = Listen4 !IP4 !TcpPort
+data Key = Listening !Addr !TcpPort
            -- ^ Listening connections
            --
            -- XXX: allow for the remote side to be specified
 
-         | Conn4 !IP4 !TcpPort !IP4 !TcpPort
+         | Conn !Addr !TcpPort !Addr !TcpPort
            -- ^ Open connections
 
            deriving (Show,Eq,Ord,Generic)
@@ -80,7 +78,7 @@ genIss now IssGen { .. } = (IssGen iss' now, iss')
 
 
 data ListenTcb = ListenTcb { ltcbIss  :: !(IORef IssGen)
-                           , ltcbSrc  :: !IP4
+                           , ltcbSrc  :: !Addr
                            , ltcbPort :: !TcpPort
                            }
 
@@ -107,15 +105,13 @@ data Tcb = Tcb { tcbSndUna
                , tcbDestPort :: !TcpPort
 
                  -- routing information
-               , tcbDev   :: !Device
-               , tcbSrc4  :: !IP4
-               , tcbDst4  :: !IP4
-               , tcbNext4 :: !IP4
+               , tcbRouteInfo :: !(RouteInfo Addr)
+               , tcbDest      :: !Addr
                }
 
 
-newTcb :: Device -> IP4 -> TcpPort -> IP4 -> TcpPort -> IP4 -> IO Tcb
-newTcb tcbDev tcbSrc4 tcbSourcePort tcbDst4 tcbDestPort tcbNext4 =
+newTcb :: RouteInfo Addr -> TcpPort -> Addr -> TcpPort -> IO Tcb
+newTcb tcbRouteInfo tcbSourcePort tcbDest tcbDestPort =
   do tcbSndUna <- newIORef 0
      tcbSndNxt <- newIORef 0
      tcbSndWnd <- newIORef 0
@@ -135,32 +131,32 @@ incVar ref n = atomicModifyIORef' ref (\ c -> (c + n, ()))
 
 
 -- | Lookup the Tcb for an established connection.
-findEstablished4 :: HasTcpState state
-                 => state -> IP4 -> TcpPort -> IP4 -> TcpPort -> IO (Maybe TcbState)
-findEstablished4 state src srcPort dst dstPort =
-  HT.lookup (Conn4 src srcPort dst dstPort) (tcpSockets (view tcpState state))
+findEstablished :: HasTcpState state
+                => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe TcbState)
+findEstablished state src srcPort dst dstPort =
+  HT.lookup (Conn src srcPort dst dstPort) (tcpSockets (view tcpState state))
 
 
 -- | Find the Tcb for a listening connection.
-findListening4 :: HasTcpState state => state -> IP4 -> TcpPort -> IO (Maybe TcbState)
-findListening4 state src srcPort =
-  do mb <- HT.lookup (Listen4 src srcPort) tcpSockets
+findListening :: HasTcpState state => state -> Addr -> TcpPort -> IO (Maybe TcbState)
+findListening state src srcPort =
+  do mb <- HT.lookup (Listening src srcPort) tcpSockets
      case mb of
        Just{}  -> return mb
-       Nothing -> HT.lookup (Listen4 WildcardIP4 srcPort) tcpSockets
+       Nothing -> HT.lookup (Listening (wildcardAddr src) srcPort) tcpSockets
 
   where
   TcpState { .. } = view tcpState state
 
 
 -- | Find a Tcb.
-findTcb4 :: HasTcpState state
-         => state -> IP4 -> TcpPort -> IP4 -> TcpPort -> IO TcbState
-findTcb4 state src srcPort dst dstPort =
-  do mb <- findEstablished4 state src srcPort dst dstPort
+findTcb :: HasTcpState state
+        => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO TcbState
+findTcb state src srcPort dst dstPort =
+  do mb <- findEstablished state src srcPort dst dstPort
      case mb of
        Just tcb -> return tcb
-       Nothing  -> do mb' <- findListening4 state dst dstPort
+       Nothing  -> do mb' <- findListening state dst dstPort
                       case mb' of
                         Just tcb -> return tcb
                         Nothing  -> return Closed

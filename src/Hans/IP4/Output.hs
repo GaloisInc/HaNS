@@ -8,9 +8,11 @@ module Hans.IP4.Output (
     responder,
   ) where
 
+import Hans.Checksum (computeChecksum)
 import Hans.Config (config,Config(..))
 import Hans.Device
-           (Device(..),DeviceConfig(..),DeviceStats(..),updateError,statTX)
+           (Device(..),DeviceConfig(..),DeviceStats(..),updateError,statTX
+           ,ChecksumOffload(..),txOffload)
 import Hans.Ethernet
            ( Mac,sendEthernet,pattern ETYPE_IPV4, pattern ETYPE_ARP
            , pattern BroadcastMac)
@@ -20,12 +22,15 @@ import Hans.IP4.ArpTable
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Lens
+import Hans.Network.Types (NetworkProtocol)
+import Hans.Serialize (runPutPacket)
 import Hans.Types
 
 import           Control.Concurrent (forkIO,threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (when,forever,unless)
 import qualified Data.ByteString.Lazy as L
+import           Data.Serialize.Put (putWord16be)
 
 
 
@@ -45,7 +50,7 @@ responder ns = forever $
 -- | Queue a message on the responder queue instead of attempting to send it
 -- directly.
 queueIP4 :: NetworkStack -> DeviceStats
-         -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
+         -> SendSource -> IP4 -> NetworkProtocol -> L.ByteString
          -> IO ()
 queueIP4 ns stats mbSrc dst prot payload =
   do written <- BC.tryWriteChan (ip4ResponderQueue (view ip4State ns))
@@ -55,7 +60,7 @@ queueIP4 ns stats mbSrc dst prot payload =
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
 -- route to the destination, return False.
-sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
+sendIP4 :: NetworkStack -> SendSource -> IP4 -> NetworkProtocol -> L.ByteString
         -> IO Bool
 
 -- A special case for when the sender knows that this is the right device and
@@ -93,7 +98,7 @@ sendIP4 ns SourceAny dst prot payload =
        Nothing             -> return False
 
 
-prepareHeader :: NetworkStack -> IP4 -> IP4 -> IP4Protocol -> IO IP4Header
+prepareHeader :: NetworkStack -> IP4 -> IP4 -> NetworkProtocol -> IO IP4Header
 prepareHeader ns src dst prot =
   do ident <- nextIdent ns
      return $! emptyIP4Header { ip4Ident      = ident
@@ -105,21 +110,22 @@ prepareHeader ns src dst prot =
 
 
 -- | Prepare IP4 fragments to be sent.
-prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4Protocol -> L.ByteString
+prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> NetworkProtocol
+           -> L.ByteString
            -> IO [L.ByteString]
 prepareIP4 ns dev src dst prot payload =
   do hdr <- prepareHeader ns src dst prot
 
      let DeviceConfig { .. } = devConfig dev
 
-     return $ [ renderIP4Packet (not dcChecksumOffload) h p
+     return $ [ renderIP4Packet (view txOffload dev) h p
               | (h,p) <- splitPacket (fromIntegral dcMtu) hdr payload ]
 
 
 -- | Send an IP4 packet to the given destination. This assumes that routing has
 -- already taken place, and that the source and destination addresses are
 -- correct.
-primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> IP4Protocol
+primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> NetworkProtocol
              -> L.ByteString -> IO ()
 primSendIP4 ns dev src dst next prot payload
     -- when the source and next hop are the same, re-queue in the network stack
@@ -193,3 +199,25 @@ arpRequestThread ns dev src dst = loop 0
          Just{}                    -> return ()
          Nothing | n < ip4ArpRetry -> loop (n + 1)
                  | otherwise       -> markUnreachable ip4ArpTable dst
+
+
+-- | The final step to render an IP header and its payload out as a lazy
+-- 'ByteString'. Compute the checksum over the packet with its checksum zeroed,
+-- then reconstruct a new lazy 'ByteString' that contains chunks from the old
+-- header, and the new checksum.
+renderIP4Packet :: ChecksumOffload -> IP4Header -> L.ByteString -> L.ByteString
+renderIP4Packet ChecksumOffload { .. } hdr pkt
+  | coIP4     = bytes `L.append` pkt
+  | otherwise = packet
+  where
+
+  pktlen    = L.length pkt
+
+  bytes     = runPutPacket 20 40 pkt (putIP4Header hdr (fromIntegral pktlen))
+  cs        = computeChecksum (L.take (L.length bytes - pktlen) bytes)
+
+  beforeCS  = L.take 10 bytes
+  afterCS   = L.drop 12 bytes
+  csBytes   = runPutPacket 2 100 afterCS (putWord16be cs)
+
+  packet    = beforeCS `L.append` csBytes

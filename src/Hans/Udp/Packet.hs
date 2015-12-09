@@ -4,7 +4,7 @@
 module Hans.Udp.Packet where
 
 import Hans.Checksum (finalizeChecksum,extendChecksum)
-import Hans.IP4.Packet (IP4,ip4PseudoHeader,pattern IP4_PROT_UDP)
+import Hans.IP4.Packet (IP4,ip4PseudoHeader)
 import Hans.Serialize
 
 import qualified Data.ByteString.Lazy as L

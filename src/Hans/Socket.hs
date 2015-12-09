@@ -5,7 +5,7 @@ module Hans.Socket where
 
 import           Hans.Addr
 import qualified Hans.Buffer.Datagram as DGram
-import           Hans.Device.Types (Device(devName))
+import           Hans.Device.Types (Device)
 import           Hans.Lens
 import           Hans.Network
 import           Hans.Types

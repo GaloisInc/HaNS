@@ -8,20 +8,12 @@ module Hans.Addr (
     NetworkAddr(..)
   ) where
 
+import           Hans.Addr.Types (Addr(..),sameFamily)
 import qualified Hans.IP4.Packet as IP4
 
 import Data.Hashable (Hashable)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
-
-
-data Addr = Addr4 IP4.IP4
-            deriving (Eq,Ord,Show,Generic,Typeable)
-
-instance Hashable Addr
-
-sameFamily :: Addr -> Addr -> Bool
-sameFamily Addr4{} Addr4{} = True
 
 
 class (Hashable addr, Show addr, Typeable addr, Eq addr, Generic addr)

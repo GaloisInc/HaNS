@@ -2,15 +2,17 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Hans.Udp.Input (
-    processUdp4
+    processUdp
   ) where
 
 import           Hans.Addr (Addr,toAddr)
 import qualified Hans.Buffer.Datagram as DG
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
-import           Hans.Device (Device(..),DeviceConfig(..))
-import           Hans.IP4.Packet (IP4,ip4PseudoHeader,pattern IP4_PROT_UDP)
+import           Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
+import           Hans.IP4.Packet (IP4)
+import           Hans.Lens (view)
 import           Hans.Monad (Hans,decode',dropPacket,io)
+import           Hans.Network
 import           Hans.Udp.Packet
 import           Hans.Types
 
@@ -18,13 +20,17 @@ import           Control.Monad (unless)
 import qualified Data.ByteString as S
 
 
-processUdp4 :: NetworkStack -> Device -> IP4 -> IP4 -> S.ByteString -> Hans ()
-processUdp4 ns dev src dst bytes =
+{-# SPECIALIZE processUdp :: NetworkStack -> Device -> IP4 -> IP4
+                          -> S.ByteString -> Hans () #-}
+
+processUdp :: Network addr
+           => NetworkStack -> Device -> addr -> addr -> S.ByteString -> Hans ()
+processUdp ns dev src dst bytes =
   do let checksum = finalizeChecksum $ extendChecksum bytes
-                                     $ ip4PseudoHeader src dst IP4_PROT_UDP
+                                     $ pseudoHeader src dst PROT_UDP
                                      $ S.length bytes
 
-     unless (dcChecksumOffload (devConfig dev) || checksum == 0)
+     unless (coUdp (view rxOffload dev) || checksum == 0)
          (dropPacket (devStats dev))
 
      ((hdr,payloadLen),payload) <- decode' (devStats dev) getUdpHeader bytes

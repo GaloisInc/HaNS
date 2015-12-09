@@ -3,6 +3,7 @@
 module Hans.IP4.Icmp4 where
 
 import Hans.Checksum (computeChecksum)
+import Hans.Device.Types (ChecksumOffload(..))
 import Hans.IP4.Packet (IP4,getIP4,putIP4)
 import Hans.Serialize (runPutPacket)
 
@@ -174,10 +175,10 @@ getIcmp4Packet  = label "ICMP" $
 
 -- NOTE: we may want to parameterize this on the MTU of the device that will
 -- send the message, as it could fragment.
-renderIcmp4Packet :: Bool -> Icmp4Packet -> L.ByteString
-renderIcmp4Packet includeCS pkt
-  | not includeCS = bytes
-  | otherwise     = L.take 2 bytes `L.append`
+renderIcmp4Packet :: ChecksumOffload -> Icmp4Packet -> L.ByteString
+renderIcmp4Packet ChecksumOffload { .. } pkt
+  | coIcmp4   = bytes
+  | otherwise = L.take 2 bytes `L.append`
                     runPutPacket 2 100 (L.drop 4 bytes) (putWord16be cs)
 
   where

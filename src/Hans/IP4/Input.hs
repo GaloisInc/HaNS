@@ -8,7 +8,7 @@ module Hans.IP4.Input (
   ) where
 
 import Hans.Checksum (computeChecksum)
-import Hans.Device (Device(..),DeviceConfig(..))
+import Hans.Device (Device(..),ChecksumOffload(..),txOffload,rxOffload)
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
 import Hans.IP4.ArpTable (addEntry,lookupEntry)
 import Hans.IP4.Fragments (processFragment)
@@ -18,10 +18,11 @@ import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..))
 import Hans.Lens (view)
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
+import Hans.Network.Types
 import Hans.Serialize (runPutPacket)
 import Hans.Types
-import Hans.Udp.Input (processUdp4)
-import Hans.Tcp.Input (processTcp4)
+import Hans.Udp.Input (processUdp)
+import Hans.Tcp.Input (processTcp)
 
 import           Control.Monad (when,unless)
 import qualified Data.ByteString as S
@@ -78,7 +79,7 @@ processIP4 ns dev payload =
   do ((hdr,hdrLen,bodyLen),body) <- decode' (devStats dev) getIP4Packet payload
 
      -- only validate the checkum if the device hasn't done that already
-     let packetValid = dcChecksumOffload (devConfig dev)
+     let packetValid = coIP4 (view rxOffload dev)
                     || 0 == computeChecksum (S.take hdrLen payload)
      unless packetValid (dropPacket (devStats dev))
 
@@ -100,10 +101,10 @@ handleIP4 ns dev hdr body =
          processFragment (ip4Fragments (view ip4State ns)) hdr body
 
      case ip4Protocol of
-       IP4_PROT_ICMP -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
-       IP4_PROT_UDP  -> processUdp4 ns dev ip4SourceAddr ip4DestAddr body'
-       IP4_PROT_TCP  -> processTcp4 ns dev ip4SourceAddr ip4DestAddr body'
-       _             -> dropPacket (devStats dev)
+       PROT_ICMP4 -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
+       PROT_UDP   -> processUdp  ns dev ip4SourceAddr ip4DestAddr body'
+       PROT_TCP   -> processTcp  ns dev ip4SourceAddr ip4DestAddr body'
+       _          -> dropPacket (devStats dev)
 
 
 -- | Validate the destination of this packet.
@@ -139,8 +140,7 @@ checkDestination ns dev dest =
 processICMP :: NetworkStack -> Device -> IP4 -> IP4 -> S.ByteString -> Hans ()
 
 processICMP ns dev src dst body =
-  do let packetValid = dcChecksumOffload (devConfig dev)
-                    || 0 == computeChecksum body
+  do let packetValid = coIcmp4 (view rxOffload dev) || 0 == computeChecksum body
 
      unless packetValid (dropPacket (devStats dev))
 
@@ -152,10 +152,9 @@ processICMP ns dev src dst body =
        -- on. As it's probably going out the same device, this seems OK, but it
        -- would be nice to confirm that.
        Echo ident seqNum bytes ->
-         do let packet = renderIcmp4Packet
-                             (not (dcChecksumOffload (devConfig dev)))
+         do let packet = renderIcmp4Packet (view txOffload dev)
                              (EchoReply ident seqNum bytes)
-            io (queueIP4 ns (devStats dev) (SourceIP4 dst) src IP4_PROT_ICMP packet)
+            io (queueIP4 ns (devStats dev) (SourceIP4 dst) src PROT_ICMP4 packet)
             escape
 
 

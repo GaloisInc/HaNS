@@ -1,6 +1,7 @@
 module Tests.IP4.Fragmentation where
 
 import Tests.IP4.Packet
+import Tests.Network
 
 import Hans.Config
 import Hans.IP4.Fragments

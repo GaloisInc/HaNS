@@ -15,10 +15,11 @@ import           System.Environment (getArgs)
 
 main :: IO ()
 main  =
-  do args <- getArgs
-     name <- case args of
-               [name] -> return (S8.pack name)
-               _      -> fail "Expected a device name"
+  do args        <- getArgs
+     (name,dhcp) <- case args of
+                      [name,"dhcp"] -> return (S8.pack name,True)
+                      name:_        -> return (S8.pack name,False)
+                      _             -> fail "Expected a device name"
 
      ns  <- newNetworkStack defaultConfig
      dev <- addDevice ns name defaultDeviceConfig
@@ -31,15 +32,32 @@ main  =
      -- start receiving data
      startDevice dev
 
-     mbLease <- dhcpClient ns defaultDhcpConfig dev
-     case mbLease of
+     if dhcp
+        then
+          do mbLease <- dhcpClient ns defaultDhcpConfig dev
+             case mbLease of
 
-       Just lease ->
-         do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
-            print =<< getHostByName ns "galois.com"
-            threadDelay (1000000 * 60)
+               Just lease ->
+                 do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
+                    print =<< getHostByName ns "galois.com"
+                    threadDelay (1000000 * 60)
 
-       Nothing ->
-            putStrLn "Dhcp failed"
+               Nothing ->
+                    putStrLn "Dhcp failed"
 
+        else
+          do putStrLn "Static IP: 192.168.71.11/24"
 
+             addIP4Route ns False Route
+               { routeNetwork = IP4Mask (packIP4 192 168 71 11) 24
+               , routeType    = Direct
+               , routeDevice  = dev
+               }
+
+             addIP4Route ns True Route
+               { routeNetwork = IP4Mask (packIP4 192 168 71 11) 0
+               , routeType    = Indirect (packIP4 192 168 71 1)
+               , routeDevice  = dev
+               }
+
+             threadDelay (1000000 * 60)

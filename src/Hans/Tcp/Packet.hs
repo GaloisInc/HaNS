@@ -28,14 +28,12 @@ module Hans.Tcp.Packet (
     SackBlock(..),
 
     -- * Segment Operations
-    renderTcpPacket4,
     tcpSegLen,
     tcpSegLastSeqNum,
     tcpSegNextAckNum,
   ) where
 
 import Hans.Checksum (finalizeChecksum,extendChecksum)
-import Hans.IP4.Packet (IP4,ip4PseudoHeader,pattern IP4_PROT_TCP)
 import Hans.Lens
 import Hans.Serialize (runPutPacket)
 
@@ -449,21 +447,6 @@ putUnknown len body =
 
 
 -- Tcp Packet ------------------------------------------------------------------
-
--- | Render out a TcpPacket, without calculating its checksum.
-renderTcpPacket4 :: Bool -> IP4 -> IP4 -> TcpHeader -> L.ByteString -> L.ByteString
-renderTcpPacket4 includeCS src dst hdr body
-  | includeCS = beforeCS `L.append` csBytes
-  | otherwise = bytes
-  where
-  bytes  = runPutPacket 20 40 body (putTcpHeader hdr)
-
-  cs     = finalizeChecksum
-         $ extendChecksum bytes
-         $ ip4PseudoHeader src dst IP4_PROT_TCP (fromIntegral (L.length bytes))
-
-  beforeCS = L.take 16 bytes
-  csBytes  = runPutPacket 2 0 (L.drop 18 bytes) (putWord16be cs)
 
 -- | The length of the data segment, including Syn and Fin.
 tcpSegLen :: TcpHeader -> Int -> Int

@@ -5,7 +5,6 @@
 
 module Hans.Dns where
 
-import Hans.Addr (toAddr)
 import Hans.Config
 import Hans.Dns.Packet
 import Hans.IP4.Packet

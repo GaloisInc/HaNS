@@ -18,9 +18,10 @@ import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
-import           Hans.IP4.Packet (IP4,IP4Protocol,IP4Ident)
+import           Hans.IP4.Packet (IP4,IP4Ident)
 import qualified Hans.IP4.RoutingTable as RT
 import           Hans.Lens
+import           Hans.Network.Types (NetworkProtocol)
 
 
 import qualified Control.Concurrent.BoundedChan as BC
@@ -44,7 +45,7 @@ data SendSource = SourceAny
 data ResponderRequest = Finish !Device !Mac [L.ByteString]
                         -- ^ Finish sending these IP4 packets
 
-                      | Send !SendSource !IP4 !IP4Protocol L.ByteString
+                      | Send !SendSource !IP4 !NetworkProtocol L.ByteString
                        -- ^ Send this IP4 payload to this address
 
 

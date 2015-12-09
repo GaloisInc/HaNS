@@ -3,6 +3,7 @@
 module Tests.IP4.Packet where
 
 import Tests.Ethernet (arbitraryMac)
+import Tests.Network (arbitraryProtocol)
 import Tests.Utils (encodeDecodeIdentity)
 
 import Hans.IP4.Packet
@@ -25,10 +26,6 @@ arbitraryIP4  =
      c <- arbitraryBoundedRandom
      d <- arbitraryBoundedRandom
      return $! packIP4 a b c d
-
-
-arbitraryProtocol :: Gen IP4Protocol
-arbitraryProtocol  = arbitraryBoundedRandom
 
 
 arbitraryIdent :: Gen IP4Ident

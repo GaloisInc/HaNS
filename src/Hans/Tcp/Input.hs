@@ -1,51 +1,46 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 module Hans.Tcp.Input (
-    processTcp4
+    processTcp
   ) where
 
+import Hans.Addr (Addr,NetworkAddr(..))
 import Hans.Checksum (finalizeChecksum,extendChecksum)
-import Hans.Device.Types (Device(..),DeviceConfig(..))
-import Hans.IP4 (IP4,ip4PseudoHeader,pattern IP4_PROT_TCP)
-import Hans.Lens
+import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
+import Hans.Lens (view,set)
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
-import Hans.Tcp.Output (routeTcp4,sendTcp4)
+import Hans.Network
+import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
 import Hans.Types
 
 import           Control.Monad (unless,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (atomicWriteIORef)
-import           Data.Time.Clock.POSIX (getPOSIXTime)
+import           Data.IORef (atomicWriteIORef,readIORef)
 
 
 -- | Process incoming tcp segments.
-processTcp4 :: NetworkStack -> Device -> IP4 -> IP4 -> S.ByteString -> Hans ()
-processTcp4 ns dev src dst bytes =
+processTcp :: Network addr
+           => NetworkStack -> Device -> addr -> addr -> S.ByteString -> Hans ()
+processTcp ns dev src dst bytes =
   do -- make sure that the checksum is valid
      let checksum = finalizeChecksum $ extendChecksum bytes
-                                     $ ip4PseudoHeader src dst IP4_PROT_TCP
+                                     $ pseudoHeader src dst PROT_TCP
                                      $ S.length bytes
-     unless (dcChecksumOffload (devConfig dev) || checksum == 0)
+     unless (coTcp (view rxOffload dev) || checksum == 0)
             (dropPacket (devStats dev))
 
      (hdr,payload) <- decode' (devStats dev) getTcpHeader bytes
 
-     incomingSegment ns dev src dst hdr payload
+     let src' = toAddr src
+     let dst' = toAddr dst
 
-
-incomingSegment :: NetworkStack
-                -> Device -> IP4 -> IP4 -> TcpHeader -> S.ByteString -> Hans ()
-
-incomingSegment ns dev src dst hdr payload =
-  do tcb <- io (findTcb4 ns src (tcpSourcePort hdr) dst (tcpDestPort hdr))
-
-     case tcb of
-
-       Closed      -> respondClosed  ns dev src dst hdr (S.length payload)
-       Listen ltcb -> respondListen  ns dev src dst hdr payload ltcb
-       SynSent tcb -> respondSynSent ns dev src dst hdr payload tcb
+     state <- io (findTcb ns src' (tcpSourcePort hdr) dst' (tcpDestPort hdr))
+     case state of
+       Closed      -> respondClosed  ns dev src' dst' hdr (S.length payload)
+       Listen ltcb -> respondListen  ns dev src' dst' hdr payload ltcb
+       SynSent tcb -> respondSynSent ns dev src' dst' hdr payload tcb
        _           -> escape
 
 
@@ -69,11 +64,12 @@ incomingSegment ns dev src dst hdr payload =
 --     <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
 --
 --   Return.
-respondClosed :: NetworkStack
-              -> Device -> IP4 -> IP4 -> TcpHeader -> Int -> Hans ()
+respondClosed :: Network addr
+              => NetworkStack
+              -> Device -> addr -> addr -> TcpHeader -> Int -> Hans ()
 respondClosed ns dev src dst hdr payloadLen
   | view tcpRst hdr = escape
-  | otherwise       = do _ <- io (routeTcp4 ns dev dst src hdr' L.empty)
+  | otherwise       = do _ <- io (routeTcp ns dev dst src hdr' L.empty)
                          escape
   where
   hdr' | view tcpAck hdr = set tcpRst True
@@ -94,8 +90,8 @@ respondClosed ns dev src dst hdr payloadLen
 
 -- If the state is LISTEN then
 --
-respondListen :: NetworkStack 
-              -> Device -> IP4 -> IP4 -> TcpHeader -> S.ByteString
+respondListen :: NetworkStack
+              -> Device -> Addr -> Addr -> TcpHeader -> S.ByteString
               -> ListenTcb -> Hans ()
 respondListen ns dev src dst hdr payload ltcb =
 --   first check for an RST
@@ -121,7 +117,7 @@ respondListen ns dev src dst hdr payload ltcb =
                                     , tcpAckNum     = 0
                                     }
 
-          _ <- io (routeTcp4 ns dev src dst hdr' L.empty)
+          _ <- io (routeTcp ns dev src dst hdr' L.empty)
           escape
 
 --   third check for a SYN
@@ -156,15 +152,12 @@ respondListen ns dev src dst hdr payload ltcb =
 --    unspecified fields should be filled in now.
 
      when (view tcpSyn hdr) $
-       do mbRoute <- io (lookupRoute ns dst)
-          nxt     <- case mbRoute of
+       do mbRoute <- io (findNextHop ns (Just dev) (Just src) src)
+          ri      <- case mbRoute of
+                       Just ri -> return ri
+                       _       -> escape
 
-                       Just (src',nxt,dev')
-                         | src == src' && dev == dev' -> return nxt
-
-                       _ -> escape
-
-          io $ do tcb <- newTcb dev src dst nxt
+          io $ do tcb <- newTcb ri (tcpDestPort hdr) src (tcpSourcePort hdr)
                   iss <- nextIss ltcb
 
                   atomicWriteIORef (tcbRcvNxt tcb) (tcpSeqNum hdr + 1)
@@ -179,13 +172,13 @@ respondListen ns dev src dst hdr payload ltcb =
                              , tcpSeqNum     = iss
                              , tcpAckNum     = tcpSeqNum hdr + 1
                              }
-                  _ <- sendTcp4 ns dev src dst nxt hdr' L.empty
+                  _ <- sendTcp ns ri dst hdr' L.empty
 
                   atomicWriteIORef (tcbSndNxt tcb) (iss + 1)
                   atomicWriteIORef (tcbSndUna tcb)  iss
 
                   registerSocket ns
-                      (Conn4 src (tcpSourcePort hdr) dst (tcpDestPort hdr))
+                      (Conn src (tcpSourcePort hdr) dst (tcpDestPort hdr))
                       (SynReceived tcb)
 
 --   fourth other text or control
@@ -204,9 +197,9 @@ respondListen ns dev src dst hdr payload ltcb =
 
 -- If the state is SYN-SENT then
 
-respondSynSent :: NetworkStack
-               -> IP4 -> IP4 -> TcpHeader -> L.ByteString -> Tcb -> Hans ()
-respondSynSent ns src dst hdr payload tcb =
+respondSynSent :: NetworkStack -> Device
+               -> Addr -> Addr -> TcpHeader -> S.ByteString -> Tcb -> Hans ()
+respondSynSent ns dev src dst hdr payload tcb =
 
 --   first check the ACK bit
 --
@@ -219,18 +212,17 @@ respondSynSent ns src dst hdr payload tcb =
 --
 --       and discard the segment.  Return.
 
-  do when (view tcpAck hdr) $
-       do iss    <- io (readIORef (tcbIss    tcb))
-          sndNxt <- io (readIORef (tcbSndNxt tcb))
-          when (tcpAckNum hdr <= iss || tcpAckNum > sndNxt) $
+  do sndNxt <- io (readIORef (tcbSndNxt tcb))
+     when (view tcpAck hdr) $
+       do iss <- io (readIORef (tcbIss    tcb))
+          when (tcpAckNum hdr <= iss || tcpAckNum hdr > sndNxt) $
             do unless (view tcpRst hdr) $ io $
-                 do next <- readIORef (tcbNext4 tcb)
-                    let hdr' = set tcpRst True
+                 do let hdr' = set tcpRst True
                              $ emptyTcpHeader { tcpSourcePort = tcpDestPort hdr
                                               , tcpDestPort   = tcpSourcePort hdr
                                               , tcpSeqNum     = tcpAckNum hdr
                                               }
-                    _ <- sendTcp4 ns src dst next hdr' L.empty
+                    _ <- sendTcp ns (tcbRouteInfo tcb) dst hdr' L.empty
                     return ()
 
                escape
@@ -247,9 +239,9 @@ respondSynSent ns src dst hdr payload tcb =
 
      when (view tcpRst hdr) $
        do sndUna <- io (readIORef (tcbSndUna tcb))
-          unless (view tcpAck hdr && sndUna <= tcpAckNum hdr
+          unless (view tcpAck hdr && sndUna        <= tcpAckNum hdr
                                   && tcpAckNum hdr <= sndNxt) $
-            do registerSocket key Closed
+            do io (registerSocket ns undefined Closed)
 
 --   third check the security and precedence
 --

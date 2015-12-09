@@ -15,15 +15,22 @@ module Hans (
     closeDevice,
     startDevice,
 
-    -- * IP4
+    -- * Network Layer
+    Addr(),
+    NetworkAddr(..),
+    Network(..),
+    RouteInfo(..),
+    lookupRoute,
+
+    -- ** IP4
     IP4.IP4(), IP4.packIP4,
     IP4.IP4Mask(..),
     IP4.Route(..), IP4.RouteType(Direct,Indirect),
     addIP4Route,
-    lookupIP4Route,
 
   ) where
 
+import           Hans.Addr (NetworkAddr(..),Addr(),sameFamily)
 import           Hans.Config
 import           Hans.Device
 import           Hans.Device.Loopback
@@ -32,6 +39,7 @@ import qualified Hans.IP4.Packet as IP4
 import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
+import           Hans.Network
 import           Hans.Types
 import qualified Hans.Udp.State as Udp
 import qualified Hans.Tcp.State as Tcp
@@ -83,7 +91,3 @@ addDevice ns devName devConfig =
 addIP4Route :: NetworkStack -> Bool -> IP4.Route -> IO ()
 addIP4Route NetworkStack { .. } = IP4.addRoute nsIP4State
 {-# INLINE addIP4Route #-}
-
-lookupIP4Route :: NetworkStack -> IP4.IP4 -> IO (Maybe (IP4.IP4,IP4.IP4,Device))
-lookupIP4Route NetworkStack { .. } = IP4.lookupRoute nsIP4State
-{-# INLINE lookupIP4Route #-}

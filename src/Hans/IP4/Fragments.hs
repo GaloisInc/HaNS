@@ -12,6 +12,7 @@ import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet
 import           Hans.Lens (view)
 import           Hans.Monad
+import           Hans.Network.Types (NetworkProtocol)
 import           Hans.Time (toUSeconds)
 
 import           Control.Concurrent (forkIO,ThreadId,threadDelay,killThread)
@@ -22,7 +23,7 @@ import           Data.Time.Clock
 
 
 -- | Keys are of the form @(src,dest,prot,ident)@.
-type Key = (IP4,IP4,IP4Protocol,IP4Ident)
+type Key = (IP4,IP4,NetworkProtocol,IP4Ident)
 
 type Table  = HT.HashTable Key Buffer
 

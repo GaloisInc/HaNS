@@ -57,6 +57,8 @@ library
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
+                                Hans.Addr
+                                Hans.Addr.Types
                                 Hans.Buffer.Datagram
                                 Hans.Checksum
                                 Hans.Config
@@ -84,6 +86,8 @@ library
                                 Hans.Input
                                 Hans.Lens
                                 Hans.Monad
+                                Hans.Network
+                                Hans.Network.Types
                                 Hans.Serialize
                                 Hans.Socket
                                 Hans.Tcp.Input
