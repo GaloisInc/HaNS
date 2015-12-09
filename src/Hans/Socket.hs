@@ -198,10 +198,18 @@ instance Socket UdpSocket where
 
 
 -- | Receive, with information about who sent this datagram.
-recvfrom :: Network addr => UdpSocket addr -> IO (Device,Addr,SockPort,L.ByteString)
-recvfrom UdpSocket { .. } =
-  do ((dev,src,srcPort,_,_), chunk) <- DGram.readChunk udpBuffer
-     return (dev,src,srcPort,L.fromStrict chunk)
+recvfrom :: Network addr
+         => UdpSocket addr -> IO (Device,addr,SockPort,L.ByteString)
+recvfrom UdpSocket { .. } = loop
+  where
+
+  -- NOTE: this loop shouldn't run more than one time, as it's very unlikely
+  -- that we receive a packet destined for a different protocol address
+  loop =
+    do ((dev,addr,srcPort,_,_), chunk) <- DGram.readChunk udpBuffer
+       case fromAddr addr of
+         Just src -> return (dev,src,srcPort,L.fromStrict chunk)
+         Nothing  -> loop
 {-# LANGUAGE recvfrom #-}
 
 

@@ -103,7 +103,7 @@ queryServers4 sock req = go
        -- require that the server we sent a request to is the one that responded
        case mbRes of
          Just (_,srcIp,srcPort,bytes)
-           | srcIp == toAddr addr, srcPort == 53 ->
+           | srcIp == addr, srcPort == 53 ->
              case runGetLazy getDNSPacket bytes of
                Right res -> return (Just res)
                Left _    -> return Nothing
