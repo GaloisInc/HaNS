@@ -12,6 +12,7 @@ import Hans.IP4.Packet
 import Hans.IP4.State as Exports
 import Hans.IP4.RoutingTable as Exports (RoutingTable)
 import Hans.Lens
+import Hans.Tcp.State as Exports
 import Hans.Udp.State as Exports
 
 import           Control.Concurrent (ThreadId)
@@ -43,6 +44,9 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                  , nsUdpState :: !UdpState
                                    -- ^ State for UDP processing
 
+                                 , nsTcpState :: !TcpState
+                                   -- ^ State for TCP processing
+
                                  , nsNameServers4 :: !(IORef [IP4])
                                  }
 
@@ -57,6 +61,11 @@ instance HasIP4State NetworkStack where
 instance HasUdpState NetworkStack where
   udpState = to nsUdpState
   {-# INLINE udpState #-}
+
+instance HasTcpState NetworkStack where
+  tcpState = to nsTcpState
+  {-# INLINE tcpState #-}
+
 
 class HasNetworkStack ns where
   networkStack :: Getting r ns NetworkStack

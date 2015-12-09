@@ -21,6 +21,7 @@ import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
 import Hans.Serialize (runPutPacket)
 import Hans.Types
 import Hans.Udp.Input (processUdp4)
+import Hans.Tcp.Input (processTcp4)
 
 import           Control.Monad (when,unless)
 import qualified Data.ByteString as S
@@ -101,6 +102,7 @@ handleIP4 ns dev hdr body =
      case ip4Protocol of
        IP4_PROT_ICMP -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
        IP4_PROT_UDP  -> processUdp4 ns dev ip4SourceAddr ip4DestAddr body'
+       IP4_PROT_TCP  -> processTcp4 ns dev ip4SourceAddr ip4DestAddr body'
        _             -> dropPacket (devStats dev)
 
 

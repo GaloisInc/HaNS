@@ -37,7 +37,7 @@ main  =
        Just lease ->
          do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
             print =<< getHostByName ns "galois.com"
-            threadDelay (1000000 * 20)
+            threadDelay (1000000 * 60)
 
        Nothing ->
             putStrLn "Dhcp failed"

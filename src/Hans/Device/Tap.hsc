@@ -17,6 +17,7 @@ import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
 import           Control.Monad (forever,when,foldM_)
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Unsafe as S
@@ -101,7 +102,11 @@ tapSendLoop stats fd queue = forever $
      allocaBytes (fromIntegral ((#size struct iovec) * len)) $ \ iov ->
        do foldM_ writeChunk iov chunks
           bytesWritten <- c_writev fd iov (fromIntegral len)
-          updateTX stats (fromIntegral bytesWritten == L.length bs)
+          if fromIntegral bytesWritten == L.length bs
+             then do updateBytes   statTX stats (fromIntegral bytesWritten)
+                     updatePackets statTX stats
+
+             else updateError statTX stats
   where
 
   -- write the chunk address and length into the iovec entry
@@ -125,7 +130,11 @@ tapRecvLoop ns dev @ Device { .. } fd = forever $
      -- of 60 bytes, so just don't do that check here.
 
      success <- tryWriteChan (nsInput ns) $! FromDevice dev bytes
-     updateRX devStats success
+     if success
+        then do updateBytes   statRX devStats (S.length bytes)
+                updatePackets statRX devStats
+
+        else updateError statRX devStats
 
 
 tapClose :: Fd -> IO ()

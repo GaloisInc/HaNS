@@ -68,6 +68,7 @@ library
                                 Hans.Ethernet
                                 Hans.Ethernet.Types
                                 Hans.HashTable
+                                Hans.IP4
                                 Hans.IP4.ArpTable
                                 Hans.IP4.Dhcp.Client
                                 Hans.IP4.Dhcp.Codec
@@ -85,7 +86,10 @@ library
                                 Hans.Monad
                                 Hans.Serialize
                                 Hans.Socket
+                                Hans.Tcp.Input
+                                Hans.Tcp.Output
                                 Hans.Tcp.Packet
+                                Hans.Tcp.State
                                 Hans.Time
                                 Hans.Types
                                 Hans.Udp.Input

@@ -43,18 +43,18 @@ putIP4 :: Putter IP4
 putIP4 (IP4 w) = putWord32be w
 
 packIP4 :: Word8 -> Word8 -> Word8 -> Word8 -> IP4
-packIP4 a b c d = IP4 $ fromIntegral a `shiftL` 24
-                    .|. fromIntegral b `shiftL` 16
-                    .|. fromIntegral c `shiftL`  8
-                    .|. fromIntegral d
+packIP4 a b c d = IP4 $! set (byte 3) a
+                      $! set (byte 2) b
+                      $! set (byte 1) c
+                      $! set (byte 0) d 0
 {-# INLINE packIP4 #-}
 
 
 unpackIP4 :: IP4 -> (Word8,Word8,Word8,Word8)
-unpackIP4 (IP4 w) = ( fromIntegral (w `shiftR` 24)
-                    , fromIntegral (w `shiftR` 16)
-                    , fromIntegral (w `shiftR`  8)
-                    , fromIntegral  w
+unpackIP4 (IP4 w) = ( view (byte 3) w
+                    , view (byte 2) w
+                    , view (byte 1) w
+                    , view (byte 0) w
                     )
 {-# INLINE unpackIP4 #-}
 

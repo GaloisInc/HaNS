@@ -7,12 +7,10 @@ module Hans.Ethernet (
 
 import Hans.Device.Types
 import Hans.Ethernet.Types as Exports
-import Hans.Monad (Hans,decode',io,escape)
 import Hans.Serialize (runPutPacket)
 
 import           Control.Concurrent.BoundedChan (tryWriteChan)
-import           Control.Monad (when,unless)
-import qualified Data.ByteString as S
+import           Control.Monad (unless)
 import qualified Data.ByteString.Lazy as L
 
 
@@ -24,6 +22,6 @@ sendEthernet Device { .. } eDest eType payload =
 
      -- if the packet is too big for the device, throw it away
      if (fromIntegral (L.length packet) > dcMtu devConfig + 14)
-        then updateError devStats
+        then updateError statTX devStats
         else do queued <- tryWriteChan devSendQueue packet
-                unless queued (updateDropped devStats)
+                unless queued (updateDropped statTX devStats)

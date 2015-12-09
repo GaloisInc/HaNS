@@ -16,7 +16,7 @@ module Hans.IP4.ArpTable (
   ) where
 
 import           Hans.Config (Config(..))
-import           Hans.Device.Types (DeviceStats,updateError)
+import           Hans.Device.Types (DeviceStats,updateError,statTX)
 import           Hans.Ethernet (Mac)
 import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet (IP4)
@@ -151,7 +151,7 @@ writeChanStrategy mbStats f chan = WaitStrategy (return (handler,()))
     case f mb of
       Just msg -> do written <- BC.tryWriteChan chan msg
                      case mbStats of
-                       Just stats | not written -> updateError stats
+                       Just stats | not written -> updateError statTX stats
                        _                        -> return ()
 
       -- XXX should this update a stat?

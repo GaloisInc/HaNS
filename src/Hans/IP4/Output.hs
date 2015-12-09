@@ -10,7 +10,7 @@ module Hans.IP4.Output (
 
 import Hans.Config (config,Config(..))
 import Hans.Device
-           (Device(..),DeviceConfig(..),DeviceStats(..),updateError,updateTX)
+           (Device(..),DeviceConfig(..),DeviceStats(..),updateError,statTX)
 import Hans.Ethernet
            ( Mac,sendEthernet,pattern ETYPE_IPV4, pattern ETYPE_ARP
            , pattern BroadcastMac)
@@ -50,7 +50,7 @@ queueIP4 :: NetworkStack -> DeviceStats
 queueIP4 ns stats mbSrc dst prot payload =
   do written <- BC.tryWriteChan (ip4ResponderQueue (view ip4State ns))
                     (Send mbSrc dst prot payload)
-     unless written (updateError stats)
+     unless written (updateError statTX stats)
 
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
@@ -69,7 +69,7 @@ sendIP4 ns (SourceDev dev src) dst prot payload =
             return True
 
        _ ->
-         do updateError (devStats dev)
+         do updateError statTX (devStats dev)
             return False
 
 -- sending from a specific device
@@ -125,9 +125,10 @@ primSendIP4 ns dev src dst next prot payload
     -- when the source and next hop are the same, re-queue in the network stack
     -- after fragment reassembly
   | src == next =
-    do hdr     <- prepareHeader ns src dst prot
-       written <- BC.tryWriteChan (nsInput ns) $! FromIP4 dev hdr (L.toStrict payload)
-       updateTX (devStats dev) written
+    do hdr <- prepareHeader ns src dst prot
+       _   <- BC.tryWriteChan (nsInput ns) $! FromIP4 dev hdr (L.toStrict payload)
+       -- don't write any stats for packets that skip the device layer
+       return ()
 
     -- the packet is leaving the network stack so encode it and send
   | otherwise =

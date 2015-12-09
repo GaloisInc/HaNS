@@ -6,7 +6,7 @@ module Hans.Monad (
   , decode, decode'
   ) where
 
-import Hans.Device.Types (DeviceStats(), updateDropped)
+import Hans.Device.Types (DeviceStats(),updateDropped,statRX)
 
 import qualified Data.ByteString as S
 import           Data.IORef (newIORef,writeIORef,readIORef)
@@ -65,10 +65,10 @@ escape :: Hans a
 escape  = Hans (\ e _ -> e)
 {-# INLINE escape #-}
 
--- | Synonym for 'escape'.
+-- | Synonym for 'escape' that also updates device statistics.
 dropPacket :: DeviceStats -> Hans a
 dropPacket stats =
-  do io (updateDropped stats)
+  do io (updateDropped statRX stats)
      escape
 {-# INLINE dropPacket #-}
 
@@ -79,20 +79,16 @@ io m = Hans (\ _ k -> m >>= k )
 
 -- | Run a Get action in the context of the Hans monad, 
 decode :: DeviceStats -> Get a -> S.ByteString -> Hans a
-decode stats m bytes =
+decode dev m bytes =
   case runGet m bytes of
     Right a -> return a
-
-    -- XXX what should we do with the error text?
-    Left _err -> dropPacket stats
+    Left _  -> dropPacket dev
 {-# INLINE decode #-}
 
 -- | Run a Get action in the context of the Hans monad, returning any unconsumed
 -- input.
 decode' :: DeviceStats -> Get a -> S.ByteString -> Hans (a,S.ByteString)
-decode' stats m bytes =
+decode' dev m bytes =
   case runGetState m bytes 0 of
     Right a -> return a
-
-    -- XXX what should we do with the error text?
-    Left _err -> dropPacket stats
+    Left _  -> dropPacket dev

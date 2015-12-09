@@ -19,10 +19,12 @@ module Hans.Lens (
 
     -- * Utility Lenses
     bit,
+    byte,
 
   ) where
 
 import qualified Data.Bits as B
+import           Data.Word (Word8)
 import           MonadLib (Id,runId)
 
 
@@ -98,3 +100,13 @@ bit n = lens get upd
 
   upd a True  = B.setBit   a n
   upd a False = B.clearBit a n
+
+
+byte :: (Integral a, B.Bits a) => Int -> Lens' a Word8
+byte n = lens get upd
+  where
+  sh      = n * 8
+
+  get a   = fromIntegral (a `B.shiftR` sh)
+
+  upd a b = a B..|. fromIntegral (b `B.shiftL` sh)

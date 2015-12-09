@@ -17,7 +17,6 @@ module Hans.Tcp.Packet (
 
     -- ** Serialization
     getTcpHeader, putTcpHeader,
-    renderTcpPacket4,
 
     -- ** Options
     HasTcpOptions(..),
@@ -27,6 +26,12 @@ module Hans.Tcp.Packet (
     TcpOption(..),
     TcpOptionTag(..), tcpOptionTag,
     SackBlock(..),
+
+    -- * Segment Operations
+    renderTcpPacket4,
+    tcpSegLen,
+    tcpSegLastSeqNum,
+    tcpSegNextAckNum,
   ) where
 
 import Hans.Checksum (finalizeChecksum,extendChecksum)
@@ -459,3 +464,18 @@ renderTcpPacket4 includeCS src dst hdr body
 
   beforeCS = L.take 16 bytes
   csBytes  = runPutPacket 2 0 (L.drop 18 bytes) (putWord16be cs)
+
+-- | The length of the data segment, including Syn and Fin.
+tcpSegLen :: TcpHeader -> Int -> Int
+tcpSegLen hdr len = len + flagVal tcpSyn + flagVal tcpFin
+  where
+  flagVal l | view l hdr = 1
+            | otherwise  = 0
+
+-- | The last sequence number used in a segment.
+tcpSegLastSeqNum :: TcpHeader -> Int -> TcpSeqNum
+tcpSegLastSeqNum hdr len = tcpSeqNum hdr + fromIntegral (tcpSegLen hdr len) - 1
+
+-- | The ack number for this segment.
+tcpSegNextAckNum :: TcpHeader -> Int -> TcpAckNum
+tcpSegNextAckNum hdr len = tcpSeqNum hdr + fromIntegral (tcpSegLen hdr len)

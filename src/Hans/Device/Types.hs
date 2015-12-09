@@ -7,6 +7,7 @@
 module Hans.Device.Types where
 
 import           Hans.Ethernet.Types (Mac)
+import           Hans.Lens
 
 import           Control.Concurrent.BoundedChan (BoundedChan)
 import qualified Control.Exception as X
@@ -86,48 +87,76 @@ type Stat = IORef Int
 incrementStat :: Stat -> IO ()
 incrementStat ref = atomicModifyIORef' ref (\ i -> (i + 1, ()))
 
-data DeviceStats = DeviceStats { statTX      :: !Stat
-                               , statRX      :: !Stat
-                               , statDropped :: !Stat
-                               , statError   :: !Stat
+addStat :: Stat -> Int -> IO ()
+addStat ref n = atomicModifyIORef' ref (\ i -> (i + n, ()))
+
+data StatGroup = StatGroup { _statBytes   :: !Stat
+                           , _statPackets :: !Stat
+                           , _statErrors  :: !Stat
+                           , _statDropped :: !Stat
+                           }
+
+statBytes, statPackets, statErrors, statDropped :: Getting r StatGroup Stat
+statBytes   = to _statBytes
+statPackets = to _statPackets
+statErrors  = to _statErrors
+statDropped = to _statDropped
+
+newStatGroup :: IO StatGroup
+newStatGroup  =
+  do _statBytes   <- newIORef 0
+     _statPackets <- newIORef 0
+     _statErrors  <- newIORef 0
+     _statDropped <- newIORef 0
+     return $! StatGroup { .. }
+
+dumpStatGroup :: String -> StatGroup -> IO ()
+dumpStatGroup pfx = \ StatGroup { .. } ->
+  do putStrLn header
+     mapM_ showStat [_statBytes,_statPackets,_statErrors,_statDropped]
+     putStrLn ""
+  where
+  header = unwords (map pad [ pfx ++ " bytes", "packets", "errors", "dropped" ])
+  pad xs = xs ++ replicate (19 - length xs) ' '
+
+  showStat ref =
+    do val <- readIORef ref
+       putStr (pad (show val))
+       putStr " "
+{-# INLINE dumpStatGroup #-}
+
+data DeviceStats = DeviceStats { _statTX :: !StatGroup
+                               , _statRX :: !StatGroup
                                }
+
+statTX, statRX :: Getting r DeviceStats StatGroup
+statTX = to _statTX
+statRX = to _statRX
 
 newDeviceStats :: IO DeviceStats
 newDeviceStats  =
-  do statTX      <- newIORef 0
-     statRX      <- newIORef 0
-     statDropped <- newIORef 0
-     statError   <- newIORef 0
-     return DeviceStats { .. }
+  do _statTX <- newStatGroup
+     _statRX <- newStatGroup
+     return $! DeviceStats { .. }
 
 dumpStats :: DeviceStats -> IO ()
 dumpStats DeviceStats { .. } =
-  do tx <- readIORef statTX
-     rx <- readIORef statRX
-     d  <- readIORef statDropped
-     e  <- readIORef statError
-     putStrLn $ unlines
-       [ "tx:      " ++ show tx
-       , "rx:      " ++ show rx
-       , "dropped: " ++ show d
-       , "errors:  " ++ show e ]
+  do dumpStatGroup "RX:" _statRX
+     dumpStatGroup "TX:" _statTX
+
 
 -- | Add one to the count of dropped packets for this device.
-updateDropped :: DeviceStats -> IO ()
-updateDropped DeviceStats { .. } = incrementStat statDropped
+updateDropped :: Getting Stat DeviceStats StatGroup -> DeviceStats -> IO ()
+updateDropped group stats = incrementStat (view (group . statDropped) stats)
 
 -- | Add one to the error count for this device.
-updateError :: DeviceStats -> IO ()
-updateError DeviceStats { .. } = incrementStat statError
+updateError :: Getting Stat DeviceStats StatGroup -> DeviceStats -> IO ()
+updateError group stats = incrementStat (view (group . statErrors) stats)
 
--- | Update information about packets received.
-updateRX :: DeviceStats -> Bool -> IO ()
-updateRX stats success
-  | success   = incrementStat (statRX stats)
-  | otherwise = updateError stats
+-- | Update information about bytes received.
+updateBytes :: Getting Stat DeviceStats StatGroup -> DeviceStats -> Int -> IO ()
+updateBytes group stats n = addStat (view (group . statBytes) stats) n
 
--- | Update information about packets sent.
-updateTX :: DeviceStats -> Bool -> IO ()
-updateTX stats success
-  | success   = incrementStat (statTX stats)
-  | otherwise = updateError stats
+-- | Update information about bytes received.
+updatePackets :: Getting Stat DeviceStats StatGroup -> DeviceStats -> IO ()
+updatePackets group stats = incrementStat (view (group . statPackets) stats)

@@ -35,7 +35,7 @@ expireAt time a heap =
   let heap' = H.insert H.Entry { H.priority = time, H.payload = a }
             $ H.filter (\ H.Entry { .. } -> payload /= a ) heap
    in (heap',H.priority (H.minimum heap'))
-   -- ^ NOTE: it's safe to use the partial function minimum, as we just inserted
+   -- NOTE: it's safe to use the partial function minimum, as we just inserted
    -- into the heap we're asking for the minimum element of.
 {-# INLINE expireAt #-}
 

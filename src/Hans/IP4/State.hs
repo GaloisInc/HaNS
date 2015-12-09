@@ -38,7 +38,7 @@ data SendSource = SourceAny
                   -- ^ The interface with this address
 
                 | SourceDev !Device !IP4
-                  -- ^ Broadcast from this device
+                  -- ^ This device with this source address
 
 
 data ResponderRequest = Finish !Device !Mac [L.ByteString]

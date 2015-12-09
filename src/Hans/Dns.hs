@@ -6,7 +6,6 @@
 module Hans.Dns where
 
 import Hans.Config
-import Hans.Device.Types (Device(..),updateError)
 import Hans.Dns.Packet
 import Hans.IP4.Packet
 import Hans.Lens
@@ -102,12 +101,11 @@ queryServers4 sock req = go
 
        -- require that the server we sent a request to is the one that responded
        case mbRes of
-         Just (dev,srcIp,srcPort,bytes)
+         Just (_,srcIp,srcPort,bytes)
            | srcIp == addr, srcPort == 53 ->
              case runGetLazy getDNSPacket bytes of
                Right res -> return (Just res)
-               Left _    -> do updateError (devStats dev)
-                               return Nothing
+               Left _    -> return Nothing
 
          _ -> go addrs
 
@@ -120,9 +118,9 @@ data Source = FromHost HostName
 
 sourceHost :: Source -> Name
 sourceHost (FromHost host) = toLabels host
-sourceHost (FromAddr4 ip4) = let (a,b,c,d) = unpackIP4 ip4
-                                 byte x    = S8.pack (show x)
-                              in map byte [d,c,b,a] ++ ["in-addr","arpa"]
+sourceHost (FromAddr4 ip4) = let (a,b,c,d)  = unpackIP4 ip4
+                                 showByte x = S8.pack (show x)
+                              in map showByte [d,c,b,a] ++ ["in-addr","arpa"]
 
 toLabels :: HostName -> Name
 toLabels str =

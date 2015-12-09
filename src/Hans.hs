@@ -34,6 +34,7 @@ import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Types
 import qualified Hans.Udp.State as Udp
+import qualified Hans.Tcp.State as Tcp
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.BoundedChan (newBoundedChan)
@@ -47,6 +48,7 @@ newNetworkStack nsConfig =
      nsDevices      <- newIORef []
      nsIP4State     <- IP4.newIP4State nsConfig
      nsUdpState     <- Udp.newUdpState nsConfig
+     nsTcpState     <- Tcp.newTcpState nsConfig
      nsNameServers4 <- newIORef []
 
      rec nsIP4Responder <- forkIO (IP4.responder ns)

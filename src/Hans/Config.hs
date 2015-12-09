@@ -37,6 +37,9 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
 
                      , cfgDnsResolveTimeout :: !Int
                        -- ^ In microseconds
+
+                     , cfgTcpSocketTableSize :: !Int
+                       -- ^ Best to pick a prime number.
                      }
 
 defaultConfig :: Config
@@ -49,6 +52,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgIP4InitialTTL      = 128
                         , cfgUdpSocketTableSize = 31
                         , cfgDnsResolveTimeout  = 5000000
+                        , cfgTcpSocketTableSize = 67
                         }
 
 class HasConfig cfg where
