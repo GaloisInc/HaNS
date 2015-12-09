@@ -43,8 +43,9 @@ incomingSegment ns dev src dst hdr payload =
 
      case tcb of
 
-       Closed      -> respondClosed ns dev src dst hdr (S.length payload)
-       Listen ltcb -> respondListen ns dev src dst hdr payload ltcb
+       Closed      -> respondClosed  ns dev src dst hdr (S.length payload)
+       Listen ltcb -> respondListen  ns dev src dst hdr payload ltcb
+       SynSent tcb -> respondSynSent ns dev src dst hdr payload tcb
        _           -> escape
 
 
@@ -202,7 +203,11 @@ respondListen ns dev src dst hdr payload ltcb =
 
 
 -- If the state is SYN-SENT then
---
+
+respondSynSent :: NetworkStack
+               -> IP4 -> IP4 -> TcpHeader -> L.ByteString -> Tcb -> Hans ()
+respondSynSent ns src dst hdr payload tcb =
+
 --   first check the ACK bit
 --
 --     If the ACK bit is set
@@ -213,7 +218,23 @@ respondListen ns dev src dst hdr payload ltcb =
 --         <SEQ=SEG.ACK><CTL=RST>
 --
 --       and discard the segment.  Return.
---
+
+  do when (view tcpAck hdr) $
+       do iss    <- io (readIORef (tcbIss    tcb))
+          sndNxt <- io (readIORef (tcbSndNxt tcb))
+          when (tcpAckNum hdr <= iss || tcpAckNum > sndNxt) $
+            do unless (view tcpRst hdr) $ io $
+                 do next <- readIORef (tcbNext4 tcb)
+                    let hdr' = set tcpRst True
+                             $ emptyTcpHeader { tcpSourcePort = tcpDestPort hdr
+                                              , tcpDestPort   = tcpSourcePort hdr
+                                              , tcpSeqNum     = tcpAckNum hdr
+                                              }
+                    _ <- sendTcp4 ns src dst next hdr' L.empty
+                    return ()
+
+               escape
+
 --       If SND.UNA =< SEG.ACK =< SND.NXT then the ACK is acceptable.
 --
 --   second check the RST bit
@@ -223,7 +244,13 @@ respondListen ns dev src dst hdr payload ltcb =
 --       connection reset", drop the segment, enter CLOSED state,
 --       delete TCB, and return.  Otherwise (no ACK) drop the segment
 --       and return.
---
+
+     when (view tcpRst hdr) $
+       do sndUna <- io (readIORef (tcbSndUna tcb))
+          unless (view tcpAck hdr && sndUna <= tcpAckNum hdr
+                                  && tcpAckNum hdr <= sndNxt) $
+            do registerSocket key Closed
+
 --   third check the security and precedence
 --
 --     If the security/compartment in the segment does not exactly

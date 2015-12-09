@@ -5,6 +5,7 @@ module Hans.Udp.Input (
     processUdp4
   ) where
 
+import           Hans.Addr (Addr,toAddr)
 import qualified Hans.Buffer.Datagram as DG
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device (Device(..),DeviceConfig(..))
@@ -29,15 +30,15 @@ processUdp4 ns dev src dst bytes =
      ((hdr,payloadLen),payload) <- decode' (devStats dev) getUdpHeader bytes
 
      -- attempt to find a destination for this packet
-     io (routeMsg ns dev src dst hdr (S.take payloadLen payload))
+     io (routeMsg ns dev (toAddr src) (toAddr dst) hdr (S.take payloadLen payload))
 
-routeMsg :: NetworkStack -> Device -> IP4 -> IP4 -> UdpHeader -> S.ByteString -> IO ()
+routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO ()
 routeMsg ns dev src dst UdpHeader { .. } payload =
-  do mb <- lookupRecv4 ns dst udpDestPort
+  do mb <- lookupRecv ns dst udpDestPort
      case mb of
 
        -- XXX: which stat should increment when writeChunk fails?
-       Just (Receiver4 buf) ->
+       Just buf ->
          do _ <- DG.writeChunk buf (dev,src,udpSourcePort,dst,udpDestPort) payload
             return ()
 

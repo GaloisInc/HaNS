@@ -62,7 +62,7 @@ sendIP4 :: NetworkStack -> SendSource -> IP4 -> IP4Protocol -> L.ByteString
 -- source address. The routing table is still queried to find the next hop, and
 -- if the route found doesn't use the device provided, the packets aren't sent.
 sendIP4 ns (SourceDev dev src) dst prot payload =
-  do mbRoute <- lookupRoute ns dst
+  do mbRoute <- lookupRoute4 ns dst
      case mbRoute of
        Just (_,next,dev') | devName dev == devName dev' ->
          do primSendIP4 ns dev src dst next prot payload
@@ -86,7 +86,7 @@ sendIP4 ns (SourceIP4 src) dst prot payload =
 
 -- find the right path out
 sendIP4 ns SourceAny dst prot payload =
-  do mbRoute <- lookupRoute ns dst
+  do mbRoute <- lookupRoute4 ns dst
      case mbRoute of
        Just (src,next,dev) -> do primSendIP4 ns dev src dst next prot payload
                                  return True

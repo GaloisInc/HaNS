@@ -30,6 +30,21 @@ data DeviceConfig = DeviceConfig { dcSendQueueLen :: {-# UNPACK #-} !Int
                                  , dcMtu :: !Int
                                  }
 
+class HasDeviceConfig cfg where
+  deviceConfig :: Getting r cfg DeviceConfig
+
+instance HasDeviceConfig DeviceConfig where
+  deviceConfig = id
+  {-# INLINE deviceConfig #-}
+
+instance HasDeviceConfig Device where
+  deviceConfig = to devConfig
+  {-# INLINE deviceConfig #-}
+
+
+checksumOffload :: HasDeviceConfig cfg => cfg -> Bool
+checksumOffload cfg = dcChecksumOffload (view deviceConfig cfg)
+
 defaultDeviceConfig :: DeviceConfig
 defaultDeviceConfig  = DeviceConfig { dcSendQueueLen    = 128
                                     , dcChecksumOffload = False

@@ -7,7 +7,7 @@ module Hans.IP4.State (
     newIP4State,
     HasIP4State(..),
     addRoute,
-    lookupRoute,
+    lookupRoute4,
     isLocalAddr,
     nextIdent,
     routesForDev,
@@ -94,8 +94,8 @@ addRoute state = \ defRoute route ->
 
 
 -- | Lookup the source address, as well as the next hop and device.
-lookupRoute :: HasIP4State state => state -> IP4 -> IO (Maybe (IP4,IP4,Device))
-lookupRoute state = \ dest ->
+lookupRoute4 :: HasIP4State state => state -> IP4 -> IO (Maybe (IP4,IP4,Device))
+lookupRoute4 state = \ dest ->
   do routes <- readIORef ip4Routes
      case RT.lookupRoute dest routes of
        Just route -> return (Just ( RT.routeSource route

@@ -2,6 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Hans.IP4.Packet where
 
@@ -27,12 +28,13 @@ import           Data.Serialize
                     ,putLazyByteString,putShortByteString)
 import           Data.Typeable (Typeable)
 import           Data.Word (Word8,Word16,Word32)
+import           GHC.Generics (Generic)
 
 
 -- IP4 Addresses ---------------------------------------------------------------
 
 newtype IP4 = IP4 Word32
-              deriving (Eq,Ord,Show,Hashable,Checksum,Typeable)
+              deriving (Eq,Ord,Show,Hashable,Checksum,Typeable,Generic)
 
 getIP4 :: Get IP4
 getIP4  =

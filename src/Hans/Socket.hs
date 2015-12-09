@@ -1,22 +1,20 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module Hans.Socket where
 
+import           Hans.Addr
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device(devName))
-import           Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4)
 import           Hans.Lens
+import           Hans.Network
 import           Hans.Types
-                     (HasNetworkStack(..),NetworkStack,registerRecv4,UdpBuffer
-                     ,lookupRoute,nextUdpPort4)
+                     (HasNetworkStack(..),NetworkStack,registerRecv,UdpBuffer
+                     ,nextUdpPort)
 import           Hans.Udp.Input ()
-import           Hans.Udp.Output (primSendUdp4)
+import           Hans.Udp.Output (primSendUdp)
 
-import qualified Control.Exception as X
+import           Control.Exception
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (IORef,newIORef,readIORef,atomicModifyIORef')
@@ -38,36 +36,36 @@ data SocketConfig = SocketConfig { scRecvBufferSize :: !Int
 defaultSocketConfig :: SocketConfig
 defaultSocketConfig  = SocketConfig { scRecvBufferSize = 4096 }
 
-class Socket (sock :: * -> *) addr where
+class Socket sock where
 
   -- | Open a socket. This is the functionality of `socket` and `bind` in the
   -- same operation.
-  sOpen :: HasNetworkStack ns
+  sOpen :: (HasNetworkStack ns, Network addr)
         => ns
         -> SocketConfig
         -> Maybe Device -> addr -> Maybe SockPort -> IO (sock addr)
 
   -- | Connect this socket to one on a remote machine.
-  sConnect :: sock addr -> addr -> SockPort -> IO ()
+  sConnect :: Network addr => sock addr -> addr -> SockPort -> IO ()
 
   -- | Send a chunk of data on a socket.
-  sWrite :: sock addr -> L.ByteString -> IO Int
+  sWrite :: Network addr => sock addr -> L.ByteString -> IO Int
 
   -- | Read a chunk of data from a socket. Reading an empty result indicates
   -- that the socket has closed.
-  sRead :: sock addr -> Int -> IO L.ByteString
+  sRead :: Network addr => sock addr -> Int -> IO L.ByteString
 
   -- | Non-blocking read from a socket. Reading an empty result means that the
   -- socket has closed, while reading a 'Nothing' result indicates that there
   -- was no data available.
-  sTryRead :: sock addr -> Int -> IO (Maybe L.ByteString)
+  sTryRead :: Network addr => sock addr -> Int -> IO (Maybe L.ByteString)
 
   -- | Close an open socket.
-  sClose :: sock addr -> IO ()
+  sClose :: Network addr => sock addr -> IO ()
 
 
-data SockState addr = KnownRoute !Device !addr !SockPort !addr !SockPort !addr
-                      -- ^ Known source, dest and next-hop.
+data SockState addr = KnownRoute !(RouteInfo addr) !addr !SockPort !SockPort
+                      -- ^ Cached route, and port information
 
                     | KnownSource !(Maybe Device) !addr !SockPort
                       -- ^ Known source only.
@@ -95,57 +93,59 @@ data SocketException addr = AlreadyOpen !addr !SockPort
                             -- ^ All ports are in use.
                             deriving (Show,Typeable)
 
-throwIO4 :: SocketException IP4 -> IO a
-throwIO4  = X.throwIO
+instance (Show addr, Typeable addr) => Exception (SocketException addr)
 
-instance (Show addr, Typeable addr) => X.Exception (SocketException addr)
+throwSE :: (Show addr, Typeable addr) => addr -> SocketException addr -> IO a
+throwSE _ = throwIO
+{-# INLINE throwSE #-}
 
 
--- Datagram Sockets ------------------------------------------------------------
+-- UDP Sockets -----------------------------------------------------------------
 
-data DatagramSocket addr =
-  DatagramSocket { dgNS       :: !NetworkStack
-                 , dgBuffer   :: !(UdpBuffer addr)
-                 , dgState    :: !(IORef (SockState addr))
-                 , dgClose    ::  IO ()
-                 }
+data UdpSocket addr = UdpSocket { udpNS        :: !NetworkStack
+                                , udpBuffer    :: !UdpBuffer
+                                , udpSockState :: !(IORef (SockState addr))
+                                , udpClose     :: !(IO ())
+                                }
 
-instance HasNetworkStack (DatagramSocket addr) where
-  networkStack = to dgNS
+instance HasNetworkStack (UdpSocket addr) where
+  networkStack = to udpNS
   {-# INLINE networkStack #-}
 
-instance Socket DatagramSocket IP4 where
+instance Socket UdpSocket where
 
   sOpen ns SocketConfig { .. } mbDev src mbPort =
-    do let dgNS = view networkStack ns
+    do let udpNS = view networkStack ns
        srcPort <- case mbPort of
-                   Nothing -> do mb <- nextUdpPort4 dgNS src
+                   Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
                                  case mb of
                                    Just port -> return port
-                                   Nothing   -> throwIO4 NoPortAvailable
+                                   Nothing   -> throwSE src NoPortAvailable
 
                    Just p  -> return p
 
-       dgState  <- newIORef (KnownSource mbDev src srcPort)
+       udpSockState <- newIORef (KnownSource mbDev src srcPort)
 
-       dgBuffer <- DGram.newBuffer scRecvBufferSize
+       udpBuffer <- DGram.newBuffer scRecvBufferSize
 
        -- XXX: Need some SocketError exceptions: this only happens if there's
        -- already something listening
-       mbClose <- registerRecv4 dgNS src srcPort dgBuffer
-       dgClose <- case mbClose of
-                    Just unreg -> return unreg
-                    Nothing    -> throwIO4 (AlreadyOpen src srcPort)
+       mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
+       udpClose <- case mbClose of
+                     Just unreg -> return unreg
+                     Nothing    -> throwIO (AlreadyOpen src srcPort)
 
-       return $! DatagramSocket { .. }
+       return $! UdpSocket { .. }
 
-  sConnect DatagramSocket { .. } dst dstPort =
-    do mbRoute <- lookupRoute dgNS dst
+  -- Always lookup the route before modifying the state of the socket, so that
+  -- the state can be manipulated atomically.
+  sConnect UdpSocket { .. } dst dstPort =
+    do mbRoute <- lookupRoute udpNS dst
        case mbRoute of
 
-         Just (src,next,dev) ->
+         Just ri ->
 
-           do let sameDev (Just dev') = devName dev == devName dev'
+           do let sameDev (Just dev') = riDev ri == dev'
                   sameDev Nothing     = True
 
                   connect state = case state of
@@ -153,8 +153,8 @@ instance Socket DatagramSocket IP4 where
 
                         -- If the source was the wildcard address, change it to
                         -- the address specified by that rule.
-                      | (src == src' && sameDev mbDev) || src' == WildcardIP4 ->
-                        (KnownRoute dev src srcPort dst dstPort next, Nothing)
+                      | sameDev mbDev && (riSource ri == src' || isWildcardAddr src') ->
+                        (KnownRoute ri dst srcPort dstPort, Nothing)
 
                       | otherwise ->
                         (state, Just NoRouteToHost)
@@ -162,77 +162,83 @@ instance Socket DatagramSocket IP4 where
                     _ ->
                       (state, Just AlreadyConnected)
 
-              mbEx <- atomicModifyIORef' dgState connect
+              mbEx <- atomicModifyIORef' udpSockState connect
               case mbEx of
                 Nothing -> return ()
-                Just e  -> throwIO4 e
+                Just e  -> throwSE dst e
 
-         Nothing -> throwIO4 NoRouteToHost
+         Nothing -> throwSE dst NoRouteToHost
 
-  sWrite DatagramSocket { .. } bytes =
-    do path <- readIORef dgState
+  sWrite UdpSocket { .. } bytes =
+    do path <- readIORef udpSockState
        case path of
 
-         KnownRoute dev src srcPort dst dstPort next ->
-           do sent <- primSendUdp4 dgNS dev src srcPort dst dstPort next bytes
+         KnownRoute ri dst srcPort dstPort ->
+           do sent <- primSendUdp udpNS ri dst srcPort dstPort bytes
               if sent
                  then return (fromIntegral (L.length bytes))
                  else return (-1)
 
-         KnownSource{} ->
-              throwIO4 NoConnection
+         KnownSource _ src _ ->
+              throwSE src NoConnection
 
-  sRead DatagramSocket { .. } len =
-    do (_,buf) <- DGram.readChunk dgBuffer
+  sRead UdpSocket { .. } len =
+    do (_,buf) <- DGram.readChunk udpBuffer
        return (L.fromStrict (S.take len buf))
 
-  sTryRead DatagramSocket { .. } len =
-    do mb <- DGram.tryReadChunk dgBuffer
+  sTryRead UdpSocket { .. } len =
+    do mb <- DGram.tryReadChunk udpBuffer
        case mb of
          Just (_,buf) -> return $! Just $! L.fromStrict $! S.take len buf
          Nothing      -> return Nothing
 
 
-  sClose DatagramSocket { .. } = dgClose
+  sClose UdpSocket { .. } = udpClose
   {-# INLINE sClose #-}
 
 
 -- | Receive, with information about who sent this datagram.
-recvfrom4 :: DatagramSocket IP4 -> IO (Device,IP4,SockPort,L.ByteString)
-recvfrom4 DatagramSocket { .. } =
-  do ((dev,src,srcPort,_,_), chunk) <- DGram.readChunk dgBuffer
+recvfrom :: Network addr => UdpSocket addr -> IO (Device,Addr,SockPort,L.ByteString)
+recvfrom UdpSocket { .. } =
+  do ((dev,src,srcPort,_,_), chunk) <- DGram.readChunk udpBuffer
      return (dev,src,srcPort,L.fromStrict chunk)
-{-# LANGUAGE recvfrom4 #-}
+{-# LANGUAGE recvfrom #-}
 
 
 -- | Send to a specific end host.
-sendto4 :: DatagramSocket IP4 -> IP4 -> SockPort -> L.ByteString -> IO ()
-sendto4 DatagramSocket { .. } = \ dst dstPort bytes ->
-  do state <- readIORef dgState
+sendto :: Network addr
+       => UdpSocket addr -> addr -> SockPort -> L.ByteString -> IO ()
+sendto UdpSocket { .. } = \ dst dstPort bytes ->
+  do state <- readIORef udpSockState
      case state of
 
        KnownSource mbDev src srcPort ->
-         do mbRoute <- lookupRoute dgNS dst
+         do mbRoute <- lookupRoute udpNS dst
             let sameDev = case mbDev of
-                            Just dev' -> \ dev -> devName dev == devName dev'
-                            Nothing   -> \ _   -> True
+                            Just dev' -> \ ri -> dev' == riDev ri
+                            Nothing   -> \ _  -> True
 
             case mbRoute of
-              Just (src',next,dev)
-                | (src == src' && sameDev dev) || src == WildcardIP4 ->
-                  do _ <- primSendUdp4 dgNS dev src' srcPort dst dstPort next bytes
+              -- the device holds the same address we were expecting to send
+              -- from, or we're sending from the wildcard address
+              Just ri
+                | sameDev ri && (src == riSource ri || isWildcardAddr src) ->
+                  do _ <- primSendUdp udpNS ri dst srcPort dstPort bytes
                      return ()
 
+              -- no route found, but we're broadcasting using a known device
               Nothing
-                | Just dev <- mbDev, dst == BroadcastIP4 ->
-                  do _ <- primSendUdp4 dgNS dev src srcPort dst dstPort dst bytes
+                | Just dev <- mbDev, isBroadcastAddr dst ->
+                  do let ri = RouteInfo { riSource = src
+                                        , riNext   = dst
+                                        , riDev    = dev }
+                     _ <- primSendUdp udpNS ri dst srcPort dstPort bytes
                      return ()
 
               _ ->
-                  throwIO4 NoRouteToHost
+                  throwSE dst NoRouteToHost
 
        -- we can't use sendto if sConnect has been used already
        KnownRoute {} ->
-         throwIO4 AlreadyConnected
-{-# INLINE sendto4 #-}
-
+         throwSE dst AlreadyConnected
+{-# INLINE sendto #-}

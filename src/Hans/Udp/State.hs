@@ -6,16 +6,16 @@ module Hans.Udp.State (
     UdpState(..), newUdpState,
     HasUdpState(..),
     UdpBuffer,
-    lookupRecv4, Receiver(..),
-    registerRecv4,
-    nextUdpPort4,
+    lookupRecv,
+    registerRecv,
+    nextUdpPort,
   ) where
 
+import           Hans.Addr (NetworkAddr(..),Addr)
 import qualified Hans.Buffer.Datagram as DG
 import           Hans.Config
 import           Hans.Device.Types (Device)
 import qualified Hans.HashTable as HT
-import           Hans.IP4.Packet (IP4, pattern CurrentNetworkIP4)
 import           Hans.Lens
 import           Hans.Udp.Packet (UdpPort)
 
@@ -24,17 +24,15 @@ import           Data.Hashable (Hashable)
 import           GHC.Generics (Generic)
 
 
-data Key = Key4 !IP4 !UdpPort
+data Key = Key !Addr !UdpPort
            deriving (Eq,Show,Generic)
 
 instance Hashable Key
 
 
-type UdpBuffer addr = DG.Buffer (Device,addr,UdpPort,addr,UdpPort)
+type UdpBuffer = DG.Buffer (Device,Addr,UdpPort,Addr,UdpPort)
 
-data Receiver = Receiver4 !(UdpBuffer IP4)
-
-data UdpState = UdpState { udpRecv  :: !(HT.HashTable Key Receiver)
+data UdpState = UdpState { udpRecv  :: !(HT.HashTable Key UdpBuffer)
                          , udpPorts :: !(MVar UdpPort)
                          }
 
@@ -53,23 +51,25 @@ instance HasUdpState UdpState where
   udpState = id
   {-# INLINE udpState #-}
 
-lookupRecv4 :: HasUdpState state => state -> IP4 -> UdpPort -> IO (Maybe Receiver)
-lookupRecv4 state dst dstPort =
-  do mb <- HT.lookup (Key4 dst dstPort) (udpRecv (view udpState state))
+lookupRecv :: HasUdpState state
+           => state -> Addr -> UdpPort -> IO (Maybe UdpBuffer)
+lookupRecv state addr dstPort =
+  do mb <- HT.lookup (Key addr dstPort) (udpRecv (view udpState state))
      case mb of
 
        -- there was a receiver waiting on this address and port
        Just _  -> return mb
 
        -- try the generic receiver for that port
-       Nothing -> HT.lookup (Key4 CurrentNetworkIP4 dstPort) (udpRecv (view udpState state))
+       Nothing -> HT.lookup (Key (wildcardAddr addr) dstPort)
+                            (udpRecv (view udpState state))
 
 
 -- | Register a listener for messages to this address and port, returning 'Just'
 -- an action to unregister the listener on success.
-registerRecv4 :: HasUdpState state
-              => state -> IP4 -> UdpPort -> UdpBuffer IP4 -> IO (Maybe (IO ()))
-registerRecv4 state src srcPort buf =
+registerRecv :: HasUdpState state
+             => state -> Addr -> UdpPort -> UdpBuffer -> IO (Maybe (IO ()))
+registerRecv state addr srcPort buf =
   do registered <- HT.alter update key table
      if registered
         then return (Just (HT.delete key table))
@@ -77,21 +77,21 @@ registerRecv4 state src srcPort buf =
   where
   table = udpRecv (view udpState state)
 
-  key = Key4 src srcPort
+  key = Key addr srcPort
 
   update mb@Just{} = (mb,False)
-  update Nothing   = (Just (Receiver4 buf),True)
+  update Nothing   = (Just buf,True)
 
 
 -- Port Management -------------------------------------------------------------
 
-nextUdpPort4 :: HasUdpState state => state -> IP4 -> IO (Maybe UdpPort)
-nextUdpPort4 state addr =
-  modifyMVar udpPorts (pickFreshPort udpRecv (Key4 addr))
+nextUdpPort :: HasUdpState state => state -> Addr -> IO (Maybe UdpPort)
+nextUdpPort state addr =
+  modifyMVar udpPorts (pickFreshPort udpRecv (Key addr))
   where
   UdpState { .. } = view udpState state
 
-pickFreshPort :: HT.HashTable Key Receiver -> (UdpPort -> Key) -> UdpPort
+pickFreshPort :: HT.HashTable Key UdpBuffer -> (UdpPort -> Key) -> UdpPort
               -> IO (UdpPort, Maybe UdpPort)
 pickFreshPort ht mkKey p0 = go 0 p0
   where

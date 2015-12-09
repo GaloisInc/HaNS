@@ -16,8 +16,7 @@ import Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4,IP4Mask(..)
 import Hans.IP4.RoutingTable(Route(..),RouteType(..))
 import Hans.Lens
 import Hans.Socket
-           (DatagramSocket,sOpen,sClose,sendto4,recvfrom4,SockPort
-           ,defaultSocketConfig)
+           (UdpSocket,sOpen,sClose,sendto,recvfrom,SockPort,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
 import Hans.Time (toUSeconds)
 import Hans.Types (NetworkStack,networkStack,addRoute,addNameServer4)
@@ -103,12 +102,12 @@ dhcpClient ns cfg dev =
 
 
 -- | Discover a dhcp server, and request an address.
-dhcpDiscover :: DhcpConfig -> Device -> DatagramSocket IP4 -> IO (Maybe DhcpLease)
+dhcpDiscover :: DhcpConfig -> Device -> UdpSocket IP4 -> IO (Maybe DhcpLease)
 dhcpDiscover cfg dev sock =
   do xid  <- mkXid
      let msg = renderMessage (discoverToMessage (mkDiscover xid (devMac dev)))
 
-     mb <- waitResponse cfg (sendto4 sock BroadcastIP4 bootps msg) (awaitOffer sock)
+     mb <- waitResponse cfg (sendto sock BroadcastIP4 bootps msg) (awaitOffer sock)
      case mb of
        Just offer -> dhcpRequest cfg dev sock offer
        Nothing    -> do sClose sock
@@ -116,11 +115,11 @@ dhcpDiscover cfg dev sock =
 
 
 -- | Only accept an offer.
-awaitOffer :: DatagramSocket IP4 -> IO Offer
+awaitOffer :: UdpSocket IP4 -> IO Offer
 awaitOffer sock = go
   where
   go =
-    do (_,_,srcPort,bytes) <- recvfrom4 sock
+    do (_,_,srcPort,bytes) <- recvfrom sock
 
        if srcPort /= bootps
           then go
@@ -135,10 +134,10 @@ awaitOffer sock = go
 
 -- | Respond to an offer with a request, and configure the network stack if an
 -- acknowledgement is received.
-dhcpRequest :: DhcpConfig -> Device -> DatagramSocket IP4 -> Offer -> IO (Maybe DhcpLease)
+dhcpRequest :: DhcpConfig -> Device -> UdpSocket IP4 -> Offer -> IO (Maybe DhcpLease)
 dhcpRequest cfg dev sock offer =
   do let req = renderMessage (requestToMessage (offerToRequest offer))
-     mb <- waitResponse cfg (sendto4 sock BroadcastIP4 bootps req) (awaitAck sock)
+     mb <- waitResponse cfg (sendto sock BroadcastIP4 bootps req) (awaitAck sock)
      sClose sock
      case mb of
 
@@ -150,11 +149,11 @@ dhcpRequest cfg dev sock offer =
             return (Just lease)
 
 
-awaitAck :: DatagramSocket IP4 -> IO Ack
+awaitAck :: UdpSocket IP4 -> IO Ack
 awaitAck sock = go
   where
   go =
-    do (_,_,srcPort,bytes) <- recvfrom4 sock
+    do (_,_,srcPort,bytes) <- recvfrom sock
 
        if srcPort /= bootps
           then go

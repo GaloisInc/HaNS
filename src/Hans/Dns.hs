@@ -5,6 +5,7 @@
 
 module Hans.Dns where
 
+import Hans.Addr (toAddr)
 import Hans.Config
 import Hans.Dns.Packet
 import Hans.IP4.Packet
@@ -91,18 +92,18 @@ sendRequest ns src =
          return Nothing
 
 
-queryServers4 :: DatagramSocket IP4 -> L.ByteString -> [IP4] -> IO (Maybe DNSPacket)
+queryServers4 :: UdpSocket IP4 -> L.ByteString -> [IP4] -> IO (Maybe DNSPacket)
 queryServers4 sock req = go
   where
   go (addr:addrs) =
-    do sendto4 sock addr 53 req
+    do sendto sock addr 53 req
        mbRes <- timeout (cfgDnsResolveTimeout (view config (view networkStack sock)))
-                    (recvfrom4 sock)
+                    (recvfrom sock)
 
        -- require that the server we sent a request to is the one that responded
        case mbRes of
          Just (_,srcIp,srcPort,bytes)
-           | srcIp == addr, srcPort == 53 ->
+           | srcIp == toAddr addr, srcPort == 53 ->
              case runGetLazy getDNSPacket bytes of
                Right res -> return (Just res)
                Left _    -> return Nothing

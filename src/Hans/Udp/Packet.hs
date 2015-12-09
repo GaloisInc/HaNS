@@ -56,28 +56,3 @@ putUdpHeader UdpHeader { .. } bodyLen =
      putUdpPort  udpDestPort
      putWord16be (fromIntegral (bodyLen + udpHeaderSize))
      putWord16be 0
-
-
--- Udp Packets -----------------------------------------------------------------
-
--- | Given a way to make the pseudo header, render the UDP packet.
-renderUdpPacket :: Bool -> IP4 -> IP4 -> UdpHeader -> L.ByteString
-                -> L.ByteString
-renderUdpPacket includeCS src dst hdr body
-  | not includeCS = bytes
-  | otherwise     = beforeCS `L.append` withCS
-
-  where
-
-  pktlen = fromIntegral (L.length body)
-  bytes  = runPutPacket udpHeaderSize 0 body (putUdpHeader hdr pktlen)
-
-  udplen = udpHeaderSize + pktlen
-  cs     = finalizeChecksum
-         $ extendChecksum bytes
-         $ ip4PseudoHeader src dst IP4_PROT_UDP udplen
-
-  beforeCS = L.take (fromIntegral udpHeaderSize - 2) bytes
-  afterCS  = L.drop (fromIntegral udpHeaderSize    ) bytes
-
-  withCS   = runPutPacket 2 0 afterCS (putWord16be cs)

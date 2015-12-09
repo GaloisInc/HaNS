@@ -7,7 +7,7 @@ module Hans.Tcp.State where
 import           Hans.Config (Config(..))
 import           Hans.Device.Types (Device)
 import           Hans.IP4.Packet (IP4,pattern WildcardIP4)
-import           Hans.IP4.State (HasIP4State,lookupRoute)
+import           Hans.IP4.State (HasIP4State,lookupRoute4)
 import qualified Hans.HashTable as HT
 import           Hans.Lens
 import           Hans.Tcp.Packet
@@ -62,6 +62,7 @@ registerSocket state key val =
 
 data TcbState = Listen !ListenTcb
               | SynReceived !Tcb
+              | SynSent !Tcb
               | Established !Tcb
               | Closed
 
@@ -78,7 +79,9 @@ genIss now IssGen { .. } = (IssGen iss' now, iss')
   iss'      = issLastSeqNum + increment
 
 
-data ListenTcb = ListenTcb { ltcbIss :: !(IORef IssGen)
+data ListenTcb = ListenTcb { ltcbIss  :: !(IORef IssGen)
+                           , ltcbSrc  :: !IP4
+                           , ltcbPort :: !TcpPort
                            }
 
 nextIss :: ListenTcb -> IO TcpSeqNum
@@ -99,6 +102,10 @@ data Tcb = Tcb { tcbSndUna
                , tcbRcvUp
                , tcbIrs :: !(IORef TcpSeqNum)
 
+                 -- Port information
+               , tcbSourcePort
+               , tcbDestPort :: !TcpPort
+
                  -- routing information
                , tcbDev   :: !Device
                , tcbSrc4  :: !IP4
@@ -107,8 +114,8 @@ data Tcb = Tcb { tcbSndUna
                }
 
 
-newTcb :: Device -> IP4 -> IP4 -> IP4 -> IO Tcb
-newTcb tcbDev tcbSrc4 tcbDst4 tcbNext4 =
+newTcb :: Device -> IP4 -> TcpPort -> IP4 -> TcpPort -> IP4 -> IO Tcb
+newTcb tcbDev tcbSrc4 tcbSourcePort tcbDst4 tcbDestPort tcbNext4 =
   do tcbSndUna <- newIORef 0
      tcbSndNxt <- newIORef 0
      tcbSndWnd <- newIORef 0
