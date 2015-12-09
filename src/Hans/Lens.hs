@@ -109,4 +109,4 @@ byte n = lens get upd
 
   get a   = fromIntegral (a `B.shiftR` sh)
 
-  upd a b = a B..|. fromIntegral (b `B.shiftL` sh)
+  upd a b = a B..|. (fromIntegral b `B.shiftL` sh)
