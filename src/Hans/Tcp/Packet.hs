@@ -70,6 +70,17 @@ putTcpSeqNum  = putWord32be
 getTcpSeqNum :: Get TcpSeqNum
 getTcpSeqNum  = getWord32be
 
+-- | Checks that the second sequence number is withing the range defined by the
+-- other two: a <= b <= c.
+seqNumInRange :: TcpSeqNum -> TcpSeqNum -> TcpSeqNum -> Bool
+seqNumInRange lo x hi
+
+  | lo < hi   = lo <= x && x <= hi
+
+    -- the bounds have wrapped
+  | otherwise = lo <= x || x <= hi
+
+
 
 -- | An alias to TcpSeqNum, as these two are used in the same role.
 type TcpAckNum = TcpSeqNum

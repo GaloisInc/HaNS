@@ -22,6 +22,18 @@ emptyHeap :: ExpireHeap a
 emptyHeap  = H.empty
 {-# INLINE emptyHeap #-}
 
+-- | The next time that something in the heap will expire, if the heap is
+-- non-empty.
+nextEvent :: ExpireHeap a -> Maybe UTCTime
+nextEvent heap =
+  do (entry,_) <- H.viewMin heap
+     return (H.priority entry)
+
+-- | Remove all expired entries from the heap.
+dropExpired :: UTCTime -> ExpireHeap a -> ExpireHeap a
+dropExpired now heap = H.dropWhile (expiresBefore now) heap
+{-# INLINE dropExpired #-}
+
 -- | Given the current time, partition the heap into valid entries, and entries
 -- that have expired.
 partitionExpired :: UTCTime -> ExpireHeap a -> (ExpireHeap a, ExpireHeap a)
@@ -30,10 +42,9 @@ partitionExpired now heap = swap (H.break (expiresBefore now) heap)
 
 -- | Add an entry to the 'ExpireHeap', and return the time of the next
 -- expiration event.
-expireAt :: Eq a => UTCTime -> a -> ExpireHeap a -> (ExpireHeap a,UTCTime)
+expireAt :: UTCTime -> a -> ExpireHeap a -> (ExpireHeap a,UTCTime)
 expireAt time a heap =
-  let heap' = H.insert H.Entry { H.priority = time, H.payload = a }
-            $ H.filter (\ H.Entry { .. } -> payload /= a ) heap
+  let heap' = H.insert H.Entry { H.priority = time, H.payload = a } heap
    in (heap',H.priority (H.minimum heap'))
    -- NOTE: it's safe to use the partial function minimum, as we just inserted
    -- into the heap we're asking for the minimum element of.
@@ -53,4 +64,4 @@ expirationDelay now heap =
 
 -- | Convert a 'NominalDiffTime' into microseconds for use with 'threadDelay'.
 toUSeconds :: NominalDiffTime -> Int
-toUSeconds diff = truncate (diff * 1000000)
+toUSeconds diff = max 0 (truncate (diff * 1000000))

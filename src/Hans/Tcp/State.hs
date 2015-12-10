@@ -5,35 +5,37 @@
 module Hans.Tcp.State where
 
 import           Hans.Addr (Addr,wildcardAddr)
-import           Hans.Config (Config(..))
+import           Hans.Config (HasConfig(..),Config(..))
 import qualified Hans.HashTable as HT
 import           Hans.Lens
-import           Hans.Network.Types (RouteInfo)
+import           Hans.Network.Types (RouteInfo(..))
 import           Hans.Tcp.Packet
+import           Hans.Tcp.Tcb
+import           Hans.Time
 
+import           Control.Concurrent (forkIO,threadDelay)
+import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
-import           Data.Time.Clock (getCurrentTime,UTCTime,diffUTCTime)
+import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
+import           Data.Time.Clock (getCurrentTime,UTCTime,diffUTCTime,addUTCTime)
 import           GHC.Generics (Generic)
 
 
 -- General State ---------------------------------------------------------------
 
-data Key = Listening !Addr !TcpPort
-           -- ^ Listening connections
-           --
-           -- XXX: allow for the remote side to be specified
+data ListenKey = ListenKey !Addr !TcpPort
+                 deriving (Show,Eq,Ord,Generic)
 
-         | Conn !Addr !TcpPort !Addr !TcpPort
-           -- ^ Open connections
-
+data Key = Key !Addr !TcpPort !Addr !TcpPort
            deriving (Show,Eq,Ord,Generic)
 
+instance Hashable ListenKey
 instance Hashable Key
 
-
 data TcpState =
-  TcpState { tcpSockets :: {-# UNPACK #-} !(HT.HashTable Key TcbState)
+  TcpState { tcpListen   :: {-# UNPACK #-} !(HT.HashTable ListenKey ListenTcb)
+           , tcpActive   :: {-# UNPACK #-} !(HT.HashTable Key Tcb)
+           , tcpTimeWait :: {-# UNPACK #-} !(IORef (ExpireHeap TimeWaitTcb))
            }
 
 
@@ -47,116 +49,108 @@ instance HasTcpState TcpState where
 
 newTcpState :: Config -> IO TcpState
 newTcpState Config { .. } =
-  do tcpSockets <- HT.newHashTable cfgTcpSocketTableSize
+  do tcpListen   <- HT.newHashTable cfgTcpListenTableSize
+     tcpActive   <- HT.newHashTable cfgTcpActiveTableSize
+     tcpTimeWait <- newIORef emptyHeap
      return TcpState { .. }
 
 
-registerSocket :: HasTcpState state => state -> Key -> TcbState -> IO ()
-registerSocket state key val =
-  HT.insert key val (tcpSockets (view tcpState state))
+-- | Register a new listening socket.
+registerListening :: HasTcpState state
+                  => state -> Addr -> TcpPort -> ListenTcb -> IO ()
+registerListening state addr port val =
+  HT.insert (ListenKey addr port) val (tcpListen (view tcpState state))
 
 
--- Tcb -------------------------------------------------------------------------
-
-data TcbState = Listen !ListenTcb
-              | SynReceived !Tcb
-              | SynSent !Tcb
-              | Established !Tcb
-              | Closed
+-- | Register a new active socket.
+registerActive :: HasTcpState state
+               => state -> Addr -> TcpPort -> Addr -> TcpPort -> Tcb -> IO ()
+registerActive state dst dstPort src srcPort val =
+  HT.insert (Key dst dstPort src srcPort) val (tcpActive (view tcpState state))
 
 
-data IssGen = IssGen { issLastSeqNum :: !TcpSeqNum
-                     , issLastUpdate :: !UTCTime
-                     }
+-- | Register a socket in the TimeWait state. If the heap was empty, fork off a
+-- thread to reap its contents after the timeWaitTimeout.
+--
+-- NOTE: this doesn't remove the original socket from the Active set.
+registerTimeWait :: (HasConfig state, HasTcpState state)
+                 => state -> TimeWaitTcb -> IO ()
+registerTimeWait state tcb =
+  do let Config { .. } = view config state
+     now      <- getCurrentTime
+     mbExpire <-
+       atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+           let (heap', next) = expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap
 
--- | Update the ISS, based on a 128khz incrementing counter.
-genIss :: UTCTime -> IssGen -> (IssGen,TcpSeqNum)
-genIss now IssGen { .. } = (IssGen iss' now, iss')
-  where
-  increment = round (diffUTCTime now issLastUpdate * 128000)
-  iss'      = issLastSeqNum + increment
+               shouldReap | nullHeap heap = Just next
+                          | otherwise     = Nothing
 
+            in (heap', shouldReap)
 
-data ListenTcb = ListenTcb { ltcbIss  :: !(IORef IssGen)
-                           , ltcbSrc  :: !Addr
-                           , ltcbPort :: !TcpPort
-                           }
+     -- mbExpire will only be Just in the case that the heap was previously
+     -- empty. Because we're only ever using atomicModifyIORef to mutate the
+     -- heap, this will only happen when this context is the only one that
+     -- observed the heap being empty. As a result, we can safely spawn a thread
+     -- without the danger of spawning on for each time a socket is registered
+     -- in TimeWait.
+     case mbExpire of
+       Just future -> do _ <- forkIO $ do delayDiff now future
+                                          reapLoop
+                         return ()
 
-nextIss :: ListenTcb -> IO TcpSeqNum
-nextIss ListenTcb { .. } =
-  do now <- getCurrentTime
-     atomicModifyIORef' ltcbIss (genIss now)
-
-
-data Tcb = Tcb { tcbSndUna
-               , tcbSndNxt
-               , tcbSndWnd
-               , tcbSndUp
-               , tcbSndWl1
-               , tcbSndWl2
-               , tcbIss
-               , tcbRcvNxt
-               , tcbRcvWnd
-               , tcbRcvUp
-               , tcbIrs :: !(IORef TcpSeqNum)
-
-                 -- Port information
-               , tcbSourcePort
-               , tcbDestPort :: !TcpPort
-
-                 -- routing information
-               , tcbRouteInfo :: !(RouteInfo Addr)
-               , tcbDest      :: !Addr
-               }
-
-
-newTcb :: RouteInfo Addr -> TcpPort -> Addr -> TcpPort -> IO Tcb
-newTcb tcbRouteInfo tcbSourcePort tcbDest tcbDestPort =
-  do tcbSndUna <- newIORef 0
-     tcbSndNxt <- newIORef 0
-     tcbSndWnd <- newIORef 0
-     tcbSndUp  <- newIORef 0
-     tcbSndWl1 <- newIORef 0
-     tcbSndWl2 <- newIORef 0
-     tcbIss    <- newIORef 0
-     tcbRcvNxt <- newIORef 0
-     tcbRcvWnd <- newIORef 0
-     tcbRcvUp  <- newIORef 0
-     tcbIrs    <- newIORef 0
-     return Tcb { .. }
-
-
-incVar :: IORef TcpSeqNum -> TcpSeqNum -> IO ()
-incVar ref n = atomicModifyIORef' ref (\ c -> (c + n, ()))
-
-
--- | Lookup the Tcb for an established connection.
-findEstablished :: HasTcpState state
-                => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe TcbState)
-findEstablished state src srcPort dst dstPort =
-  HT.lookup (Conn src srcPort dst dstPort) (tcpSockets (view tcpState state))
-
-
--- | Find the Tcb for a listening connection.
-findListening :: HasTcpState state => state -> Addr -> TcpPort -> IO (Maybe TcbState)
-findListening state src srcPort =
-  do mb <- HT.lookup (Listening src srcPort) tcpSockets
-     case mb of
-       Just{}  -> return mb
-       Nothing -> HT.lookup (Listening (wildcardAddr src) srcPort) tcpSockets
+       Nothing -> return ()
 
   where
-  TcpState { .. } = view tcpState state
+
+  -- delay by at least half a second, until some point in the future.
+  delayDiff now future =
+    threadDelay (max 500000 (toUSeconds (diffUTCTime future now)))
+
+  -- The reap thread will reap TimeWait sockets according to their expiration
+  -- time, and then exit.
+  reapLoop =
+    do now      <- getCurrentTime
+       mbExpire <-
+         atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+             let heap' = dropExpired now heap
+              in (heap', nextEvent heap')
+
+       case mbExpire of
+         Just future -> do delayDiff now future
+                           reapLoop
+
+         Nothing     -> return ()
 
 
--- | Find a Tcb.
-findTcb :: HasTcpState state
-        => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO TcbState
-findTcb state src srcPort dst dstPort =
-  do mb <- findEstablished state src srcPort dst dstPort
+-- | Lookup a socket in the Listen state.
+lookupListening :: HasTcpState state
+                => state -> Addr -> TcpPort -> IO (Maybe ListenTcb)
+lookupListening state src port =
+  do mb <- HT.lookup (ListenKey src port) (tcpListen (view tcpState state))
      case mb of
-       Just tcb -> return tcb
-       Nothing  -> do mb' <- findListening state dst dstPort
-                      case mb' of
-                        Just tcb -> return tcb
-                        Nothing  -> return Closed
+       Just {} -> return mb
+       Nothing ->
+         HT.lookup (ListenKey (wildcardAddr src) port) (tcpListen (view tcpState state))
+
+
+-- | Lookup an active socket.
+lookupActive :: HasTcpState state
+             => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
+lookupActive state dst dstPort src srcPort =
+  HT.lookup (Key dst dstPort src srcPort) (tcpActive (view tcpState state))
+
+
+-- | Lookup a socket in the TimeWait state.
+lookupTimeWait :: HasTcpState state
+             => state -> Addr -> TcpPort -> Addr -> TcpPort
+             -> IO (Maybe TimeWaitTcb)
+lookupTimeWait state dst dstPort src srcPort =
+  do heap <- readIORef (tcpTimeWait (view tcpState state))
+     return (payload `fmap` F.find isConn heap)
+  where
+  isConn Entry { payload = TimeWaitTcb { .. } } =
+    and [ twDest               == dst
+        , twDestPort           == dstPort
+        , riSource twRouteInfo == src
+        , twSourcePort         == srcPort ]
+

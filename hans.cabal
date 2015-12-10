@@ -94,6 +94,7 @@ library
                                 Hans.Tcp.Output
                                 Hans.Tcp.Packet
                                 Hans.Tcp.State
+                                Hans.Tcp.Tcb
                                 Hans.Time
                                 Hans.Types
                                 Hans.Udp.Input

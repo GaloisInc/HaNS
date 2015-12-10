@@ -41,7 +41,7 @@ processTcp ns dev src dst bytes =
        Closed      -> respondClosed  ns dev src' dst' hdr (S.length payload)
        Listen ltcb -> respondListen  ns dev src' dst' hdr payload ltcb
        SynSent tcb -> respondSynSent ns dev src' dst' hdr payload tcb
-       _           -> escape
+       _           -> checkSequenceNumber ns dev src' dst' hdr payload state
 
 
 -- Page 64 ---------------------------------------------------------------------
@@ -93,7 +93,7 @@ respondClosed ns dev src dst hdr payloadLen
 respondListen :: NetworkStack
               -> Device -> Addr -> Addr -> TcpHeader -> S.ByteString
               -> ListenTcb -> Hans ()
-respondListen ns dev src dst hdr payload ltcb =
+respondListen ns dev src dst hdr _payload ltcb =
 --   first check for an RST
 --
 --     An incoming RST should be ignored.  Return.
@@ -151,8 +151,9 @@ respondListen ns dev src dst hdr payload ltcb =
 --    the foreign socket was not fully specified), then the
 --    unspecified fields should be filled in now.
 
+     -- XXX currently not queueing any control or text present
      when (view tcpSyn hdr) $
-       do mbRoute <- io (findNextHop ns (Just dev) (Just src) src)
+       do mbRoute <- io (findNextHop ns (Just dev) (Just dst) src)
           ri      <- case mbRoute of
                        Just ri -> return ri
                        _       -> escape
@@ -172,7 +173,7 @@ respondListen ns dev src dst hdr payload ltcb =
                              , tcpSeqNum     = iss
                              , tcpAckNum     = tcpSeqNum hdr + 1
                              }
-                  _ <- sendTcp ns ri dst hdr' L.empty
+                  _ <- sendTcp ns ri src hdr' L.empty
 
                   atomicWriteIORef (tcbSndNxt tcb) (iss + 1)
                   atomicWriteIORef (tcbSndUna tcb)  iss
@@ -199,7 +200,7 @@ respondListen ns dev src dst hdr payload ltcb =
 
 respondSynSent :: NetworkStack -> Device
                -> Addr -> Addr -> TcpHeader -> S.ByteString -> Tcb -> Hans ()
-respondSynSent ns dev src dst hdr payload tcb =
+respondSynSent ns _dev src dst hdr payload tcb =
 
 --   first check the ACK bit
 --
@@ -222,7 +223,7 @@ respondSynSent ns dev src dst hdr payload tcb =
                                               , tcpDestPort   = tcpSourcePort hdr
                                               , tcpSeqNum     = tcpAckNum hdr
                                               }
-                    _ <- sendTcp ns (tcbRouteInfo tcb) dst hdr' L.empty
+                    _ <- sendTcp ns (tcbRouteInfo tcb) src hdr' L.empty
                     return ()
 
                escape
@@ -240,8 +241,11 @@ respondSynSent ns dev src dst hdr payload tcb =
      when (view tcpRst hdr) $
        do sndUna <- io (readIORef (tcbSndUna tcb))
           unless (view tcpAck hdr && sndUna        <= tcpAckNum hdr
-                                  && tcpAckNum hdr <= sndNxt) $
-            do io (registerSocket ns undefined Closed)
+                                  && tcpAckNum hdr <= sndNxt)
+               -- XXX: this closes the socket in the tcp state, but doesn't
+               -- notify the user
+              (io (registerSocket ns (error "need key") Closed))
+          escape
 
 --   third check the security and precedence
 --
@@ -305,6 +309,115 @@ respondSynSent ns dev src dst hdr payload tcb =
 --     and send it.  If there are other controls or text in the
 --     segment, queue them for processing after the ESTABLISHED state
 --     has been reached, return.
---
+
+     -- XXX make sure to check the retransmit queue here
+     when (view tcpSyn hdr) $ io $
+       do let rcvNxt = tcpSeqNum hdr + 1
+          atomicWriteIORef (tcbRcvNxt tcb) rcvNxt
+          atomicWriteIORef (tcbIrs    tcb) (tcpSeqNum hdr)
+
+          let sndUna = tcpAckNum hdr
+          atomicWriteIORef (tcbSndUna tcb) sndUna
+          iss <- readIORef (tcbIss tcb)
+
+          if sndUna > iss
+             then
+               do registerSocket ns (error "need key") (Established tcb)
+                  -- XXX need to ack any queued data
+                  let hdr' = set tcpSyn True
+                           $ set tcpAck True
+                           $ emptyTcpHeader { tcpSourcePort = tcpDestPort hdr
+                                            , tcpDestPort   = tcpSourcePort hdr
+                                            , tcpSeqNum     = iss
+                                            , tcpAckNum     = rcvNxt }
+                  _ <- sendTcp ns (tcbRouteInfo tcb) src hdr' L.empty
+
+                  -- XXX what other controls should be considered here?
+                  unless (S.null payload) (step6UrgCheck ns src dst hdr tcb payload)
+
+             else
+               do registerSocket ns (error "need key") (SynReceived tcb)
+                  let hdr' = set tcpSyn True
+                           $ set tcpAck True
+                           $ emptyTcpHeader { tcpSourcePort = tcpDestPort hdr
+                                            , tcpDestPort   = tcpSourcePort hdr
+                                            , tcpSeqNum     = iss
+                                            , tcpAckNum     = rcvNxt }
+
+                  -- XXX need to queue additional control/text for processing
+                  -- after entering Established
+                  _ <- sendTcp ns (tcbRouteInfo tcb) src hdr' L.empty
+
+                  return ()
+
 --   fifth, if neither of the SYN or RST bits is set then drop the
 --   segment and return.
+     escape
+
+
+-- Page 68 ---------------------------------------------------------------------
+
+-- Otherwise,
+--
+--   first check sequence number
+--
+--     SYN-RECEIVED STATE
+--     ESTABLISHED STATE
+--     FIN-WAIT-1 STATE
+--     FIN-WAIT-2 STATE
+--     CLOSE-WAIT STATE
+--     CLOSING STATE
+--     LAST-ACK STATE
+--     TIME-WAIT STATE
+--
+--       Segments are processed in sequence.  Initial tests on arrival
+--       are used to discard old duplicates, but further processing is
+--       done in SEG.SEQ order.  If a segment's contents straddle the
+--       boundary between old and new, only the new parts should be
+--       processed.
+--
+--       There are four cases for the acceptability test for an incoming
+--       segment:
+--
+--       Segment Receive  Test
+--       Length  Window
+--       ------- -------  -------------------------------------------
+--
+--          0       0     SEG.SEQ = RCV.NXT
+--
+--          0      >0     RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND
+--
+--         >0       0     not acceptable
+--
+--         >0      >0     RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND
+--                     or RCV.NXT =< SEG.SEQ+SEG.LEN-1 < RCV.NXT+RCV.WND
+--
+--       If the RCV.WND is zero, no segments will be acceptable, but
+--       special allowance should be made to accept valid ACKs, URGs and
+--       RSTs.
+--
+--       If an incoming segment is not acceptable, an acknowledgment
+--       should be sent in reply (unless the RST bit is set, if so drop
+--       the segment and return):
+--
+--         <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
+--
+--       After sending the acknowledgment, drop the unacceptable segment
+--       and return.
+--
+--       In the following it is assumed that the segment is the idealized
+--       segment that begins at RCV.NXT and does not exceed the window.
+--       One could tailor actual segments to fit this assumption by
+--       trimming off any portions that lie outside the window (including
+--       SYN and FIN), and only processing further if the segment then
+--       begins at RCV.NXT.  Segments with higher begining sequence
+--       numbers may be held for later processing.
+
+checkSequenceNumber :: NetworkStack -> Device
+                    -> Addr -> Addr -> TcpHeader -> S.ByteString -> Tcb
+                    -> Hans ()
+
+
+-- -----------------------------------------------------------------------------
+
+step6UrgCheck = undefined

@@ -24,7 +24,7 @@ putNetworkProtocol  = putWord8
 
 -- | Information about how to reach a specific destination address (source and
 -- next-hop addresses, and device to use).
-data RouteInfo addr = RouteInfo { riSource
+data RouteInfo addr = RouteInfo { riSource :: !addr
                                   -- ^ The source address to use when sending
                                 , riNext :: !addr
                                   -- ^ The next-hop in the route
