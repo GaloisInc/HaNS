@@ -14,10 +14,11 @@ import           Hans.Tcp.Tcb
 import           Hans.Time
 
 import           Control.Concurrent (forkIO,threadDelay)
+import           Control.Monad (guard)
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
-import           Data.Time.Clock (getCurrentTime,addUTCTime,diffUTCTime)
+import           Data.Time.Clock (UTCTime,getCurrentTime,addUTCTime,diffUTCTime)
 import           GHC.Generics (Generic)
 
 
@@ -32,10 +33,12 @@ data Key = Key !Addr !TcpPort !Addr !TcpPort
 instance Hashable ListenKey
 instance Hashable Key
 
+type TimeWaitHeap = ExpireHeap TimeWaitTcb
+
 data TcpState =
   TcpState { tcpListen   :: {-# UNPACK #-} !(HT.HashTable ListenKey ListenTcb)
            , tcpActive   :: {-# UNPACK #-} !(HT.HashTable Key Tcb)
-           , tcpTimeWait :: {-# UNPACK #-} !(IORef (ExpireHeap TimeWaitTcb))
+           , tcpTimeWait :: {-# UNPACK #-} !(IORef TimeWaitHeap)
            }
 
 
@@ -77,29 +80,46 @@ registerActive state remote remotePort local localPort val =
 registerTimeWait :: (HasConfig state, HasTcpState state)
                  => state -> TimeWaitTcb -> IO ()
 registerTimeWait state tcb =
-  do let Config { .. } = view config state
-     now      <- getCurrentTime
-     mbExpire <-
+  let Config { .. } = view config state
+   in updateTimeWait state $ \ now heap ->
+          fst (expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap)
+
+-- | Reset the timer associated with a TimeWaitTcb.
+resetTimeWait :: (HasConfig state, HasTcpState state)
+              => state -> TimeWaitTcb -> IO ()
+resetTimeWait state tcb =
+  let Config { .. } = view config state
+   in updateTimeWait state $ \ now heap ->
+          fst $ expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb
+              $ filterHeap (/= tcb) heap
+
+-- | Modify the TimeWait heap, and spawn a reaping thread when necessary.
+updateTimeWait :: (HasConfig state, HasTcpState state)
+               => state -> (UTCTime -> TimeWaitHeap -> TimeWaitHeap) -> IO ()
+updateTimeWait state update =
+  do now    <- getCurrentTime
+     mbReap <-
        atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
-           let (heap', next) = expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap
+           let heap'  = update now heap
 
-               shouldReap | nullHeap heap = Just next
-                          | otherwise     = Nothing
+               -- Return a reaping action if:
+               --
+               -- 1. The original heap was empty, signifying that there was no
+               --    existing reaper running
+               --
+               -- 2. The user action added something to the heap
+               reaper = do guard (nullHeap heap)
+                           future <- nextEvent heap'
+                           return $ do delayDiff now future
+                                       reapLoop
 
-            in (heap', shouldReap)
+            in (heap', reaper)
 
-     -- mbExpire will only be Just in the case that the heap was previously
-     -- empty. Because we're only ever using atomicModifyIORef to mutate the
-     -- heap, this will only happen when this context is the only one that
-     -- observed the heap being empty. As a result, we can safely spawn a thread
-     -- without the danger of spawning on for each time a socket is registered
-     -- in TimeWait.
-     case mbExpire of
-       Just future -> do _ <- forkIO $ do delayDiff now future
-                                          reapLoop
+     case mbReap of
+       Just reaper -> do _ <- forkIO reaper
                          return ()
 
-       Nothing -> return ()
+       Nothing     -> return ()
 
   where
 
@@ -121,6 +141,8 @@ registerTimeWait state tcb =
                            reapLoop
 
          Nothing     -> return ()
+
+  
 
 
 -- | Lookup a socket in the Listen state.
@@ -163,4 +185,4 @@ lookupTimeWait state dst dstPort src srcPort =
 deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
 deleteTimeWait state tw =
   atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
-      (filterHeap (== tw) heap, ())
+      (filterHeap (/= tw) heap, ())

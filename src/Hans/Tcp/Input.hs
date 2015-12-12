@@ -19,7 +19,7 @@ import Hans.Types
 import           Control.Monad (unless,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (atomicWriteIORef,readIORef)
+import           Data.IORef (atomicModifyIORef',atomicWriteIORef,readIORef)
 
 
 -- | Process incoming tcp segments.
@@ -149,20 +149,46 @@ createChildTcb ns dev remote local hdr parent =
 
 handleTimeWait :: NetworkStack -> TcpHeader -> S.ByteString -> TimeWaitTcb -> Hans ()
 handleTimeWait ns hdr payload tcb =
-  do unless (sequenceNumberValid (twRcvNxt tcb) (twRcvWnd tcb) hdr payload) $
-       do sndNxt <- io (readIORef (twSndNxt tcb))
-          ack    <- io (mkAck sndNxt (twRcvNxt tcb) hdr)
-          _      <- io (sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty)
+     -- page 69
+  do rcvNxt <- io (readIORef (twRcvNxt tcb))
+     unless (sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload) $
+       do ack <- io (mkAck (twSndNxt tcb) rcvNxt hdr)
+          _   <- io (sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty)
           escape
 
+     -- page 70
      when (view tcpRst hdr) $
        do io (deleteTimeWait ns tcb)
           escape
 
+     -- page 71
      when (view tcpSyn hdr) $
        do rst <- io (mkRst hdr)
           _   <- io (sendTcp ns (twRouteInfo tcb) (twDest tcb) rst L.empty)
           io (deleteTimeWait ns tcb)
+          escape
+
+     -- page 73
+     when (not (view tcpAck hdr)) escape
+
+     -- page 74
+     -- ignore the URG bit
+
+     -- page 75
+     -- ignore the segment text
+
+     -- page 75/76
+     -- process the FIN bit
+     when (view tcpFin hdr) $
+       do rcvNxt' <- io $
+              atomicModifyIORef' (twRcvNxt tcb) $ \ i ->
+                  let i' = i + 1 + fromIntegral (S.length payload)
+                   in (i', i')
+
+          ack <- io (mkAck (twSndNxt tcb) rcvNxt' hdr)
+          _   <- io (sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty)
+
+          io (resetTimeWait ns tcb)
           escape
 
      escape

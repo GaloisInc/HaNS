@@ -118,9 +118,9 @@ newTcb tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
 -- TimeWait Sockets ------------------------------------------------------------
 
 data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
-                               , twSndNxt     :: !SeqNumVar     -- ^ SND.NXT
+                               , twSndNxt     :: !TcpSeqNum     -- ^ SND.NXT
 
-                               , twRcvNxt     :: !TcpSeqNum     -- ^ RCV.NXT
+                               , twRcvNxt     :: !SeqNumVar     -- ^ RCV.NXT
                                , twRcvWnd     :: !TcpSeqNum     -- ^ RCV.WND
 
                                  -- Port information
