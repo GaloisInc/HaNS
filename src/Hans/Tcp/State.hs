@@ -17,7 +17,7 @@ import           Control.Concurrent (forkIO,threadDelay)
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
-import           Data.Time.Clock (getCurrentTime,UTCTime,diffUTCTime,addUTCTime)
+import           Data.Time.Clock (getCurrentTime,addUTCTime,diffUTCTime)
 import           GHC.Generics (Generic)
 
 
@@ -65,8 +65,9 @@ registerListening state addr port val =
 -- | Register a new active socket.
 registerActive :: HasTcpState state
                => state -> Addr -> TcpPort -> Addr -> TcpPort -> Tcb -> IO ()
-registerActive state dst dstPort src srcPort val =
-  HT.insert (Key dst dstPort src srcPort) val (tcpActive (view tcpState state))
+registerActive state remote remotePort local localPort val =
+  HT.insert (Key remote remotePort local localPort) val
+            (tcpActive (view tcpState state))
 
 
 -- | Register a socket in the TimeWait state. If the heap was empty, fork off a
@@ -131,6 +132,7 @@ lookupListening state src port =
        Just {} -> return mb
        Nothing ->
          HT.lookup (ListenKey (wildcardAddr src) port) (tcpListen (view tcpState state))
+{-# INLINE lookupListening #-}
 
 
 -- | Lookup an active socket.
@@ -138,6 +140,7 @@ lookupActive :: HasTcpState state
              => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
 lookupActive state dst dstPort src srcPort =
   HT.lookup (Key dst dstPort src srcPort) (tcpActive (view tcpState state))
+{-# INLINE lookupActive #-}
 
 
 -- | Lookup a socket in the TimeWait state.
@@ -153,4 +156,11 @@ lookupTimeWait state dst dstPort src srcPort =
         , twDestPort           == dstPort
         , riSource twRouteInfo == src
         , twSourcePort         == srcPort ]
+{-# INLINE lookupTimeWait #-}
 
+
+-- | Delete an entry from the TimeWait heap.
+deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
+deleteTimeWait state tw =
+  atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+      (filterHeap (== tw) heap, ())

@@ -6,24 +6,17 @@ module Hans.Network (
     module Hans.Network.Types
   ) where
 
-import           Hans.Addr (NetworkAddr,toAddr)
+import           Hans.Addr (NetworkAddr)
 import           Hans.Addr.Types (Addr(..))
 import           Hans.Checksum (PartialChecksum)
-import           Hans.Device.Types (Device,HasDeviceConfig(..))
+import           Hans.Device.Types (Device)
 import qualified Hans.IP4        as IP4
-import qualified Hans.IP4.Packet as IP4
 import qualified Hans.IP4.State  as IP4
 import           Hans.Lens
 import           Hans.Network.Types
 import           Hans.Types
 
 import qualified Data.ByteString.Lazy as L
-import           Data.Typeable (Typeable)
-import           Data.Word (Word8)
-
-
-instance HasDeviceConfig (RouteInfo addr) where
-  deviceConfig = to riDev . deviceConfig
 
 
 -- | Interaction with routing and message delivery for a network layer.

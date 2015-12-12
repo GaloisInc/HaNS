@@ -22,6 +22,12 @@ emptyHeap :: ExpireHeap a
 emptyHeap  = H.empty
 {-# INLINE emptyHeap #-}
 
+filterHeap :: (a -> Bool) -> ExpireHeap a -> ExpireHeap a
+filterHeap p = H.filter p'
+  where
+  p' H.Entry { .. } = p payload
+{-# INLINE filterHeap #-}
+
 -- | The next time that something in the heap will expire, if the heap is
 -- non-empty.
 nextEvent :: ExpireHeap a -> Maybe UTCTime

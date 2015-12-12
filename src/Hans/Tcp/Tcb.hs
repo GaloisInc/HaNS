@@ -90,16 +90,16 @@ data Tcb = Tcb { tcbState :: !(IORef State)
                , tcbIrs    :: !SeqNumVar -- ^ IRS
 
                  -- Port information
-               , tcbSourcePort :: !TcpPort -- ^ Local port
-               , tcbDestPort   :: !TcpPort -- ^ Remote port
+               , tcbLocalPort  :: !TcpPort -- ^ Local port
+               , tcbRemotePort :: !TcpPort -- ^ Remote port
 
-                 -- routing information
+                 -- Routing information
                , tcbRouteInfo :: !(RouteInfo Addr) -- ^ Cached routing
-               , tcbDest      :: !Addr             -- ^ Remote host
+               , tcbRemote    :: !Addr             -- ^ Remote host
                }
 
 newTcb :: RouteInfo Addr -> TcpPort -> Addr -> TcpPort -> State -> IO Tcb
-newTcb tcbRouteInfo tcbSourcePort tcbDest tcbDestPort state =
+newTcb tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
   do tcbState  <- newIORef state
      tcbSndUna <- newIORef 0
      tcbSndNxt <- newIORef 0
@@ -118,8 +118,16 @@ newTcb tcbRouteInfo tcbSourcePort tcbDest tcbDestPort state =
 -- TimeWait Sockets ------------------------------------------------------------
 
 data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
+                               , twSndNxt     :: !SeqNumVar     -- ^ SND.NXT
+
+                               , twRcvNxt     :: !TcpSeqNum     -- ^ RCV.NXT
+                               , twRcvWnd     :: !TcpSeqNum     -- ^ RCV.WND
+
+                                 -- Port information
                                , twSourcePort :: !TcpPort
                                , twDestPort   :: !TcpPort
+
+                                 -- Routing information
                                , twRouteInfo  :: !(RouteInfo Addr)
                                , twDest       :: !Addr
-                               }
+                               } deriving (Eq)

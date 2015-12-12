@@ -8,8 +8,11 @@ module Hans.Tcp.Packet (
     -- * Header
     TcpHeader(..),
     TcpPort,
-    TcpSeqNum,
     emptyTcpHeader,
+
+    -- ** Sequence Numbers
+    TcpSeqNum, TcpAckNum,
+    withinWindow,
 
     -- ** Header Flags
     tcpNs, tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn,
@@ -33,14 +36,11 @@ module Hans.Tcp.Packet (
     tcpSegNextAckNum,
   ) where
 
-import Hans.Checksum (finalizeChecksum,extendChecksum)
 import Hans.Lens
-import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (replicateM,replicateM_,unless)
 import           Data.Bits ((.|.),(.&.),shiftL,shiftR)
 import qualified Data.ByteString as S
-import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import           Data.List (find)
 import           Data.Serialize.Get
@@ -70,17 +70,13 @@ putTcpSeqNum  = putWord32be
 getTcpSeqNum :: Get TcpSeqNum
 getTcpSeqNum  = getWord32be
 
--- | Checks that the second sequence number is withing the range defined by the
--- other two: a <= b <= c.
-seqNumInRange :: TcpSeqNum -> TcpSeqNum -> TcpSeqNum -> Bool
-seqNumInRange lo x hi
-
-  | lo < hi   = lo <= x && x <= hi
-
-    -- the bounds have wrapped
-  | otherwise = lo <= x || x <= hi
-
-
+-- | The conditional defined on page 24 of RFC793 for checking to see that a
+-- sequence number falls within the receive window.
+withinWindow :: TcpSeqNum -> TcpSeqNum -> TcpSeqNum -> Bool
+withinWindow l r
+  | l < r     = \x -> l <= x && x < r
+  | otherwise = \x -> l <= x || x < r
+{-# INLINE withinWindow #-}
 
 -- | An alias to TcpSeqNum, as these two are used in the same role.
 type TcpAckNum = TcpSeqNum

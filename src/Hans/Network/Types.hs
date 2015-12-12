@@ -3,7 +3,8 @@
 
 module Hans.Network.Types where
 
-import Hans.Device.Types (Device)
+import Hans.Device.Types (Device,HasDeviceConfig(..))
+import Hans.Lens
 
 import Data.Serialize (Get,Put,getWord8,putWord8)
 import Data.Word (Word8)
@@ -30,4 +31,7 @@ data RouteInfo addr = RouteInfo { riSource :: !addr
                                   -- ^ The next-hop in the route
                                 , riDev :: !Device
                                   -- ^ The device used for delivery
-                                } deriving (Functor)
+                                } deriving (Eq,Functor)
+
+instance HasDeviceConfig (RouteInfo addr) where
+  deviceConfig = to riDev . deviceConfig
