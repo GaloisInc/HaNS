@@ -147,8 +147,10 @@ handleSynSent ns dev hdr payload tcb =
 
           when (sndUna > iss) $
             do io (setState tcb Established)
-               -- XXX: increment the syn backlog if this socket is related to a
+
+               -- increment the syn backlog if this socket originated with a
                -- listening connection
+               when (isJust (tcbParent tcb)) (incrSynBacklog ns)
 
                -- XXX: notify the user
                sndNxt <- io (readIORef (tcbSndNxt tcb))
