@@ -27,7 +27,10 @@ import           GHC.Generics (Generic)
 data ListenKey = ListenKey !Addr !TcpPort
                  deriving (Show,Eq,Ord,Generic)
 
-data Key = Key !Addr !TcpPort !Addr !TcpPort
+data Key = Key !Addr    -- ^ Remote address
+               !TcpPort -- ^ Remote port
+               !Addr    -- ^ Local address
+               !TcpPort -- ^ Local port
            deriving (Show,Eq,Ord,Generic)
 
 instance Hashable ListenKey
@@ -36,10 +39,29 @@ instance Hashable Key
 type TimeWaitHeap = ExpireHeap TimeWaitTcb
 
 data TcpState =
-  TcpState { tcpListen   :: {-# UNPACK #-} !(HT.HashTable ListenKey ListenTcb)
-           , tcpActive   :: {-# UNPACK #-} !(HT.HashTable Key Tcb)
-           , tcpTimeWait :: {-# UNPACK #-} !(IORef TimeWaitHeap)
+  TcpState { tcpListen_     :: {-# UNPACK #-} !(HT.HashTable ListenKey ListenTcb)
+           , tcpActive_     :: {-# UNPACK #-} !(HT.HashTable Key Tcb)
+           , tcpTimeWait_   :: {-# UNPACK #-} !(IORef TimeWaitHeap)
+           , tcpSynBacklog_ :: {-# UNPACK #-} !(IORef Int)
+             -- ^ Decrements when a connection enters SynReceived or SynSent,
+             -- and increments back up once it's closed, or enters Established.
            }
+
+tcpListen :: HasTcpState state => Getting r state (HT.HashTable ListenKey ListenTcb)
+tcpListen  = tcpState . to tcpListen_
+{-# INLINE tcpListen #-}
+
+tcpActive :: HasTcpState state => Getting r state (HT.HashTable Key Tcb)
+tcpActive  = tcpState . to tcpActive_
+{-# INLINE tcpActive #-}
+
+tcpTimeWait :: HasTcpState state => Getting r state (IORef TimeWaitHeap)
+tcpTimeWait  = tcpState . to tcpTimeWait_
+{-# INLINE tcpTimeWait #-}
+
+tcpSynBacklog :: HasTcpState state => Getting r state (IORef Int)
+tcpSynBacklog  = tcpState . to tcpSynBacklog_
+{-# INLINE tcpSynBacklog #-}
 
 
 class HasTcpState state where
@@ -52,25 +74,41 @@ instance HasTcpState TcpState where
 
 newTcpState :: Config -> IO TcpState
 newTcpState Config { .. } =
-  do tcpListen   <- HT.newHashTable cfgTcpListenTableSize
-     tcpActive   <- HT.newHashTable cfgTcpActiveTableSize
-     tcpTimeWait <- newIORef emptyHeap
+  do tcpListen_     <- HT.newHashTable cfgTcpListenTableSize
+     tcpActive_     <- HT.newHashTable cfgTcpActiveTableSize
+     tcpTimeWait_   <- newIORef emptyHeap
+     tcpSynBacklog_ <- newIORef cfgTcpMaxSynBacklog
      return TcpState { .. }
+
+
+-- | Returns 'True' when there is space in the Syn backlog, and False if the
+-- connection should be rejected.
+decrSynBacklog :: HasTcpState state => state -> IO Bool
+decrSynBacklog state =
+  atomicModifyIORef' (view tcpSynBacklog state) $ \ backlog ->
+    if backlog > 0
+       then (backlog - 1, True)
+       else (backlog, False)
+
+-- | Yield back an entry in the Syn backlog.
+incrSynBacklog :: HasTcpState state => state -> IO ()
+incrSynBacklog state =
+  atomicModifyIORef' (view tcpSynBacklog state)
+                     (\ backlog -> (backlog + 1, ()))
 
 
 -- | Register a new listening socket.
 registerListening :: HasTcpState state
                   => state -> Addr -> TcpPort -> ListenTcb -> IO ()
 registerListening state addr port val =
-  HT.insert (ListenKey addr port) val (tcpListen (view tcpState state))
+  HT.insert (ListenKey addr port) val (view tcpListen state)
 
 
 -- | Register a new active socket.
 registerActive :: HasTcpState state
                => state -> Addr -> TcpPort -> Addr -> TcpPort -> Tcb -> IO ()
 registerActive state remote remotePort local localPort val =
-  HT.insert (Key remote remotePort local localPort) val
-            (tcpActive (view tcpState state))
+  HT.insert (Key remote remotePort local localPort) val (view tcpActive state)
 
 
 -- | Register a socket in the TimeWait state. If the heap was empty, fork off a
@@ -99,7 +137,7 @@ updateTimeWait :: (HasConfig state, HasTcpState state)
 updateTimeWait state update =
   do now    <- getCurrentTime
      mbReap <-
-       atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+       atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
            let heap'  = update now heap
 
                -- Return a reaping action if:
@@ -132,7 +170,7 @@ updateTimeWait state update =
   reapLoop =
     do now      <- getCurrentTime
        mbExpire <-
-         atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+         atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
              let heap' = dropExpired now heap
               in (heap', nextEvent heap')
 
@@ -149,11 +187,11 @@ updateTimeWait state update =
 lookupListening :: HasTcpState state
                 => state -> Addr -> TcpPort -> IO (Maybe ListenTcb)
 lookupListening state src port =
-  do mb <- HT.lookup (ListenKey src port) (tcpListen (view tcpState state))
+  do mb <- HT.lookup (ListenKey src port) (view tcpListen state)
      case mb of
        Just {} -> return mb
        Nothing ->
-         HT.lookup (ListenKey (wildcardAddr src) port) (tcpListen (view tcpState state))
+         HT.lookup (ListenKey (wildcardAddr src) port) (view tcpListen state)
 {-# INLINE lookupListening #-}
 
 
@@ -161,7 +199,7 @@ lookupListening state src port =
 lookupActive :: HasTcpState state
              => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
 lookupActive state dst dstPort src srcPort =
-  HT.lookup (Key dst dstPort src srcPort) (tcpActive (view tcpState state))
+  HT.lookup (Key dst dstPort src srcPort) (view tcpActive state)
 {-# INLINE lookupActive #-}
 
 
@@ -170,7 +208,7 @@ lookupTimeWait :: HasTcpState state
              => state -> Addr -> TcpPort -> Addr -> TcpPort
              -> IO (Maybe TimeWaitTcb)
 lookupTimeWait state dst dstPort src srcPort =
-  do heap <- readIORef (tcpTimeWait (view tcpState state))
+  do heap <- readIORef (view tcpTimeWait state)
      return (payload `fmap` F.find isConn heap)
   where
   isConn Entry { payload = TimeWaitTcb { .. } } =
@@ -181,8 +219,22 @@ lookupTimeWait state dst dstPort src srcPort =
 {-# INLINE lookupTimeWait #-}
 
 
+tcbKey :: Tcb -> Key
+tcbKey Tcb { .. } =
+  let RouteInfo { .. } = tcbRouteInfo
+   in Key tcbRemote tcbRemotePort riSource tcbLocalPort
+{-# INLINE tcbKey #-}
+
+
+-- | Delete an active connection from the tcp state.
+deleteActive :: HasTcpState state => state -> Tcb -> IO ()
+deleteActive state tcb =
+  HT.delete (tcbKey tcb) (view tcpActive state)
+{-# INLINE deleteActive #-}
+
+
 -- | Delete an entry from the TimeWait heap.
 deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
 deleteTimeWait state tw =
-  atomicModifyIORef' (tcpTimeWait (view tcpState state)) $ \ heap ->
+  atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
       (filterHeap (/= tw) heap, ())

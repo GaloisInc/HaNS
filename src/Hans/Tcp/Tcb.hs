@@ -1,18 +1,32 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Hans.Tcp.Tcb where
 
 import Hans.Addr (Addr)
+import Hans.Config (HasConfig(..),Config(..))
 import Hans.Lens
 import Hans.Network.Types (RouteInfo)
 import Hans.Tcp.Packet
 
+import Control.Monad (when)
 import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime)
-import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
+import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef,atomicWriteIORef)
+import MonadLib (BaseM(..))
 
 
 
 -- Socket State ----------------------------------------------------------------
+
+whenState :: (BaseM m IO, GetState tcb) => tcb -> State -> m () -> m ()
+whenState tcb state m =
+  do state' <- inBase (getState tcb)
+     when (state == state') m
+
+-- | The Tcb type is the only one that supports changing state.
+setState :: Tcb -> State -> IO ()
+setState Tcb { .. } = atomicWriteIORef tcbState
 
 getStateFrom :: GetState tcb => Getting tcb s tcb -> s -> IO State
 getStateFrom l s = getState (view l s)
@@ -72,7 +86,11 @@ nextIss ListenTcb { .. } =
 
 type SeqNumVar = IORef TcpSeqNum
 
-data Tcb = Tcb { tcbState :: !(IORef State)
+data Tcb = Tcb { tcbParent :: Maybe ListenTcb
+                 -- ^ Parent to notify if this tcb was generated from a socket
+                 -- in the LISTEN state
+
+               , tcbState :: !(IORef State)
 
                  -- Sender variables
                , tcbSndUna :: !SeqNumVar -- ^ SND.UNA
@@ -96,11 +114,19 @@ data Tcb = Tcb { tcbState :: !(IORef State)
                  -- Routing information
                , tcbRouteInfo :: !(RouteInfo Addr) -- ^ Cached routing
                , tcbRemote    :: !Addr             -- ^ Remote host
+
+                 -- Fragmentation information
+               , tcbMss :: !(IORef Int) -- ^ Maximum segment size
                }
 
-newTcb :: RouteInfo Addr -> TcpPort -> Addr -> TcpPort -> State -> IO Tcb
-newTcb tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
-  do tcbState  <- newIORef state
+newTcb :: HasConfig state
+       => state
+       -> Maybe ListenTcb
+       -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
+       -> State -> IO Tcb
+newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
+  do let Config { .. } = view config cxt
+     tcbState  <- newIORef state
      tcbSndUna <- newIORef 0
      tcbSndNxt <- newIORef 0
      tcbSndWnd <- newIORef 0
@@ -112,6 +138,7 @@ newTcb tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
      tcbRcvWnd <- newIORef 0
      tcbRcvUp  <- newIORef 0
      tcbIrs    <- newIORef 0
+     tcbMss    <- newIORef cfgTcpInitialMSS
      return Tcb { .. }
 
 

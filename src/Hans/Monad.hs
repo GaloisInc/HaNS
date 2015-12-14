@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 module Hans.Monad (
     Hans()
   , runHans, runHansOnce
@@ -11,6 +13,7 @@ import Hans.Device.Types (DeviceStats(),updateDropped,statRX)
 import qualified Data.ByteString as S
 import           Data.IORef (newIORef,writeIORef,readIORef)
 import           Data.Serialize.Get (runGet,runGetState,Get)
+import           MonadLib (BaseM(..))
 
 
 newtype Hans a = Hans { unHans :: IO () -> (a -> IO ()) -> IO () }
@@ -37,6 +40,10 @@ instance Monad Hans where
 
   {-# INLINE return #-}
   {-# INLINE (>>=)  #-}
+
+instance BaseM Hans IO where
+  inBase = io
+  {-# INLINE inBase #-}
 
 
 -- | Run only one iteration of the Hans monad.

@@ -46,6 +46,13 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
 
                      , cfgTcpTimeoutTimeWait :: !NominalDiffTime
                        -- ^ Time to remain in TimeWait, in seconds.
+
+                     , cfgTcpInitialMSS :: !Int
+                       -- ^ Initial MSS for tcp connections
+
+                     , cfgTcpMaxSynBacklog :: !Int
+                       -- ^ Maximum number of connections waiting for an
+                       -- acknowledgement.
                      }
 
 defaultConfig :: Config
@@ -61,6 +68,8 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpListenTableSize = 5
                         , cfgTcpActiveTableSize = 67
                         , cfgTcpTimeoutTimeWait = 60.0 -- one minute
+                        , cfgTcpInitialMSS      = 512
+                        , cfgTcpMaxSynBacklog   = 128
                         }
 
 class HasConfig cfg where
