@@ -20,6 +20,7 @@ import           Control.Monad (unless,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (atomicModifyIORef',atomicWriteIORef,readIORef)
+import           Data.Maybe (isJust)
 
 
 -- | Process incoming tcp segments.
@@ -35,10 +36,10 @@ processTcp ns dev src dst bytes =
 
      (hdr,payload) <- decode' (devStats dev) getTcpHeader bytes
 
-     let src' = toAddr src
-     let dst' = toAddr dst
+     let remote = toAddr src
+     let local  = toAddr dst
 
-     tryActive ns dev src' dst' hdr payload
+     tryActive ns dev remote local hdr payload
 
 -- | A single case for an incoming segment.
 type InputCase = NetworkStack -> Device -> Addr -> Addr -> TcpHeader
@@ -150,7 +151,7 @@ handleSynSent ns dev hdr payload tcb =
 
                -- increment the syn backlog if this socket originated with a
                -- listening connection
-               when (isJust (tcbParent tcb)) (incrSynBacklog ns)
+               when (isJust (tcbParent tcb)) (io (incrSynBacklog ns))
 
                -- XXX: notify the user
                sndNxt <- io (readIORef (tcbSndNxt tcb))
