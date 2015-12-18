@@ -2,6 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Hans.Tcp.Packet (
 
@@ -13,6 +14,7 @@ module Hans.Tcp.Packet (
     -- ** Sequence Numbers
     TcpSeqNum, TcpAckNum,
     withinWindow,
+    fromTcpSeqNum,
 
     -- ** Header Flags
     tcpNs, tcpCwr, tcpEce, tcpUrg, tcpAck, tcpPsh, tcpRst, tcpSyn,
@@ -42,6 +44,7 @@ import           Control.Monad (replicateM,replicateM_,unless)
 import           Data.Bits ((.|.),(.&.),shiftL,shiftR)
 import qualified Data.ByteString as S
 import qualified Data.Foldable as F
+import           Data.Int (Int32)
 import           Data.List (find)
 import           Data.Serialize.Get
                      (Get,getWord8,getWord16be,getWord32be,label,isolate
@@ -62,21 +65,39 @@ getTcpPort :: Get TcpPort
 getTcpPort  = getWord16be
 
 
-type TcpSeqNum = Word32
+newtype TcpSeqNum = TcpSeqNum Word32
+                    deriving (Num,Eq,Show)
+
+fromTcpSeqNum :: Num a => TcpSeqNum -> a
+fromTcpSeqNum (TcpSeqNum a) = fromIntegral a
+
+instance Ord TcpSeqNum where
+  compare (TcpSeqNum a) (TcpSeqNum b) =
+    compare (fromIntegral (a - b) :: Int32) 0
+
+  TcpSeqNum a <  TcpSeqNum b = (fromIntegral (a - b) :: Int32) <  0
+  TcpSeqNum a <= TcpSeqNum b = (fromIntegral (a - b) :: Int32) <= 0
+  TcpSeqNum a >  TcpSeqNum b = (fromIntegral (a - b) :: Int32) >  0
+  TcpSeqNum a >= TcpSeqNum b = (fromIntegral (a - b) :: Int32) >= 0
+
+  {-# INLINE compare #-}
+  {-# INLINE (<)     #-}
+  {-# INLINE (<=)    #-}
+  {-# INLINE (>)     #-}
+  {-# INLINE (>=)    #-}
+
+withinWindow :: TcpSeqNum -> TcpSeqNum -> TcpSeqNum -> Bool
+withinWindow l r = \x -> l <= x && x < r
+{-# INLINE withinWindow #-}
 
 putTcpSeqNum :: Putter TcpSeqNum
-putTcpSeqNum  = putWord32be
+putTcpSeqNum (TcpSeqNum w) = putWord32be w
 
 getTcpSeqNum :: Get TcpSeqNum
-getTcpSeqNum  = getWord32be
+getTcpSeqNum  =
+  do w <- getWord32be
+     return (TcpSeqNum w)
 
--- | The conditional defined on page 24 of RFC793 for checking to see that a
--- sequence number falls within the receive window.
-withinWindow :: TcpSeqNum -> TcpSeqNum -> TcpSeqNum -> Bool
-withinWindow l r
-  | l < r     = \x -> l <= x && x < r
-  | otherwise = \x -> l <= x || x < r
-{-# INLINE withinWindow #-}
 
 -- | An alias to TcpSeqNum, as these two are used in the same role.
 type TcpAckNum = TcpSeqNum

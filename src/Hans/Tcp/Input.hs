@@ -13,6 +13,7 @@ import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Network
 import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
+import Hans.Tcp.RecvWindow (sequenceNumberValid,SeqNumTest)
 import Hans.Tcp.Tcb
 import Hans.Types
 
@@ -81,13 +82,14 @@ handleActive :: NetworkStack
              -> Device -> TcpHeader -> S.ByteString -> Tcb -> Hans ()
 
 handleActive ns dev hdr payload tcb =
+     -- XXX it would be nice to add header prediction here
   do whenState tcb SynSent (handleSynSent ns dev hdr payload tcb)
 
      -- page 69
      -- check sequence numbers
      rcvNxt <- io (readIORef (tcbRcvNxt tcb))
      rcvWnd <- io (readIORef (tcbRcvWnd tcb))
-     unless (sequenceNumberValid rcvNxt rcvWnd hdr payload) $
+     unless (Invalid /= sequenceNumberValid rcvNxt rcvWnd hdr payload) $
        do unless (view tcpRst hdr) $ io $
             do sndNxt <- readIORef (tcbSndNxt tcb)
                ack    <- mkAck sndNxt rcvNxt hdr
@@ -100,6 +102,8 @@ handleActive ns dev hdr payload tcb =
      -- and starts at RCV.NXT. They suggest that you could achieve this by
      -- trimming the incoming segment to fit the window, and dropping/queueing
      -- packets that arrived out of order.
+
+     -- XXX what should we do with out of order packets?
 
 
 
@@ -245,7 +249,7 @@ handleTimeWait :: NetworkStack -> TcpHeader -> S.ByteString -> TimeWaitTcb -> Ha
 handleTimeWait ns hdr payload tcb =
      -- page 69
   do rcvNxt <- io (readIORef (twRcvNxt tcb))
-     unless (sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload) $
+     unless (Invalid /= sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload) $
        do unless (view tcpRst hdr) $ io $
             do ack <- mkAck (twSndNxt tcb) rcvNxt hdr
                _   <- sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty
@@ -303,31 +307,6 @@ handleClosed ns dev remote local hdr payload =
                                     else mkRstAck hdr payload
      _   <- io (routeTcp ns dev local remote rst L.empty)
      escape
-
-
--- Sequence Numbers ------------------------------------------------------------
-
--- | This is the check described on page 68 of RFC793, which checks that data
--- falls within the expected receive window.
-sequenceNumberValid :: TcpSeqNum  -- ^ RCV.NXT
-                    -> TcpSeqNum  -- ^ RCV.WND
-                    -> TcpHeader
-                    -> S.ByteString
-                    -> Bool
-
-sequenceNumberValid rcvNxt rcvWnd TcpHeader { .. } seg
-
-  | segLen == 0 = or [ rcvWnd == 0 && tcpSeqNum == rcvNxt
-                     , inWindow tcpSeqNum ]
-
-  | otherwise   = rcvWnd > 0
-               && or [ inWindow tcpSeqNum
-                     , inWindow (tcpSeqNum + fromIntegral segLen - 1) ]
-
-  where
-  segLen = S.length seg
-
-  inWindow = withinWindow rcvNxt (rcvNxt + rcvWnd)
 
 
 -- Utilities -------------------------------------------------------------------

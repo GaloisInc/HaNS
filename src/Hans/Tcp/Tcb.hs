@@ -67,8 +67,9 @@ data IssGen = IssGen { issLastSeqNum :: !TcpSeqNum
 genIss :: UTCTime -> IssGen -> (IssGen,TcpSeqNum)
 genIss now IssGen { .. } = (IssGen iss' now, iss')
   where
-  increment = round (diffUTCTime now issLastUpdate * 128000)
-  iss'      = issLastSeqNum + increment
+  increment :: Word32
+  increment  = round (diffUTCTime now issLastUpdate * 128000)
+  iss'       = issLastSeqNum + fromIntegral increment
 
 
 data ListenTcb = ListenTcb { lIss  :: !(IORef IssGen)
