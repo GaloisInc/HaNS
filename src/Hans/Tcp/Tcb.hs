@@ -13,6 +13,7 @@ import Hans.Tcp.Packet
 import Control.Monad (when)
 import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime)
 import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef,atomicWriteIORef)
+import Data.Word (Word32)
 import MonadLib (BaseM(..))
 
 

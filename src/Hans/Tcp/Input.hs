@@ -13,7 +13,7 @@ import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Network
 import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
-import Hans.Tcp.RecvWindow (sequenceNumberValid,SeqNumTest)
+import Hans.Tcp.RecvWindow (sequenceNumberValid)
 import Hans.Tcp.Tcb
 import Hans.Types
 
@@ -89,7 +89,7 @@ handleActive ns dev hdr payload tcb =
      -- check sequence numbers
      rcvNxt <- io (readIORef (tcbRcvNxt tcb))
      rcvWnd <- io (readIORef (tcbRcvWnd tcb))
-     unless (Invalid /= sequenceNumberValid rcvNxt rcvWnd hdr payload) $
+     unless (isJust (sequenceNumberValid rcvNxt rcvWnd hdr payload)) $
        do unless (view tcpRst hdr) $ io $
             do sndNxt <- readIORef (tcbSndNxt tcb)
                ack    <- mkAck sndNxt rcvNxt hdr
@@ -249,7 +249,7 @@ handleTimeWait :: NetworkStack -> TcpHeader -> S.ByteString -> TimeWaitTcb -> Ha
 handleTimeWait ns hdr payload tcb =
      -- page 69
   do rcvNxt <- io (readIORef (twRcvNxt tcb))
-     unless (Invalid /= sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload) $
+     unless (isJust (sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload)) $
        do unless (view tcpRst hdr) $ io $
             do ack <- mkAck (twSndNxt tcb) rcvNxt hdr
                _   <- sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty

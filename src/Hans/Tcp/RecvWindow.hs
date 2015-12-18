@@ -16,12 +16,9 @@ module Hans.Tcp.RecvWindow (
     sequenceNumberValid,
   ) where
 
-import           Hans.Lens
 import           Hans.Tcp.Packet
 
 import qualified Data.ByteString as S
-import           Data.List (insertBy)
-import           Data.Ord (comparing)
 
 
 -- Segments --------------------------------------------------------------------
@@ -246,9 +243,9 @@ sequenceNumberValid :: TcpSeqNum  -- ^ RCV.NXT
                     -> S.ByteString
                     -> Maybe Segment
 
-sequenceNumberValid rcvNxt rcvWnd hdr@TcpHeader { .. } seg
+sequenceNumberValid rcvNxt rcvWnd hdr@TcpHeader { .. } payload
 
-  | segLen == 0 =
+  | payloadLen == 0 =
     if rcvWnd == 0
        -- test 1
        then if tcpSeqNum == rcvNxt then Just (mkSegment hdr S.empty) else Nothing
@@ -269,14 +266,14 @@ sequenceNumberValid rcvNxt rcvWnd hdr@TcpHeader { .. } seg
 
   where
 
-  segLen = S.length seg
+  payloadLen = S.length payload
 
-  segEnd = tcpSeqNum + fromIntegral segLen - 1
+  segEnd = tcpSeqNum + fromIntegral payloadLen - 1
 
   hdr' = hdr { tcpSeqNum = rcvNxt }
 
   seg' = S.copy $ S.drop (fromTcpSeqNum (rcvNxt - tcpSeqNum))
-                $ S.take (fromTcpSeqNum (segEnd - rcvWnd)) seg
+                $ S.take (fromTcpSeqNum (segEnd - rcvWnd)) payload
 
   winEnd          = rcvNxt + rcvWnd
   seqNumInWindow  = rcvNxt <= tcpSeqNum && tcpSeqNum < winEnd

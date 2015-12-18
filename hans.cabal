@@ -93,6 +93,7 @@ library
                                 Hans.Tcp.Input
                                 Hans.Tcp.Output
                                 Hans.Tcp.Packet
+                                Hans.Tcp.RecvWindow
                                 Hans.Tcp.State
                                 Hans.Tcp.Tcb
                                 Hans.Time
