@@ -53,6 +53,9 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                      , cfgTcpMaxSynBacklog :: !Int
                        -- ^ Maximum number of connections waiting for an
                        -- acknowledgement.
+
+                     , cfgTcpInitialWindow :: !Int
+                       -- ^ Initial local window for tcp connections.
                      }
 
 defaultConfig :: Config
@@ -70,6 +73,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpTimeoutTimeWait = 60.0 -- one minute
                         , cfgTcpInitialMSS      = 512
                         , cfgTcpMaxSynBacklog   = 128
+                        , cfgTcpInitialWindow   = 14600
                         }
 
 class HasConfig cfg where

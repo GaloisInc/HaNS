@@ -8,6 +8,7 @@ module Hans.Tcp.RecvWindow (
     emptyRecvWindow,
     recvSegment,
     recvWindowSize,
+    recvWindowNext, setWindowNext,
 
     -- ** Segments
     Segment(..),
@@ -75,17 +76,6 @@ resolveOverlap a b =
 
 -- Receive Window --------------------------------------------------------------
 
-emptyRecvWindow :: TcpSeqNum -> Int -> RecvWindow
-emptyRecvWindow rwRcvNxt maxWin =
-  RecvWindow { rwSegments = []
-             , rwRcvWnd   = rwRcvNxt + rwMax
-             , .. }
-  where
-  rwMax = fromIntegral maxWin
-
-recvWindowSize :: RecvWindow -> TcpSeqNum
-recvWindowSize RecvWindow { .. } = rwRcvWnd
-
 -- | The receive window.
 --
 -- INVARIANTS:
@@ -101,7 +91,7 @@ data RecvWindow = RecvWindow { rwSegments :: ![Segment]
                                -- ^ Left-edge of the receive window
 
                              , rwRcvWnd :: !TcpSeqNum
-                               
+
                                -- ^ Current size of the receive window
 
                              , rwMax :: !TcpSeqNum
@@ -109,18 +99,42 @@ data RecvWindow = RecvWindow { rwSegments :: ![Segment]
 
                              } deriving (Show)
 
--- | Check an incoming segment, and queue it in the receive window.
+emptyRecvWindow :: TcpSeqNum -> Int -> RecvWindow
+emptyRecvWindow rwRcvNxt maxWin =
+  RecvWindow { rwSegments = []
+             , rwRcvWnd   = rwRcvNxt + rwMax
+             , .. }
+  where
+  rwMax = fromIntegral maxWin
+
+recvWindowSize :: RecvWindow -> TcpSeqNum
+recvWindowSize RecvWindow { .. } = rwRcvWnd
+
+recvWindowNext :: RecvWindow -> TcpSeqNum
+recvWindowNext RecvWindow { .. } = rwRcvNxt
+
+-- | Only sets RCV.NXT when the segment queue is empty. Returns 'True' when the
+-- value has been successfully changed.
+setWindowNext :: TcpSeqNum -> RecvWindow -> (RecvWindow,Bool)
+setWindowNext rcvNxt rw
+  | null (rwSegments rw) = (rw { rwRcvNxt = rcvNxt }, True)
+  | otherwise            = (rw, False)
+
+-- | Check an incoming segment, and queue it in the receive window. The boolean
+-- parameter on the second element of the pair is True when the segment received
+-- was valid.
 recvSegment :: TcpHeader -> S.ByteString -> RecvWindow
-            -> (RecvWindow, [Segment])
+            -> (RecvWindow, (Bool,[Segment]))
 
 recvSegment hdr body rw
 
   | Just seg <- sequenceNumberValid (rwRcvNxt rw) (rwRcvWnd rw) hdr body =
-    addSegment seg rw
+    let (rw',segs) = addSegment seg rw
+     in (rw',(True,segs))
 
     -- drop the invalid frame
   | otherwise =
-    (rw, [])
+    (rw, (False,[]))
 
 
 -- | Add a validated segment to the receive window, and return 

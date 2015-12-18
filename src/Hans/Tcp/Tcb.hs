@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Hans.Tcp.Tcb where
 
@@ -9,6 +10,8 @@ import Hans.Config (HasConfig(..),Config(..))
 import Hans.Lens
 import Hans.Network.Types (RouteInfo)
 import Hans.Tcp.Packet
+import Hans.Tcp.RecvWindow
+           (RecvWindow,emptyRecvWindow,recvWindowNext,recvWindowSize)
 
 import Control.Monad (when)
 import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime)
@@ -104,10 +107,11 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbIss    :: !SeqNumVar -- ^ ISS
 
                  -- Receive variables
-               , tcbRcvNxt :: !SeqNumVar -- ^ RCV.NXT
-               , tcbRcvWnd :: !SeqNumVar -- ^ RCV.WND
                , tcbRcvUp  :: !SeqNumVar -- ^ RCV.UP
                , tcbIrs    :: !SeqNumVar -- ^ IRS
+
+               , tcbRecvWindow :: !(IORef RecvWindow)
+                 -- ^
 
                  -- Port information
                , tcbLocalPort  :: !TcpPort -- ^ Local port
@@ -125,8 +129,9 @@ newTcb :: HasConfig state
        => state
        -> Maybe ListenTcb
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
+       -> TcpSeqNum -- ^ Initial value of RCV.NXT
        -> State -> IO Tcb
-newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
+newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort rcvNxt state =
   do let Config { .. } = view config cxt
      tcbState  <- newIORef state
      tcbSndUna <- newIORef 0
@@ -136,8 +141,7 @@ newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
      tcbIss    <- newIORef 0
-     tcbRcvNxt <- newIORef 0
-     tcbRcvWnd <- newIORef 0
+     tcbRecvWindow <- newIORef (emptyRecvWindow rcvNxt (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0
      tcbIrs    <- newIORef 0
      tcbMss    <- newIORef cfgTcpInitialMSS
@@ -160,3 +164,37 @@ data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
                                , twRouteInfo  :: !(RouteInfo Addr)
                                , twDest       :: !Addr
                                } deriving (Eq)
+
+
+-- Sockets that Receive --------------------------------------------------------
+
+getRcvNxt :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
+getRcvNxt sock =
+  do (rcvNxt,_) <- getRecvWindow sock
+     return rcvNxt
+{-# INLINE getRcvNxt #-}
+
+getRcvWnd :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
+getRcvWnd sock =
+  do (_,rcvWnd) <- getRecvWindow sock
+     return rcvWnd
+{-# INLINE getRcvWnd #-}
+
+class CanReceive sock where
+  getRecvWindow :: BaseM io IO => sock -> io (TcpSeqNum,TcpSeqNum)
+
+instance CanReceive (IORef RecvWindow) where
+  getRecvWindow ref = inBase $
+    do rw <- readIORef ref
+       return (recvWindowNext rw, recvWindowSize rw)
+  {-# INLINE getRecvWindow #-}
+
+instance CanReceive Tcb where
+  getRecvWindow Tcb { .. } = getRecvWindow tcbRecvWindow
+  {-# INLINE getRecvWindow #-}
+
+instance CanReceive TimeWaitTcb where
+  getRecvWindow TimeWaitTcb { .. } = inBase $
+    do rcvNxt <- readIORef twRcvNxt
+       return (rcvNxt,twRcvWnd)
+  {-# INLINE getRecvWindow #-}

@@ -13,7 +13,8 @@ import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Network
 import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
-import Hans.Tcp.RecvWindow (sequenceNumberValid)
+import Hans.Tcp.RecvWindow
+           (sequenceNumberValid,recvSegment,Segment(..),setWindowNext)
 import Hans.Tcp.Tcb
 import Hans.Types
 
@@ -87,25 +88,21 @@ handleActive ns dev hdr payload tcb =
 
      -- page 69
      -- check sequence numbers
-     rcvNxt <- io (readIORef (tcbRcvNxt tcb))
-     rcvWnd <- io (readIORef (tcbRcvWnd tcb))
-     unless (isJust (sequenceNumberValid rcvNxt rcvWnd hdr payload)) $
+     (valid,segs) <- io (atomicModifyIORef' (tcbRecvWindow tcb) (recvSegment hdr payload))
+     when (not valid) $
        do unless (view tcpRst hdr) $ io $
-            do sndNxt <- readIORef (tcbSndNxt tcb)
-               ack    <- mkAck sndNxt rcvNxt hdr
-               _      <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
+            do (rcvNxt,_) <- getRecvWindow tcb
+               sndNxt     <- readIORef (tcbSndNxt tcb)
+               ack        <- mkAck sndNxt rcvNxt hdr
+               _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
                return ()
 
           escape
 
-     -- At this point, RFC793 assumes that the segment fits within the window,
-     -- and starts at RCV.NXT. They suggest that you could achieve this by
-     -- trimming the incoming segment to fit the window, and dropping/queueing
-     -- packets that arrived out of order.
+     -- the segment was queued
+     when (null segs) escape
 
-     -- XXX what should we do with out of order packets?
-
-
+     -- at this point, the list of segments is contiguous, and starts at RCV.NXT
 
 
 -- Half-open Connections -------------------------------------------------------
@@ -140,7 +137,15 @@ handleSynSent ns dev hdr payload tcb =
      -- page 67/68
      when (view tcpSyn hdr) $
        do let rcvNxt = tcpSeqNum hdr + 1
-          io (atomicWriteIORef (tcbRcvNxt tcb) rcvNxt)
+
+          res <- io (atomicModifyIORef' (tcbRecvWindow tcb) (setWindowNext rcvNxt))
+          -- should never happen, but if a segment was queued in the receive
+          -- window, mucking about with RCV.NXT will cause processing to abort
+          --
+          -- XXX: maybe there's a better way to encode advancing RCV.NXT over
+          -- the SYN?
+          unless res escape
+
           io (atomicWriteIORef (tcbIrs    tcb) (tcpSeqNum hdr))
 
           sndUna <- io $
@@ -227,10 +232,9 @@ createChildTcb ns dev remote local hdr parent =
 
      -- construct a new tcb, and initialize it as specified on (page 65)
      io $ do child <- newTcb ns (Just parent) ri (tcpDestPort hdr) remote
-                          (tcpSourcePort hdr) SynReceived
+                          (tcpSourcePort hdr) (tcpSeqNum hdr + 1) SynReceived
              iss   <- nextIss parent
 
-             atomicWriteIORef (tcbRcvNxt child) (tcpSeqNum hdr + 1)
              atomicWriteIORef (tcbIrs    child) (tcpSeqNum hdr    )
              atomicWriteIORef (tcbIss    child)  iss
 
@@ -339,7 +343,7 @@ mkRstAck hdr @ TcpHeader { .. } payload =
 mkSynAck :: Tcb -> TcpHeader -> IO TcpHeader
 mkSynAck Tcb { .. } TcpHeader { .. } =
   do iss <- readIORef tcbIss
-     ack <- readIORef tcbRcvNxt
+     ack <- getRcvNxt tcbRecvWindow
 
      return $ set tcpSyn True
             $ set tcpAck True
