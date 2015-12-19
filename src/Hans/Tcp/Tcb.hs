@@ -20,6 +20,35 @@ import Data.Word (Word32)
 import MonadLib (BaseM(..))
 
 
+-- Timers ----------------------------------------------------------------------
+
+type SlowTicks = Int
+
+data TcpTimers = TcpTimers { ttDelayedAck :: !Bool
+
+                             -- MSL
+                           , tt2MSL :: !SlowTicks
+
+                             -- retransmit timer
+                           , ttRTO    :: !SlowTicks
+                           , ttSRTT   :: !SlowTicks
+                           , ttRTTVar :: !SlowTicks
+
+                             -- idle timer
+                           , ttMaxIdle :: !SlowTicks
+                           , ttIdle    :: !SlowTicks
+                           }
+
+emptyTcpTimers :: TcpTimers
+emptyTcpTimers  = TcpTimers { ttDelayedAck = False
+                            , tt2MSL       = 0
+                            , ttRTO        = 2           -- one second
+                            , ttSRTT       = 0
+                            , ttRTTVar     = 0
+                            , ttMaxIdle    = 10 * 60 * 2 -- 10 minutes
+                            , ttIdle       = 0
+                            }
+
 
 -- Socket State ----------------------------------------------------------------
 
@@ -105,13 +134,14 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbSndWl1 :: !SeqNumVar -- ^ SND.WL1
                , tcbSndWl2 :: !SeqNumVar -- ^ SND.WL2
                , tcbIss    :: !SeqNumVar -- ^ ISS
+               , tcbSendWindow :: !(IORef SendWindow)
 
                  -- Receive variables
                , tcbRcvUp  :: !SeqNumVar -- ^ RCV.UP
                , tcbIrs    :: !SeqNumVar -- ^ IRS
 
+               , tcbNeedsDelayedAck :: !(IORef Bool)
                , tcbRecvWindow :: !(IORef RecvWindow)
-                 -- ^
 
                  -- Port information
                , tcbLocalPort  :: !TcpPort -- ^ Local port
@@ -123,6 +153,9 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
 
                  -- Fragmentation information
                , tcbMss :: !(IORef Int) -- ^ Maximum segment size
+
+                 -- Timers
+               , tcbTimers :: !(IORef TcpTimers)
                }
 
 newTcb :: HasConfig state
@@ -140,11 +173,14 @@ newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort rcvNxt st
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
+     tcbSendWindow <- newIORef emptySendWindow
      tcbIss    <- newIORef 0
      tcbRecvWindow <- newIORef (emptyRecvWindow rcvNxt (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0
+     tcbNeedsDelayedAck <- newIORef False
      tcbIrs    <- newIORef 0
      tcbMss    <- newIORef cfgTcpInitialMSS
+     tcbTimers <- newIORef emptyTcpTimers
      return Tcb { .. }
 
 

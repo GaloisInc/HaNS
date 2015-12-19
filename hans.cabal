@@ -91,11 +91,13 @@ library
                                 Hans.Serialize
                                 Hans.Socket
                                 Hans.Tcp.Input
+                                Hans.Tcp.Message
                                 Hans.Tcp.Output
                                 Hans.Tcp.Packet
                                 Hans.Tcp.RecvWindow
                                 Hans.Tcp.State
                                 Hans.Tcp.Tcb
+                                Hans.Tcp.Timers
                                 Hans.Time
                                 Hans.Types
                                 Hans.Udp.Input

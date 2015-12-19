@@ -2,7 +2,8 @@
 
 module Hans.Time (
     module Hans.Time,
-    H.Entry(..)
+    H.Entry(..),
+    H.toUnsortedList,
   ) where
 
 import qualified Data.Heap as H
@@ -22,11 +23,21 @@ emptyHeap :: ExpireHeap a
 emptyHeap  = H.empty
 {-# INLINE emptyHeap #-}
 
+fromListHeap :: [Expires a] -> ExpireHeap a
+fromListHeap  = H.fromList
+{-# INLINE fromListHeap #-}
+
 filterHeap :: (a -> Bool) -> ExpireHeap a -> ExpireHeap a
 filterHeap p = H.filter p'
   where
   p' H.Entry { .. } = p payload
 {-# INLINE filterHeap #-}
+
+partitionHeap :: (a -> Bool) -> ExpireHeap a -> (ExpireHeap a,ExpireHeap a)
+partitionHeap p = H.partition p'
+  where
+  p' H.Entry { .. } = p payload
+{-# INLINE partitionHeap #-}
 
 -- | The next time that something in the heap will expire, if the heap is
 -- non-empty.

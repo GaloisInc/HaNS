@@ -250,3 +250,23 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
        KnownRoute {} ->
          throwSE dst AlreadyConnected
 {-# INLINE sendto #-}
+
+
+-- TCP Sockets -----------------------------------------------------------------
+
+data TcpSocket addr = TcpSocket { tcpNS :: !NetworkStack
+                                }
+
+instance Socket TcpSocket where
+
+  sOpen ns cfg mbDev src mbSrcPort = undefined
+
+  sClose sock = undefined
+
+  sConnect sock dst dstPort = undefined
+
+  sWrite sock bytes = undefined
+
+  sRead sock len = undefined
+
+  sTryRead ns len = undefined

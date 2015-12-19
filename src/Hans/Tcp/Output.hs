@@ -14,13 +14,29 @@ import Hans.Device.Types (Device(..),ChecksumOffload(..),txOffload)
 import Hans.Lens (view)
 import Hans.Network
 import Hans.Serialize (runPutPacket)
+import Hans.Tcp.Message (mkAck)
 import Hans.Tcp.Packet (TcpHeader,putTcpHeader)
+import Hans.Tcp.Tcb
 import Hans.Types
 
 import qualified Data.ByteString.Lazy as L
 import           Data.Serialize.Put (putWord16be)
 import           Data.Word (Word32)
 
+
+-- Sending with a TCB ----------------------------------------------------------
+
+-- | Send a single ACK to the other side of this connection.
+sendDelayedAck :: NetworkStack -> Tcb -> IO ()
+sendDelayedAck ns Tcb { .. } =
+  do seqNum <- undefined
+     ackNum <- undefined
+     ack    <- mkAck seqNum ackNum tcbLocalPort tcbRemotePort
+     _      <- sendTcp ns tcbRouteInfo tcbRemote ack L.empty
+     return ()
+
+
+-- Primitive Send --------------------------------------------------------------
 
 -- | Send outgoing tcp segments, with a route calculation.
 --

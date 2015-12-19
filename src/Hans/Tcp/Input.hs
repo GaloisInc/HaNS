@@ -11,6 +11,7 @@ import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Lens (view,set)
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Network
+import Hans.Tcp.Message
 import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
@@ -93,7 +94,7 @@ handleActive ns dev hdr payload tcb =
        do unless (view tcpRst hdr) $ io $
             do (rcvNxt,_) <- getRecvWindow tcb
                sndNxt     <- readIORef (tcbSndNxt tcb)
-               ack        <- mkAck sndNxt rcvNxt hdr
+               ack        <- mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
                _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
                return ()
 
@@ -102,7 +103,9 @@ handleActive ns dev hdr payload tcb =
      -- the segment was queued
      when (null segs) escape
 
-     -- at this point, the list of segments is contiguous, and starts at RCV.NXT
+     -- At this point, the list of segments is contiguous, and starts at the old
+     -- value of RCV.NXT. RCV.NXT has been advanced to point at the end of the
+     -- segment list.
 
 
 -- Half-open Connections -------------------------------------------------------
@@ -164,7 +167,7 @@ handleSynSent ns dev hdr payload tcb =
 
                -- XXX: notify the user
                sndNxt <- io (readIORef (tcbSndNxt tcb))
-               ack    <- io (mkAck sndNxt rcvNxt hdr)
+               ack    <- io (mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr))
 
                -- XXX: include any queued data/controls
                _      <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty)
@@ -255,7 +258,7 @@ handleTimeWait ns hdr payload tcb =
   do rcvNxt <- io (readIORef (twRcvNxt tcb))
      unless (isJust (sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload)) $
        do unless (view tcpRst hdr) $ io $
-            do ack <- mkAck (twSndNxt tcb) rcvNxt hdr
+            do ack <- mkAck (twSndNxt tcb) rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
                _   <- sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty
                return ()
           escape
@@ -289,7 +292,7 @@ handleTimeWait ns hdr payload tcb =
                   let i' = i + 1 + fromIntegral (S.length payload)
                    in (i', i')
 
-          ack <- io (mkAck (twSndNxt tcb) rcvNxt' hdr)
+          ack <- io (mkAck (twSndNxt tcb) rcvNxt' (tcpDestPort hdr) (tcpSourcePort hdr))
           _   <- io (sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty)
 
           io (resetTimeWait ns tcb)
@@ -311,60 +314,3 @@ handleClosed ns dev remote local hdr payload =
                                     else mkRstAck hdr payload
      _   <- io (routeTcp ns dev local remote rst L.empty)
      escape
-
-
--- Utilities -------------------------------------------------------------------
-
--- | @<SEQ=SEG.ACK><CTL=RST>@
-mkRst :: TcpHeader -> IO TcpHeader
-mkRst TcpHeader { .. } =
-     return $ set tcpRst True
-            $ emptyTcpHeader { tcpSourcePort = tcpDestPort
-                             , tcpDestPort   = tcpSourcePort
-                             , tcpSeqNum     = tcpAckNum
-                             }
-{-# INLINE mkRst #-}
-
-
--- | @<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>@
-mkRstAck :: TcpHeader -> S.ByteString -> IO TcpHeader
-mkRstAck hdr @ TcpHeader { .. } payload =
-     return $ set tcpRst True
-            $ set tcpAck True
-            $ emptyTcpHeader { tcpSourcePort = tcpDestPort
-                             , tcpDestPort   = tcpSourcePort
-                             , tcpSeqNum     = 0
-                             , tcpAckNum     = tcpSegNextAckNum hdr (S.length payload)
-                             }
-{-# INLINE mkRstAck #-}
-
-
--- | @<SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>@
-mkSynAck :: Tcb -> TcpHeader -> IO TcpHeader
-mkSynAck Tcb { .. } TcpHeader { .. } =
-  do iss <- readIORef tcbIss
-     ack <- getRcvNxt tcbRecvWindow
-
-     return $ set tcpSyn True
-            $ set tcpAck True
-            $ emptyTcpHeader { tcpSourcePort = tcpDestPort
-                             , tcpDestPort   = tcpSourcePort
-                             , tcpSeqNum     = iss
-                             , tcpAckNum     = ack
-                             }
-{-# INLINE mkSynAck #-}
-
-
-mkAck :: TcpSeqNum    -- ^ SEG.SEQ
-      -> TcpSeqNum    -- ^ SEG.ACK
-      -> TcpHeader
-      -> IO TcpHeader
-mkAck segSeq segAck TcpHeader { .. } =
-     return $ set tcpAck True
-            $ emptyTcpHeader { tcpSourcePort = tcpDestPort
-                             , tcpDestPort   = tcpSourcePort
-                             , tcpSeqNum     = segSeq
-                             , tcpAckNum     = segAck
-                             }
-{-# INLINE mkAck #-}
-

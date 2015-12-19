@@ -56,6 +56,9 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
 
                      , cfgTcpInitialWindow :: !Int
                        -- ^ Initial local window for tcp connections.
+
+                     , cfgTcpMSL :: !Int
+                       -- ^ Maximum segment lifetime
                      }
 
 defaultConfig :: Config
@@ -74,6 +77,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpInitialMSS      = 512
                         , cfgTcpMaxSynBacklog   = 128
                         , cfgTcpInitialWindow   = 14600
+                        , cfgTcpMSL             = 60 -- one minute
                         }
 
 class HasConfig cfg where

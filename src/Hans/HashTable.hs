@@ -6,7 +6,7 @@ module Hans.HashTable (
     insert,
     lookup,
     delete,
-    mapHashTable,
+    mapHashTable, mapHashTableM_,
     filterHashTable,
     alter,
     keys,
@@ -53,6 +53,18 @@ filterHashTable :: (Eq k, Hashable k)
                 => (k -> a -> Bool) -> HashTable k a -> IO ()
 filterHashTable p = mapBuckets (filter (uncurry p))
 {-# INLINE filterHashTable #-}
+
+-- | Monadic mapping over the values of a hash table.
+mapHashTableM_ :: (Eq k, Hashable k)
+               => (k -> a -> IO ()) -> HashTable k a -> IO ()
+mapHashTableM_ f HashTable { .. } = go 0
+  where
+  go ix | ix < htSize = do bs <- readIORef (htBuckets ! ix)
+                           mapM_ (\(k,a) -> f k a) bs
+                           go (ix + 1)
+
+        | otherwise   = return ()
+{-# INLINE mapHashTableM_ #-}
 
 mapHashTable :: (Eq k, Hashable k) => (k -> a -> a) -> HashTable k a -> IO ()
 mapHashTable f = mapBuckets (map f')
