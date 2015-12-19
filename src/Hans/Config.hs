@@ -11,18 +11,18 @@ import Data.Word (Word8)
 
 
 -- | General network stack configuration.
-data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
+data Config = Config { cfgInputQueueSize :: !Int
 
-                     , cfgArpTableSize :: {-# UNPACK #-} !Int
+                     , cfgArpTableSize :: !Int
                        -- ^ Best to pick a prime number.
 
                      , cfgArpTableLifetime :: !NominalDiffTime
 
-                     , cfgArpRetry :: {-# UNPACK #-} !Int
+                     , cfgArpRetry :: !Int
                        -- ^ Number of times to retry an arp request before
                        -- failing
 
-                     , cfgArpRetryDelay :: {-# UNPACK #-} !Int
+                     , cfgArpRetryDelay :: !Int
                        -- ^ The amount of time to wait between arp request
                        -- retransmission.
 
@@ -30,9 +30,12 @@ data Config = Config { cfgInputQueueSize :: {-# UNPACK #-} !Int
                        -- ^ Number of seconds to wait before expiring a
                        -- partially reassembled IP4 packet
 
-                     , cfgIP4InitialTTL :: {-# UNPACK #-} !Word8
+                     , cfgIP4InitialTTL :: !Word8
 
-                     , cfgUdpSocketTableSize :: {-# UNPACK #-} !Int
+                     , cfgIP4MaxFragTableEntries :: !Int
+                       -- ^ Maximum packets being reassembled at any time.
+
+                     , cfgUdpSocketTableSize :: !Int
                        -- ^ Number of buckets in the udp socket table
 
                      , cfgDnsResolveTimeout :: !Int
@@ -69,6 +72,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgArpRetryDelay      = 2000 -- 2 seconds
                         , cfgIP4FragTimeout     = 30
                         , cfgIP4InitialTTL      = 128
+                        , cfgIP4MaxFragTableEntries= 32
                         , cfgUdpSocketTableSize = 31
                         , cfgDnsResolveTimeout  = 5000000
                         , cfgTcpListenTableSize = 5

@@ -143,7 +143,6 @@ dhcpRequest cfg dev sock offer =
 
        Nothing  -> return Nothing
 
-       -- XXX apply all the routing information
        Just ack ->
          do lease <- handleAck (view networkStack sock) cfg dev offer ack
             return (Just lease)

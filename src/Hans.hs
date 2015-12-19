@@ -43,6 +43,7 @@ import           Hans.Network
 import           Hans.Types
 import qualified Hans.Udp.State as Udp
 import qualified Hans.Tcp.State as Tcp
+import qualified Hans.Tcp.Timers as Tcp
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.BoundedChan (newBoundedChan)
@@ -60,6 +61,7 @@ newNetworkStack nsConfig =
      nsNameServers4 <- newIORef []
 
      rec nsIP4Responder <- forkIO (IP4.responder ns)
+         nsTcpTimers    <- forkIO (Tcp.tcpTimers ns)
          let ns = NetworkStack { .. }
 
      registerLoopback ns

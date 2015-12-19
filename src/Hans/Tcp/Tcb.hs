@@ -12,6 +12,7 @@ import Hans.Network.Types (RouteInfo)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
            (RecvWindow,emptyRecvWindow,recvWindowNext,recvWindowSize)
+import Hans.Tcp.SendWindow (SendWindow,emptySendWindow)
 
 import Control.Monad (when)
 import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime)
@@ -182,6 +183,11 @@ newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort rcvNxt st
      tcbMss    <- newIORef cfgTcpInitialMSS
      tcbTimers <- newIORef emptyTcpTimers
      return Tcb { .. }
+
+
+-- | Cleanup the Tcb.
+finalizeTcb :: Tcb -> IO ()
+finalizeTcb Tcb { .. } = undefined
 
 
 -- TimeWait Sockets ------------------------------------------------------------

@@ -35,7 +35,7 @@ data FragTable = FragTable { ftEntries     :: !Table
 
 newFragTable :: Config -> IO FragTable
 newFragTable Config { .. } =
-  do ftEntries     <- HT.newHashTable 31 -- XXX: is this the best table size?
+  do ftEntries     <- HT.newHashTable 31
      ftPurgeThread <- forkIO (purgeEntries cfgIP4FragTimeout ftEntries)
      return FragTable { ftDuration = cfgIP4FragTimeout, .. }
 

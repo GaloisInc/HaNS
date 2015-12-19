@@ -11,6 +11,7 @@ module Hans.HashTable (
     alter,
     keys,
     hasKey,
+    size,
   ) where
 
 import           Prelude hiding (lookup)
@@ -135,6 +136,14 @@ alter f k ht = modifyBucket ht k (update id)
       (Just a, b) -> (mkBucket ((k,a):rest), b)
       (Nothing,b) -> (mkBucket        rest , b)
 {-# INLINE alter #-}
+
+
+size :: HashTable k a -> IO Int
+size HashTable { .. } = loop 0 0
+  where
+  loop acc ix | ix < htSize = do bucket <- readIORef (htBuckets ! ix)
+                                 (loop $! acc + length bucket) (ix + 1)
+              | otherwise   = return acc
 
 
 -- | Gives back an (unsorted) list of all the keys present in the hash table.

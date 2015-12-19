@@ -4,7 +4,8 @@
 module Hans.Tcp.Output (
     -- * Output
     routeTcp,
-    sendTcp
+    sendTcp,
+    sendDelayedAck,
 
     -- $notes
   ) where
@@ -29,8 +30,8 @@ import           Data.Word (Word32)
 -- | Send a single ACK to the other side of this connection.
 sendDelayedAck :: NetworkStack -> Tcb -> IO ()
 sendDelayedAck ns Tcb { .. } =
-  do seqNum <- undefined
-     ackNum <- undefined
+  do seqNum <- undefined -- from the send window
+     ackNum <- undefined -- from the recv window
      ack    <- mkAck seqNum ackNum tcbLocalPort tcbRemotePort
      _      <- sendTcp ns tcbRouteInfo tcbRemote ack L.empty
      return ()

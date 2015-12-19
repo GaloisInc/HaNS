@@ -47,6 +47,9 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                  , nsTcpState :: !TcpState
                                    -- ^ State for TCP processing
 
+                                 , nsTcpTimers :: !ThreadId
+                                   -- ^ The TCP timer thread
+
                                  , nsNameServers4 :: !(IORef [IP4])
                                  }
 

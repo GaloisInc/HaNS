@@ -180,8 +180,6 @@ updateTimeWait state update =
 
          Nothing     -> return ()
 
-  
-
 
 -- | Lookup a socket in the Listen state.
 lookupListening :: HasTcpState state
@@ -224,6 +222,14 @@ tcbKey Tcb { .. } =
   let RouteInfo { .. } = tcbRouteInfo
    in Key tcbRemote tcbRemotePort riSource tcbLocalPort
 {-# INLINE tcbKey #-}
+
+
+-- | Delete the 'Tcb', and notify any waiting processes.
+closeActive :: HasTcpState state => state -> Tcb -> IO ()
+closeActive state tcb =
+  do finalizeTcb tcb
+     deleteActive state tcb
+{-# INLINE closeActive #-}
 
 
 -- | Delete an active connection from the tcp state.
