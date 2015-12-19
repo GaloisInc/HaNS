@@ -29,9 +29,10 @@ propReassemble  = monadicIO $
      prot  <- pick arbitraryProtocol
      ident <- pick arbitraryIdent
 
-     -- XXX there's something funny going on when the MTU is particularly small
-     len   <- pick (choose (50,500))
-     mtu   <- pick (choose (40,len))
+     len   <- pick (choose (100,1500))
+
+     -- path mtu must be at least 68 (28 for header, and 40 for options)
+     mtu   <- pick (choose (68,len))
      bytes <- pick (arbitraryPayload len)
 
      let hdr = emptyIP4Header { ip4DestAddr   = dst
