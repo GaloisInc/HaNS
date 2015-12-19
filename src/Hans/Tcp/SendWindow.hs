@@ -4,17 +4,17 @@
 module Hans.Tcp.SendWindow (
     SendWindow(),
     emptySendWindow,
+    queueSegment,
+    retransmitTimeout,
     ackSegment,
-    sackSegment,
+    handleSack,
   ) where
 
 import Hans.Lens
 import Hans.Tcp.Packet
 
 import qualified Data.ByteString.Lazy as L
-import qualified Data.Foldable as F
 import           Data.List (sortBy)
-import qualified Data.Monoid as M
 import           Data.Ord (comparing)
 
 
@@ -94,6 +94,28 @@ emptySendWindow  = SendWindow { swRetransmitQueue = []
                               }
 
 
+-- | Returns the new send window, as well as boolean indicating whether or not
+-- the retransmit timer needs to be started.
+queueSegment :: TcpHeader -> L.ByteString -> SendWindow -> (SendWindow,Bool)
+queueSegment hdr body SendWindow { .. } =
+  ( SendWindow { swRetransmitQueue = swRetransmitQueue ++ [mkSegment hdr body]
+               , .. }
+  , null swRetransmitQueue )
+
+
+-- | A retransmit timer has gone off: reset the sack bit on all segments in the
+-- queue, and return the segment at the left edge of the window, if it exists.
+retransmitTimeout :: SendWindow -> (SendWindow,Maybe (TcpHeader,L.ByteString))
+retransmitTimeout win = (win', mbSeg)
+  where
+  win' = SendWindow { swRetransmitQueue = map (set sack False) (swRetransmitQueue win)
+                    , .. }
+
+  mbSeg = case swRetransmitQueue win' of
+            Segment { .. } : _ -> Just (segHeader,segBody)
+            _                  -> Nothing
+
+
 -- | Remove all segments of the send window that occur before this sequence
 -- number.
 ackSegment :: TcpSeqNum -> SendWindow -> SendWindow
@@ -113,22 +135,41 @@ ackSegment ack SendWindow { .. } =
   go segs = segs
 
 
+-- Selective ACK ---------------------------------------------------------------
+
+-- | Process a sack option, and return the updated window, and the segments that
+-- are missing from the remote window.
+handleSack :: [SackBlock] -> SendWindow -> (SendWindow,[(TcpHeader,L.ByteString)])
+handleSack blocks win =
+  let win' = processSackBlocks blocks win
+   in (win', sackRetransmit win')
+
+-- | All segments that have not been selectively acknowledged. This can be used
+-- when replying to a duplicate ack that contains a SACK option, after the
+-- option has been processed. NOTE: this still doesn't remove the packets from
+-- the queue, it just means that we know what parts to retransmit.
+sackRetransmit :: SendWindow -> [(TcpHeader,L.ByteString)]
+sackRetransmit SendWindow { .. } =
+  [ (segHeader,segBody) | Segment { .. } <- swRetransmitQueue, not segSACK ]
+
+
 -- | Mark segments that have been acknowledged through the SACK option.
-sackSegment :: [(TcpSeqNum,TcpSeqNum)] -> SendWindow -> SendWindow
-sackSegment ranges SendWindow { .. } =
-  SendWindow { swRetransmitQueue = go swRetransmitQueue (sortBy (comparing fst) ranges) }
+processSackBlocks :: [SackBlock] -> SendWindow -> SendWindow
+processSackBlocks blocks SendWindow { .. } =
+  SendWindow { swRetransmitQueue = go swRetransmitQueue
+                                 $ sortBy (comparing sbLeft) blocks }
   where
 
-  go queue@(seg:segs) rs@((l,r):rest)
+  go queue@(seg:segs) bs@(SackBlock { .. } :rest)
 
       -- segment falls within the block
-    | segWithin seg l r = set sack True seg : go segs rs
+    | segWithin seg sbLeft sbRight = set sack True seg : go segs bs
 
       -- segment begins after the block
-    | view leftEdge seg >= r = go queue rest
+    | view leftEdge seg >= sbRight = go queue rest
 
       -- segment ends before the block
-    | otherwise = seg : go segs rs
+    | otherwise = seg : go segs bs
 
   go segs _ = segs
 
