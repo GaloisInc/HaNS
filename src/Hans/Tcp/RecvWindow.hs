@@ -4,11 +4,10 @@
 
 module Hans.Tcp.RecvWindow (
     -- * Receive Window
-    RecvWindow(),
-    emptyRecvWindow,
+    Window(),
+    emptyWindow,
     recvSegment,
-    recvWindowSize,
-    recvWindowNext, setWindowNext,
+    rcvWnd, rcvNxt, setRcvNxt,
 
     -- ** Segments
     Segment(..),
@@ -17,6 +16,7 @@ module Hans.Tcp.RecvWindow (
     sequenceNumberValid,
   ) where
 
+import           Hans.Lens
 import           Hans.Tcp.Packet
 
 import qualified Data.ByteString as S
@@ -37,7 +37,7 @@ data Segment = Segment { segStart :: !TcpSeqNum
 mkSegment :: TcpHeader -> S.ByteString -> Segment
 mkSegment segHdr segBody =
   Segment { segStart = tcpSeqNum segHdr
-          , segEnd   = tcpSeqNum segHdr + fromIntegral (S.length segBody) - 1
+          , segEnd   = tcpSegLastSeqNum segHdr (S.length segBody)
           , .. }
 
 -- | The next segment number, directly after this one.
@@ -45,22 +45,31 @@ segNext :: Segment -> TcpSeqNum
 segNext Segment { .. } = segEnd + 1
 
 segLen :: Segment -> Int
-segLen Segment { .. } = S.length segBody
+segLen Segment { .. } = tcpSegLen segHdr (S.length segBody)
 
 -- | Drop data off of the front of this segment.
 trimSeg :: Int -> Segment -> Maybe Segment
 trimSeg len seg@Segment { .. }
-  | len <= 0 =
+  | len' <= 0 =
     Just seg
 
-  | len >= S.length segBody =
+  | len' >= S.length segBody =
     Nothing
 
   | otherwise =
-    Just Segment { segStart = segStart + fromIntegral len
-                 , segHdr   = segHdr { tcpSeqNum = tcpSeqNum segHdr + fromIntegral len }
-                 , segBody  = S.drop len segBody
-                 , .. }
+    Just $! Segment { segStart = segStart + fromIntegral len'
+                    , segHdr   = segHdr { tcpSeqNum = tcpSeqNum segHdr
+                                                    + fromIntegral len }
+                    , segBody  = S.drop len segBody
+                    , .. }
+
+  where
+
+  flag l | view l segHdr = 1
+         | otherwise     = 0
+
+  -- adjust the length to account for syn/fin
+  len' = len - flag tcpSyn - flag tcpFin
 
 -- | Resolve overlap between two segments. It's assumed that the two segments do
 -- actually overlap.
@@ -84,101 +93,101 @@ resolveOverlap a b =
 --     rwRcvWnd
 --  2. The segments in rwSegments should not overlap
 --
-data RecvWindow = RecvWindow { rwSegments :: ![Segment]
-                               -- ^ Out of order segments.
+data Window = Window { wSegments :: ![Segment]
+                       -- ^ Out of order segments.
 
-                             , rwRcvNxt :: !TcpSeqNum
-                               -- ^ Left-edge of the receive window
+                     , wRcvNxt :: !TcpSeqNum
+                       -- ^ Left-edge of the receive window
 
-                             , rwRcvWnd :: !TcpSeqNum
+                     , wRcvWnd :: !TcpSeqNum
 
-                               -- ^ Current size of the receive window
+                       -- ^ Current size of the receive window
 
-                             , rwMax :: !TcpSeqNum
-                               -- ^ Maximum size of the receive window
+                     , wMax :: !TcpSeqNum
+                       -- ^ Maximum size of the receive window
 
-                             } deriving (Show)
+                     } deriving (Show)
 
-emptyRecvWindow :: TcpSeqNum -> Int -> RecvWindow
-emptyRecvWindow rwRcvNxt maxWin =
-  RecvWindow { rwSegments = []
-             , rwRcvWnd   = rwRcvNxt + rwMax
-             , .. }
+emptyWindow :: TcpSeqNum -> Int -> Window
+emptyWindow wRcvNxt maxWin =
+  Window { wSegments = []
+         , wRcvWnd   = wRcvNxt + wMax
+         , .. }
   where
-  rwMax = fromIntegral maxWin
+  wMax = fromIntegral maxWin
 
-recvWindowSize :: RecvWindow -> TcpSeqNum
-recvWindowSize RecvWindow { .. } = rwRcvWnd
+rcvWnd :: Getting r Window TcpSeqNum
+rcvWnd  = to wRcvWnd
 
-recvWindowNext :: RecvWindow -> TcpSeqNum
-recvWindowNext RecvWindow { .. } = rwRcvNxt
+rcvNxt :: Getting r Window TcpSeqNum
+rcvNxt  = to wRcvNxt
 
 -- | Only sets RCV.NXT when the segment queue is empty. Returns 'True' when the
 -- value has been successfully changed.
-setWindowNext :: TcpSeqNum -> RecvWindow -> (RecvWindow,Bool)
-setWindowNext rcvNxt rw
-  | null (rwSegments rw) = (rw { rwRcvNxt = rcvNxt }, True)
-  | otherwise            = (rw, False)
+setRcvNxt :: TcpSeqNum -> Window -> (Window,Bool)
+setRcvNxt nxt win
+  | null (wSegments win) = (win { wRcvNxt = nxt }, True)
+  | otherwise            = (win, False)
 
 -- | Check an incoming segment, and queue it in the receive window. The boolean
 -- parameter on the second element of the pair is True when the segment received
 -- was valid.
-recvSegment :: TcpHeader -> S.ByteString -> RecvWindow
-            -> (RecvWindow, (Bool,[Segment]))
+recvSegment :: TcpHeader -> S.ByteString -> Window
+            -> (Window, (Bool,[Segment]))
 
-recvSegment hdr body rw
+recvSegment hdr body win
 
-  | Just seg <- sequenceNumberValid (rwRcvNxt rw) (rwRcvWnd rw) hdr body =
-    let (rw',segs) = addSegment seg rw
-     in (rw',(True,segs))
+  | Just seg <- sequenceNumberValid (wRcvNxt win) (wRcvWnd win) hdr body =
+    let (win',segs) = addSegment seg win
+     in (win',(True,segs))
 
     -- drop the invalid frame
   | otherwise =
-    (rw, (False,[]))
+    (win, (False,[]))
 
 
 -- | Add a validated segment to the receive window, and return 
-addSegment :: Segment -> RecvWindow -> (RecvWindow,[Segment])
-addSegment seg rw
+addSegment :: Segment -> Window -> (Window,[Segment])
+addSegment seg win
 
     -- The new segment falls right at the beginning of the receive window
-  | segStart seg == rwRcvNxt rw =
-    advanceWindow seg rw
+  | segStart seg == wRcvNxt win =
+    advanceWindow seg win
 
     -- As addSegment should only be called with the results of
     -- sequenceNumberValid, the only remaining case to consider is that the
     -- segment falls somewhere else within the window.
   | otherwise =
-    (insertOutOfOrder seg rw, [])
+    (insertOutOfOrder seg win, [])
 
 
 -- | Use this segment to advance the window, which may unblock zero or more out
 -- of order segments. The list returned is always non-empty, as it includes the
 -- segment that's given.
-advanceWindow :: Segment -> RecvWindow -> (RecvWindow,[Segment])
-advanceWindow seg rw
+advanceWindow :: Segment -> Window -> (Window,[Segment])
+advanceWindow seg win
 
     -- there were no other segments that might be unblocked by this one
-  | null (rwSegments rw) =
-    (moveRecvWindow (segNext seg) rw, [seg])
+  | null (wSegments win) =
+    (moveWindow (segNext seg) win, [seg])
 
     -- see if this segment unblocks any others
   | otherwise =
-    let (valid,rest) = splitContiguous (seg : rwSegments rw)
+    let (valid,rest) = splitContiguous (seg : wSegments win)
         -- XXX should this segment be checked for overlap with rwSegments?
-     in (moveRecvWindow (segNext (last valid)) rw { rwSegments = rest }, valid)
+     in (moveWindow (segNext (last valid)) win { wSegments = rest }, valid)
 
 
 -- | Insert a new segment into the receive window. NOTE: we don't need to worry
 -- about trimming the segment to fit the window, as that's already been done by
 -- sequenceNumberValid.
-insertOutOfOrder :: Segment -> RecvWindow -> RecvWindow
-insertOutOfOrder seg RecvWindow { .. } =
-  RecvWindow { rwSegments = segs'
-             , rwRcvWnd   = rwMax - fromIntegral (sum (map segLen segs'))
-             , .. }
+insertOutOfOrder :: Segment -> Window -> Window
+insertOutOfOrder seg Window { .. } =
+  Window { wSegments = segs'
+         , wRcvWnd   = wMax - fromIntegral (sum (map segLen segs'))
+         , .. }
   where
-  segs' = loop seg rwSegments
+  segs' = loop seg wSegments
 
   loop new segs@(x:xs)
 
@@ -212,22 +221,22 @@ splitContiguous (seg:segs) = loop [seg] (segNext seg) segs
 
 -- | Move the receive window to start at this new sequence number, and
 -- recalculate the window size to accommodate the set of out-of-order segments.
-moveRecvWindow :: TcpSeqNum -> RecvWindow -> RecvWindow
-moveRecvWindow rcvNxt RecvWindow { .. } =
-  RecvWindow { rwRcvNxt   = rcvNxt
-             , rwRcvWnd   = rwMax - fromIntegral (sum (map segLen rwSegments))
-             , rwSegments = trimSegments rcvNxt rwSegments
-             , .. }
+moveWindow :: TcpSeqNum -> Window -> Window
+moveWindow nxt Window { .. } =
+  Window { wRcvNxt   = nxt
+         , wRcvWnd   = wMax - fromIntegral (sum (map segLen wSegments))
+         , wSegments = trimSegments nxt wSegments
+         , .. }
 
 
 -- | Trim segments down to fit within the receive window.
 trimSegments :: TcpSeqNum -> [Segment] -> [Segment]
-trimSegments rcvNxt segs =
-  case dropWhile (\seg -> segEnd seg < rcvNxt) segs of
+trimSegments nxt segs =
+  case dropWhile (\seg -> segEnd seg < nxt) segs of
 
     -- fit this segment to the front of the window
     seg : rest ->
-      case trimSeg (fromTcpSeqNum (rcvNxt - segStart seg)) seg of
+      case trimSeg (fromTcpSeqNum (nxt - segStart seg)) seg of
         Just seg' -> seg' : rest
         Nothing   -> rest
 
@@ -257,18 +266,18 @@ sequenceNumberValid :: TcpSeqNum  -- ^ RCV.NXT
                     -> S.ByteString
                     -> Maybe Segment
 
-sequenceNumberValid rcvNxt rcvWnd hdr@TcpHeader { .. } payload
+sequenceNumberValid nxt wnd hdr@TcpHeader { .. } payload
 
   | payloadLen == 0 =
-    if rcvWnd == 0
+    if wnd == 0
        -- test 1
-       then if tcpSeqNum == rcvNxt then Just (mkSegment hdr S.empty) else Nothing
+       then if tcpSeqNum == nxt then Just (mkSegment hdr S.empty) else Nothing
 
        -- test 2
-       else if seqNumInWindow      then Just (mkSegment hdr S.empty) else Nothing
+       else if seqNumInWindow   then Just (mkSegment hdr S.empty) else Nothing
 
   | otherwise =
-    if rcvWnd == 0
+    if wnd == 0
        -- test 3
        then Nothing
 
@@ -280,15 +289,15 @@ sequenceNumberValid rcvNxt rcvWnd hdr@TcpHeader { .. } payload
 
   where
 
-  payloadLen = S.length payload
+  payloadLen = tcpSegLen hdr (S.length payload)
 
   segEnd = tcpSeqNum + fromIntegral payloadLen - 1
 
-  hdr' = hdr { tcpSeqNum = rcvNxt }
+  hdr' = hdr { tcpSeqNum = nxt }
 
-  seg' = S.copy $ S.drop (fromTcpSeqNum (rcvNxt - tcpSeqNum))
-                $ S.take (fromTcpSeqNum (segEnd - rcvWnd)) payload
+  seg' = S.copy $ S.drop (fromTcpSeqNum (nxt    - tcpSeqNum))
+                $ S.take (fromTcpSeqNum (segEnd - wnd)) payload
 
-  winEnd          = rcvNxt + rcvWnd
-  seqNumInWindow  = rcvNxt <= tcpSeqNum && tcpSeqNum < winEnd
-  dataEndInWindow = rcvNxt <= segEnd    && segEnd    < winEnd
+  winEnd          = nxt + wnd
+  seqNumInWindow  = nxt <= tcpSeqNum && tcpSeqNum < winEnd
+  dataEndInWindow = nxt <= segEnd    && segEnd    < winEnd
