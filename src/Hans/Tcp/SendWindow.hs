@@ -162,7 +162,10 @@ queueSegment hdr body win
   win' = win { wRetransmitQueue = wRetransmitQueue win ++ [seg]
              , wSndAvail        = wSndAvail win - view segLen seg }
 
-  res  = QueueResult (null (wRetransmitQueue win')) (L.length trimmedBody)
+
+  res  = QueueResult { qrStartRTO    = null (wRetransmitQueue win)
+                                    && not (null (wRetransmitQueue win'))
+                     , qrBytesQueued = L.length trimmedBody }
 
 
 -- | A retransmit timer has gone off: reset the sack bit on all segments in the
