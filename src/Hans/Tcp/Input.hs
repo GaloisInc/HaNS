@@ -114,7 +114,7 @@ handleActive ns dev hdr payload tcb =
 -- | Handle incoming packets destined for a tcb that's in the SYN-SENT state.
 handleSynSent :: NetworkStack -> Device -> TcpHeader -> S.ByteString -> Tcb
               -> Hans ()
-handleSynSent ns dev hdr payload tcb =
+handleSynSent ns _dev hdr _payload tcb =
   do -- page 66
      iss <- io (readIORef (tcbIss tcb))
      when (view tcpAck hdr) $
@@ -176,7 +176,7 @@ handleSynSent ns dev hdr payload tcb =
 
           io (setState tcb SynReceived)
           synAck <- io (mkSynAck tcb hdr)
-          _      <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) hdr L.empty)
+          _      <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) synAck L.empty)
 
           -- XXX: not queueing any additional data
           escape
@@ -194,7 +194,7 @@ handleListening :: NetworkStack
                 -> Device -> Addr -> Addr -> TcpHeader -> S.ByteString
                 -> ListenTcb -> Hans ()
 
-handleListening ns dev remote local hdr payload tcb =
+handleListening ns dev remote local hdr _payload tcb =
      -- ignore all incoming RST packets (page 64)
   do when (view tcpRst hdr)
           escape

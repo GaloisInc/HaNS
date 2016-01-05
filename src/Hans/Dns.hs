@@ -77,7 +77,7 @@ sendRequest ns src =
 
      when (null nameServers) (throwIO NoNameServers)
 
-     sock <- sOpen ns defaultSocketConfig Nothing WildcardIP4 Nothing
+     sock <- newUdpSocket ns defaultSocketConfig Nothing WildcardIP4 Nothing
 
      let req = runPutPacket 1450 1450 L.empty (putDNSPacket (mkPacket src 0))
 

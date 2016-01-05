@@ -16,7 +16,8 @@ import Hans.IP4.Packet (IP4,pattern WildcardIP4,pattern BroadcastIP4,IP4Mask(..)
 import Hans.IP4.RoutingTable(Route(..),RouteType(..))
 import Hans.Lens
 import Hans.Socket
-           (UdpSocket,sOpen,sClose,sendto,recvfrom,SockPort,defaultSocketConfig)
+           (UdpSocket,newUdpSocket,sClose,sendto,recvfrom,SockPort
+           ,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
 import Hans.Time (toUSeconds)
 import Hans.Types (NetworkStack,networkStack,addRoute,addNameServer4)
@@ -97,7 +98,7 @@ data DhcpLease = DhcpLease { dhcpRenew :: !(IO ())
 
 dhcpClient :: NetworkStack -> DhcpConfig -> Device -> IO (Maybe DhcpLease)
 dhcpClient ns cfg dev =
-  do sock <- sOpen ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootpc)
+  do sock <- newUdpSocket ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootpc)
      dhcpDiscover cfg dev sock
 
 
@@ -169,7 +170,7 @@ awaitAck sock = go
 -- | Perform a DHCP Renew.
 renew :: NetworkStack -> DhcpConfig -> Device -> Offer -> IO ()
 renew ns cfg dev offer =
-  do sock <- sOpen ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootps)
+  do sock <- newUdpSocket ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootps)
      _    <- dhcpRequest cfg dev sock offer
 
      return ()

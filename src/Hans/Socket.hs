@@ -1,7 +1,26 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 
-module Hans.Socket where
+module Hans.Socket (
+    -- * Abstract Sockets
+    Socket(..),
+    ListenSocket(..),
+    DataSocket(..),
+    SocketConfig(..), defaultSocketConfig,
+    SockPort,
+
+    -- ** UDP Sockets
+    UdpSocket(),
+    newUdpSocket,
+    sendto,
+    recvfrom,
+
+    -- ** TCP Sockets
+    TcpSocket(), TcpListenSocket(),
+
+  ) where
 
 import           Hans.Addr
 import qualified Hans.Buffer.Datagram as DGram
@@ -17,7 +36,7 @@ import           Hans.Udp.Output (primSendUdp)
 import           Control.Exception
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (IORef,newIORef,readIORef,atomicModifyIORef')
+import           Data.IORef (IORef,newIORef,readIORef)
 import           Data.Typeable (Typeable)
 import           Data.Word (Word16)
 
@@ -38,15 +57,33 @@ defaultSocketConfig  = SocketConfig { scRecvBufferSize = 4096 }
 
 class Socket sock where
 
-  -- | Open a socket. This is the functionality of `socket` and `bind` in the
-  -- same operation.
-  sOpen :: (HasNetworkStack ns, Network addr)
-        => ns
-        -> SocketConfig
-        -> Maybe Device -> addr -> Maybe SockPort -> IO (sock addr)
+  -- | Close an open socket.
+  sClose :: Network addr => sock addr -> IO ()
+
+
+class (DataSocket (Client sock), Socket sock) => ListenSocket sock where
+
+  type Client sock :: * -> *
+
+  -- | Create a listening socket, with a backlog of n.
+  sListen :: (HasNetworkStack ns, Network addr)
+          => ns -> SocketConfig -> addr -> SockPort -> Int -> IO (sock addr)
+
+  sAccept :: Network addr => sock addr -> IO (Client sock addr)
+
+
+class Socket sock => DataSocket sock where
 
   -- | Connect this socket to one on a remote machine.
-  sConnect :: Network addr => sock addr -> addr -> SockPort -> IO ()
+  sConnect :: (HasNetworkStack ns, Network addr)
+           => ns
+           -> SocketConfig
+           -> Maybe Device
+           -> Maybe addr     -- ^ Local address
+           -> Maybe SockPort -- ^ Local port
+           -> addr           -- ^ Remote host
+           -> SockPort       -- ^ Remote port
+           -> IO (sock addr)
 
   -- | Send a chunk of data on a socket.
   sWrite :: Network addr => sock addr -> L.ByteString -> IO Int
@@ -59,16 +96,6 @@ class Socket sock where
   -- socket has closed, while reading a 'Nothing' result indicates that there
   -- was no data available.
   sTryRead :: Network addr => sock addr -> Int -> IO (Maybe L.ByteString)
-
-  -- | Close an open socket.
-  sClose :: Network addr => sock addr -> IO ()
-
-
-data SockState addr = KnownRoute !(RouteInfo addr) !addr !SockPort !SockPort
-                      -- ^ Cached route, and port information
-
-                    | KnownSource !(Maybe Device) !addr !SockPort
-                      -- ^ Known source only.
 
 
 -- Exceptions ------------------------------------------------------------------
@@ -102,6 +129,13 @@ throwSE _ = throwIO
 
 -- UDP Sockets -----------------------------------------------------------------
 
+data SockState addr = KnownRoute !(RouteInfo addr) !addr !SockPort !SockPort
+                      -- ^ Cached route, and port information
+
+                    | KnownSource !(Maybe Device) !addr !SockPort
+                      -- ^ Known source only.
+
+
 data UdpSocket addr = UdpSocket { udpNS        :: !NetworkStack
                                 , udpBuffer    :: !UdpBuffer
                                 , udpSockState :: !(IORef (SockState addr))
@@ -114,60 +148,76 @@ instance HasNetworkStack (UdpSocket addr) where
 
 instance Socket UdpSocket where
 
-  sOpen ns SocketConfig { .. } mbDev src mbPort =
+  sClose UdpSocket { .. } = udpClose
+  {-# INLINE sClose #-}
+
+
+newUdpSocket :: (HasNetworkStack ns, Network addr)
+             => ns
+             -> SocketConfig
+             -> Maybe Device
+             -> addr
+             -> Maybe SockPort
+             -> IO (UdpSocket addr)
+
+newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
+  do let udpNS = view networkStack ns
+
+     srcPort <- case mbSrcPort of
+                 Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
+                               case mb of
+                                 Just port -> return port
+                                 Nothing   -> throwSE src NoPortAvailable
+
+                 Just p  -> return p
+
+     udpSockState <- newIORef (KnownSource mbDev src srcPort)
+
+     udpBuffer <- DGram.newBuffer scRecvBufferSize
+
+     -- XXX: Need some SocketError exceptions: this only happens if there's
+     -- already something listening
+     mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
+     udpClose <- case mbClose of
+                   Just unreg -> return unreg
+                   Nothing    -> throwIO (AlreadyOpen src srcPort)
+
+     return $! UdpSocket { .. }
+
+
+instance DataSocket UdpSocket where
+
+  -- Always lookup the route before modifying the state of the socket, so that
+  -- the state can be manipulated atomically.
+  sConnect ns SocketConfig { .. } mbDev mbSrc mbPort dst dstPort =
     do let udpNS = view networkStack ns
+
+       mbRoute <- lookupRoute udpNS dst
+       ri      <- case mbRoute of
+                    Just ri | maybe True (riDev ri ==) mbDev -> return ri
+                    _                                        -> throwSE dst NoRouteToHost
+
+       src <- case mbSrc of
+                Just src | src == riSource ri -> return src
+                _                             -> throwSE dst NoRouteToHost
+
        srcPort <- case mbPort of
-                   Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
-                                 case mb of
-                                   Just port -> return port
-                                   Nothing   -> throwSE src NoPortAvailable
+                    Just p  -> return p
+                    Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
+                                  case mb of
+                                    Just port -> return port
+                                    Nothing   -> throwSE src NoPortAvailable
 
-                   Just p  -> return p
-
-       udpSockState <- newIORef (KnownSource mbDev src srcPort)
+       udpSockState <- newIORef (KnownRoute ri dst srcPort dstPort)
 
        udpBuffer <- DGram.newBuffer scRecvBufferSize
 
-       -- XXX: Need some SocketError exceptions: this only happens if there's
-       -- already something listening
        mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
        udpClose <- case mbClose of
                      Just unreg -> return unreg
                      Nothing    -> throwIO (AlreadyOpen src srcPort)
 
-       return $! UdpSocket { .. }
-
-  -- Always lookup the route before modifying the state of the socket, so that
-  -- the state can be manipulated atomically.
-  sConnect UdpSocket { .. } dst dstPort =
-    do mbRoute <- lookupRoute udpNS dst
-       case mbRoute of
-
-         Just ri ->
-
-           do let sameDev (Just dev') = riDev ri == dev'
-                  sameDev Nothing     = True
-
-                  connect state = case state of
-                    KnownSource mbDev src' srcPort
-
-                        -- If the source was the wildcard address, change it to
-                        -- the address specified by that rule.
-                      | sameDev mbDev && (riSource ri == src' || isWildcardAddr src') ->
-                        (KnownRoute ri dst srcPort dstPort, Nothing)
-
-                      | otherwise ->
-                        (state, Just NoRouteToHost)
-
-                    _ ->
-                      (state, Just AlreadyConnected)
-
-              mbEx <- atomicModifyIORef' udpSockState connect
-              case mbEx of
-                Nothing -> return ()
-                Just e  -> throwSE dst e
-
-         Nothing -> throwSE dst NoRouteToHost
+       return UdpSocket { .. }
 
   sWrite UdpSocket { .. } bytes =
     do path <- readIORef udpSockState
@@ -192,9 +242,6 @@ instance Socket UdpSocket where
          Just (_,buf) -> return $! Just $! L.fromStrict $! S.take len buf
          Nothing      -> return Nothing
 
-
-  sClose UdpSocket { .. } = udpClose
-  {-# INLINE sClose #-}
 
 
 -- | Receive, with information about who sent this datagram.
@@ -259,14 +306,33 @@ data TcpSocket addr = TcpSocket { tcpNS :: !NetworkStack
 
 instance Socket TcpSocket where
 
-  sOpen ns cfg mbDev src mbSrcPort = undefined
-
   sClose sock = undefined
 
-  sConnect sock dst dstPort = undefined
+
+instance DataSocket TcpSocket where
+
+  sConnect ns mbDev src mbSrcPort dst dstPort = undefined
 
   sWrite sock bytes = undefined
 
   sRead sock len = undefined
 
   sTryRead ns len = undefined
+
+
+data TcpListenSocket addr = TcpListenSocket { tlNS :: !NetworkStack
+                                            }
+
+
+instance Socket TcpListenSocket where
+
+  sClose sock = undefined
+
+
+instance ListenSocket TcpListenSocket where
+
+  type Client TcpListenSocket = TcpSocket
+
+  sListen ns src srcPort = undefined
+
+  sAccept sock = undefined
