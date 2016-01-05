@@ -53,14 +53,13 @@ updateActive ns runSlow tcb@Tcb { .. } =
 -- in the send window, retransmit the left-most segment.
 handleRTO :: NetworkStack -> Tcb -> TcpTimers -> IO ()
 handleRTO ns Tcb { .. } TcpTimers { .. }
-    -- when 2MSL has expired, re-send the left edge of the send window
-  | tt2MSL == 0 =
+  | ttRetransmitValid && ttRetransmit <= 0 =
     do mbSeg <- atomicModifyIORef' tcbSendWindow retransmitTimeout
        case mbSeg of
          Just (hdr,body) -> do _ <- sendTcp ns tcbRouteInfo tcbRemote hdr body
                                return ()
 
-         Nothing         -> return ()
+         Nothing -> return ()
 
   | otherwise =
     return ()
@@ -71,7 +70,7 @@ handleRTO ns Tcb { .. } TcpTimers { .. }
 handle2MSL :: NetworkStack -> Tcb -> TcpTimers -> IO ()
 handle2MSL ns tcb@Tcb { .. } TcpTimers { .. }
 
-  | tt2MSL == 0 =
+  | tt2MSL <= 0 =
        -- why do we only check the idle timer when 2MSL goes off?
        if ttIdle >= ttMaxIdle
           then closeActive ns tcb
@@ -79,20 +78,3 @@ handle2MSL ns tcb@Tcb { .. } TcpTimers { .. }
 
   | otherwise =
     return ()
-
-
--- | Step the timers by one slow tick: decrement 2MSL, and increment the idle
--- timer. Returns the old value in the second element of the tuple.
-updateTimers :: TcpTimers -> (TcpTimers, TcpTimers)
-updateTimers tt = (tt',tt)
-  where
-  tt' = tt { tt2MSL = max 0 (tt2MSL tt - 1)
-           , ttIdle = ttIdle tt + 1 }
-
-
--- | Reset the 2MSL timer.
-reset2MSL :: Config -> TcpTimers -> (TcpTimers, ())
-reset2MSL Config { .. } tt = (tt { tt2MSL = 4 * cfgTcpMSL }, ())
-  -- NOTE: cfgTcpMSL is multiplied by four here, as it's given in seconds, but
-  -- counted in slow ticks (half seconds). Multiplying by four gives the value
-  -- of 2*MSL in slow ticks.

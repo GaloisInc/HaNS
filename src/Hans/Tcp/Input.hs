@@ -15,7 +15,7 @@ import Hans.Tcp.Message
 import Hans.Tcp.Output (routeTcp,sendTcp)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
-           (sequenceNumberValid,recvSegment,Segment(..),setWindowNext)
+           (sequenceNumberValid,recvSegment,Segment(..),setRcvNxt)
 import Hans.Tcp.Tcb
 import Hans.Types
 

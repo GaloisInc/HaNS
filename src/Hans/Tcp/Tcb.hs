@@ -5,17 +5,16 @@
 
 module Hans.Tcp.Tcb where
 
-import Hans.Addr (Addr)
-import Hans.Config (HasConfig(..),Config(..))
-import Hans.Lens
-import Hans.Network.Types (RouteInfo)
-import Hans.Tcp.Packet
-import Hans.Tcp.RecvWindow
-           (RecvWindow,emptyRecvWindow,recvWindowNext,recvWindowSize)
-import Hans.Tcp.SendWindow (SendWindow,emptySendWindow)
+import           Hans.Addr (Addr)
+import           Hans.Config (HasConfig(..),Config(..))
+import           Hans.Lens
+import           Hans.Network.Types (RouteInfo)
+import           Hans.Tcp.Packet
+import qualified Hans.Tcp.RecvWindow as Recv
+import qualified Hans.Tcp.SendWindow as Send
 
 import Control.Monad (when)
-import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime)
+import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime,NominalDiffTime)
 import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef,atomicWriteIORef)
 import Data.Word (Word32)
 import MonadLib (BaseM(..))
@@ -31,9 +30,14 @@ data TcpTimers = TcpTimers { ttDelayedAck :: !Bool
                            , tt2MSL :: !SlowTicks
 
                              -- retransmit timer
+                           , ttRetransmitValid :: !Bool
+                           , ttRetransmit      :: !SlowTicks
+                           , ttRetries         :: !Int
+
+                             -- retransmit timer config
                            , ttRTO    :: !SlowTicks
-                           , ttSRTT   :: !SlowTicks
-                           , ttRTTVar :: !SlowTicks
+                           , ttSRTT   :: !NominalDiffTime
+                           , ttRTTVar :: !NominalDiffTime
 
                              -- idle timer
                            , ttMaxIdle :: !SlowTicks
@@ -43,12 +47,94 @@ data TcpTimers = TcpTimers { ttDelayedAck :: !Bool
 emptyTcpTimers :: TcpTimers
 emptyTcpTimers  = TcpTimers { ttDelayedAck = False
                             , tt2MSL       = 0
-                            , ttRTO        = 2           -- one second
+
+                            , ttRetransmitValid = False
+                            , ttRetransmit      = 0
+                            , ttRetries         = 0
+
+                            , ttRTO        = 2 -- two ticks -- one second
                             , ttSRTT       = 0
                             , ttRTTVar     = 0
                             , ttMaxIdle    = 10 * 60 * 2 -- 10 minutes
                             , ttIdle       = 0
                             }
+
+
+-- | Reset retransmit info.
+resetRetransmit :: TcpTimers -> TcpTimers
+resetRetransmit TcpTimers { .. } =
+  TcpTimers { ttRetransmitValid = True
+            , ttRetransmit      = ttRTO
+            , ttRetries         = 0
+            , .. }
+
+
+-- | Increment the retry count, and double the last retransmit timer.
+retryRetransmit :: TcpTimers -> TcpTimers
+retryRetransmit TcpTimers { .. } =
+  TcpTimers { ttRetransmitValid = True
+            , ttRetransmit      = ttRTO * 2 ^ retries
+            , ttRetries         = retries
+            , .. }
+  where
+  retries = ttRetries + 1
+
+
+-- | Invalidate the retransmit timer.
+stopRetransmit :: TcpTimers -> TcpTimers
+stopRetransmit TcpTimers { .. } =
+  TcpTimers { ttRetransmitValid = False
+            , ttRetries         = 0
+            , .. }
+
+
+reset2MSL :: Config -> TcpTimers -> (TcpTimers, ())
+reset2MSL Config { .. } tt = (tt { tt2MSL = 4 * cfgTcpMSL }, ())
+  -- NOTE: cfgTcpMSL is multiplied by four here, as it's given in seconds, but
+  -- counted in slow ticks (half seconds). Multiplying by four gives the value
+  -- of 2*MSL in slow ticks.
+
+
+-- | Update all slow-tick timers. Return the old timers, for use with
+-- 'atomicModifyIORef'.
+updateTimers :: TcpTimers -> (TcpTimers, TcpTimers)
+updateTimers tt = (tt',tt)
+  where
+  tt' = tt { ttRetransmit = if ttRetransmitValid tt then ttRetransmit tt - 1 else 0
+           , tt2MSL       = max 0 (tt2MSL tt - 1)
+           , ttIdle       = ttIdle tt + 1 }
+
+
+-- | Calibrate the RTO timer, as specified by RFC-6298.
+calibrateRTO :: UTCTime -> UTCTime -> TcpTimers -> TcpTimers
+calibrateRTO sent ackd tt
+  | ttSRTT tt > 0 = rolling
+  | otherwise     = initial
+  where
+
+  -- round trip measurement
+  r = diffUTCTime ackd sent
+
+  -- no data has been sent before, seed the RTO values.
+  initial = updateRTO tt
+    { ttSRTT   = r
+    , ttRTTVar = r / 2
+    }
+
+  -- data has been sent, update based on previous values
+  alpha   = 0.125
+  beta    = 0.25
+  rttvar  = (1 - beta)  * ttRTTVar tt + beta  * abs (ttSRTT tt * r)
+  srtt    = (1 - alpha) * ttSRTT   tt + alpha * r
+  rolling = updateRTO tt
+    { ttRTTVar = rttvar
+    , ttSRTT   = srtt
+    }
+
+  -- update the RTO timer length, bounding it at 64 seconds (128 ticks)
+  updateRTO tt' = tt'
+    { ttRTO = min 128 (ceiling (ttSRTT tt' + max 0.5 (2 * ttRTTVar tt')))
+    }
 
 
 -- Socket State ----------------------------------------------------------------
@@ -128,21 +214,18 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbState :: !(IORef State)
 
                  -- Sender variables
-               , tcbSndUna :: !SeqNumVar -- ^ SND.UNA
-               , tcbSndNxt :: !SeqNumVar -- ^ SND.NXT
-               , tcbSndWnd :: !SeqNumVar -- ^ SND.WND
                , tcbSndUp  :: !SeqNumVar -- ^ SND.UP
                , tcbSndWl1 :: !SeqNumVar -- ^ SND.WL1
                , tcbSndWl2 :: !SeqNumVar -- ^ SND.WL2
                , tcbIss    :: !SeqNumVar -- ^ ISS
-               , tcbSendWindow :: !(IORef SendWindow)
+               , tcbSendWindow :: !(IORef Send.Window)
 
                  -- Receive variables
                , tcbRcvUp  :: !SeqNumVar -- ^ RCV.UP
                , tcbIrs    :: !SeqNumVar -- ^ IRS
 
                , tcbNeedsDelayedAck :: !(IORef Bool)
-               , tcbRecvWindow :: !(IORef RecvWindow)
+               , tcbRecvWindow :: !(IORef Recv.Window)
 
                  -- Port information
                , tcbLocalPort  :: !TcpPort -- ^ Local port
@@ -163,26 +246,36 @@ newTcb :: HasConfig state
        => state
        -> Maybe ListenTcb
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
-       -> TcpSeqNum -- ^ Initial value of RCV.NXT
        -> State -> IO Tcb
-newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort rcvNxt state =
+newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
   do let Config { .. } = view config cxt
      tcbState  <- newIORef state
-     tcbSndUna <- newIORef 0
-     tcbSndNxt <- newIORef 0
-     tcbSndWnd <- newIORef 0
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
-     tcbSendWindow <- newIORef emptySendWindow
+     tcbSendWindow <- newIORef (Send.emptyWindow 0 0)
      tcbIss    <- newIORef 0
-     tcbRecvWindow <- newIORef (emptyRecvWindow rcvNxt (fromIntegral cfgTcpInitialWindow))
+     tcbRecvWindow <- newIORef (Recv.emptyWindow 0 (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0
      tcbNeedsDelayedAck <- newIORef False
      tcbIrs    <- newIORef 0
      tcbMss    <- newIORef cfgTcpInitialMSS
      tcbTimers <- newIORef emptyTcpTimers
      return Tcb { .. }
+
+
+-- | Set the value of RCV.NXT. Returns 'True' when the value has been set
+-- successfully, and 'False' if the receive queue was not empty.
+setRcvNxt :: TcpSeqNum -> Tcb -> IO Bool
+setRcvNxt rcvNxt Tcb { .. } =
+  atomicModifyIORef' tcbRecvWindow (Recv.setRcvNxt rcvNxt)
+
+
+-- | Set the value of SND.NXT. Returns 'True' when the value has been set
+-- successfully, and 'False' if the send queue was not empty.
+setSndNxt :: TcpSeqNum -> Tcb -> IO Bool
+setSndNxt sndNxt Tcb { .. } =
+  atomicModifyIORef' tcbSendWindow (Send.setSndNxt sndNxt)
 
 
 -- | Cleanup the Tcb.
@@ -212,23 +305,23 @@ data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
 
 getRcvNxt :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
 getRcvNxt sock =
-  do (rcvNxt,_) <- getRecvWindow sock
-     return rcvNxt
+  do (nxt,_) <- getRecvWindow sock
+     return nxt
 {-# INLINE getRcvNxt #-}
 
 getRcvWnd :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
 getRcvWnd sock =
-  do (_,rcvWnd) <- getRecvWindow sock
-     return rcvWnd
+  do (_,wnd) <- getRecvWindow sock
+     return wnd
 {-# INLINE getRcvWnd #-}
 
 class CanReceive sock where
   getRecvWindow :: BaseM io IO => sock -> io (TcpSeqNum,TcpSeqNum)
 
-instance CanReceive (IORef RecvWindow) where
+instance CanReceive (IORef Recv.Window) where
   getRecvWindow ref = inBase $
     do rw <- readIORef ref
-       return (recvWindowNext rw, recvWindowSize rw)
+       return (view Recv.rcvNxt rw, view Recv.rcvWnd rw)
   {-# INLINE getRecvWindow #-}
 
 instance CanReceive Tcb where

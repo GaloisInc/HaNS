@@ -7,7 +7,7 @@ module Hans.Tcp.SendWindow (
     sndNxt, setSndNxt,
     sndUna,
     sndWnd,
-    queueSegment, QueueResult(..),
+    queueSegment,
     retransmitTimeout,
     ackSegment,
     handleSack,
@@ -140,21 +140,16 @@ sndUna  = to $ \ Window { .. } ->
     []      -> wSndNxt
 
 
-data QueueResult = QueueResult { qrStartRT     :: !Bool
-                               , qrBytesQueued :: !Int64
-                               } deriving (Show)
-
-couldNotQueue :: QueueResult
-couldNotQueue  = QueueResult { qrStartRT = False, qrBytesQueued = 0 }
-
-
 -- | Returns the new send window, as well as boolean indicating whether or not
 -- the retransmit timer needs to be started.
-queueSegment :: TcpHeader -> L.ByteString -> Window -> (Window,QueueResult)
-queueSegment hdr body win
-  | wSndAvail win == 0 = (win,couldNotQueue)
-  | otherwise          = (win',res)
+queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString
+             -> Window -> (Window,Maybe (Bool,TcpHeader,L.ByteString))
+queueSegment mkHdr body win
+  | wSndAvail win == 0 = (win,Nothing)
+  | otherwise          = (win',Just (startRTO,hdr,trimmedBody))
   where
+
+  hdr         = mkHdr (wSndNxt win)
 
   trimmedBody = L.take (wSndAvail win) body
   seg         = mkSegment hdr trimmedBody
@@ -162,10 +157,8 @@ queueSegment hdr body win
   win' = win { wRetransmitQueue = wRetransmitQueue win ++ [seg]
              , wSndAvail        = wSndAvail win - view segLen seg }
 
-
-  res  = QueueResult { qrStartRTO    = null (wRetransmitQueue win)
-                                    && not (null (wRetransmitQueue win'))
-                     , qrBytesQueued = L.length trimmedBody }
+  -- start the retransmit timer when the queue was empty.
+  startRTO = null (wRetransmitQueue win)
 
 
 -- | A retransmit timer has gone off: reset the sack bit on all segments in the
@@ -180,10 +173,12 @@ retransmitTimeout win = (win', mbSeg)
 
 
 -- | Remove all segments of the send window that occur before this sequence
--- number.
+-- number, and increase the size of the available window.
 ackSegment :: TcpSeqNum -> Window -> Window
-ackSegment ack Window { .. } =
-  Window { wRetransmitQueue = go wRetransmitQueue, .. }
+ackSegment ack win =
+  win { wRetransmitQueue = go (wRetransmitQueue win)
+      , wSndAvail        = wSndAvail win + fromTcpSeqNum (ack - view sndUna win)
+      , wSndNxt          = ack }
   where
 
   go (seg:rest)
