@@ -12,10 +12,11 @@ import Hans.Lens (view,set)
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Network
 import Hans.Tcp.Message
-import Hans.Tcp.Output (routeTcp,sendTcp)
+import Hans.Tcp.Output (routeTcp,sendTcp,sendAck,sendWithTcb)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
-           (sequenceNumberValid,recvSegment,Segment(..),setRcvNxt)
+           (sequenceNumberValid,recvSegment,Segment(..))
+import Hans.Tcp.SendWindow (ackSegment)
 import Hans.Tcp.Tcb
 import Hans.Types
 
@@ -93,7 +94,7 @@ handleActive ns dev hdr payload tcb =
      when (not valid) $
        do unless (view tcpRst hdr) $ io $
             do (rcvNxt,_) <- getRecvWindow tcb
-               sndNxt     <- readIORef (tcbSndNxt tcb)
+               sndNxt     <- getSndNxt tcb
                ack        <- mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
                _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
                return ()
@@ -117,7 +118,7 @@ handleSynSent ns dev hdr payload tcb =
   do -- page 66
      iss <- io (readIORef (tcbIss tcb))
      when (view tcpAck hdr) $
-       do sndNxt <- io (readIORef (tcbSndNxt tcb))
+       do sndNxt <- getSndNxt tcb
 
           when (tcpSeqNum hdr <= iss || tcpAckNum hdr > sndNxt) $
             do rst <- io (mkRst hdr)
@@ -141,7 +142,7 @@ handleSynSent ns dev hdr payload tcb =
      when (view tcpSyn hdr) $
        do let rcvNxt = tcpSeqNum hdr + 1
 
-          res <- io (atomicModifyIORef' (tcbRecvWindow tcb) (setWindowNext rcvNxt))
+          res <- io (setRcvNxt rcvNxt tcb)
           -- should never happen, but if a segment was queued in the receive
           -- window, mucking about with RCV.NXT will cause processing to abort
           --
@@ -153,10 +154,11 @@ handleSynSent ns dev hdr payload tcb =
 
           sndUna <- io $
             if view tcpAck hdr
-               then do atomicWriteIORef (tcbSndUna tcb) (tcpAckNum hdr)
+               then do atomicModifyIORef' (tcbSendWindow tcb)
+                           $ \win -> (ackSegment (tcpAckNum hdr) win, ())
                        return (tcpAckNum hdr)
 
-               else readIORef (tcbSndUna tcb)
+               else getSndUna tcb
 
           when (sndUna > iss) $
             do io (setState tcb Established)
@@ -166,11 +168,8 @@ handleSynSent ns dev hdr payload tcb =
                when (isJust (tcbParent tcb)) (io (incrSynBacklog ns))
 
                -- XXX: notify the user
-               sndNxt <- io (readIORef (tcbSndNxt tcb))
-               ack    <- io (mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr))
-
                -- XXX: include any queued data/controls
-               _      <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty)
+               io (sendAck ns tcb)
 
                -- XXX: not processing additional data/controls from the ack
                escape
@@ -180,10 +179,11 @@ handleSynSent ns dev hdr payload tcb =
           _      <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) hdr L.empty)
 
           -- XXX: not queueing any additional data
-          return ()
+          escape
 
      -- page 68
-     unless (view tcpSyn hdr || view tcpRst hdr) escape
+     -- at this point, neither syn or rst were set, so drop the segment
+     escape
 
 
 -- Listening Connections -------------------------------------------------------
@@ -235,17 +235,18 @@ createChildTcb ns dev remote local hdr parent =
 
      -- construct a new tcb, and initialize it as specified on (page 65)
      io $ do child <- newTcb ns (Just parent) ri (tcpDestPort hdr) remote
-                          (tcpSourcePort hdr) (tcpSeqNum hdr + 1) SynReceived
+                          (tcpSourcePort hdr) SynReceived
              iss   <- nextIss parent
 
-             atomicWriteIORef (tcbIrs    child) (tcpSeqNum hdr    )
-             atomicWriteIORef (tcbIss    child)  iss
+             atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
+             atomicWriteIORef (tcbIss child)  iss
 
-             synAck <- mkSynAck child hdr
-             _      <- sendTcp ns ri remote synAck L.empty
-
-             atomicWriteIORef (tcbSndNxt child) (iss + 1)
-             atomicWriteIORef (tcbSndUna child)  iss
+             -- queueing a SYN/ACK in the send window will advance SND.NXT
+             -- automatically
+             _ <- setSndNxt iss child
+             let synAck = set tcpSyn True
+                        $ set tcpAck True emptyTcpHeader
+             _ <- sendWithTcb ns child synAck L.empty
 
              registerActive ns remote (tcpSourcePort hdr) local (tcpDestPort hdr) child
 

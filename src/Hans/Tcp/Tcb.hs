@@ -301,7 +301,40 @@ data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
                                } deriving (Eq)
 
 
--- Sockets that Receive --------------------------------------------------------
+-- Sockets that send -----------------------------------------------------------
+
+getSndNxt :: (BaseM io IO, CanSend sock) => sock -> io TcpSeqNum
+getSndNxt sock =
+  do (nxt,_) <- getSendWindow sock
+     return nxt
+{-# INLINE getSndNxt #-}
+
+getSndWnd :: (BaseM io IO, CanSend sock) => sock -> io TcpSeqNum
+getSndWnd sock =
+  do (_,wnd) <- getSendWindow sock
+     return wnd
+{-# INLINE getSndWnd #-}
+
+class CanSend sock where
+  getSendWindow :: BaseM io IO => sock -> io (TcpSeqNum,TcpSeqNum)
+
+instance CanSend (IORef Send.Window) where
+  getSendWindow ref =
+    do sw <- inBase (readIORef ref)
+       return (view Send.sndNxt sw, view Send.sndWnd sw)
+  {-# INLINE getSendWindow #-}
+
+instance CanSend Tcb where
+  getSendWindow Tcb { .. } = getSendWindow tcbSendWindow
+  {-# INLINE getSendWindow #-}
+
+
+-- Sockets that receive --------------------------------------------------------
+
+getSndUna :: BaseM io IO => Tcb -> io TcpSeqNum
+getSndUna Tcb { .. } =
+  do sw <- inBase (readIORef tcbSendWindow)
+     return $! view Send.sndUna sw
 
 getRcvNxt :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
 getRcvNxt sock =

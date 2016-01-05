@@ -7,19 +7,19 @@ module Hans.Tcp.Output (
     sendTcp,
 
     -- ** With a TCB
-    sendDelayedAck,
-    sendData,
+    sendWithTcb,
+    sendAck,
 
     -- $notes
   ) where
 
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device.Types (Device(..),ChecksumOffload(..),txOffload)
-import           Hans.Lens (view)
+import           Hans.Lens (view,set)
 import           Hans.Network
 import           Hans.Serialize (runPutPacket)
-import           Hans.Tcp.Message (mkAck)
-import           Hans.Tcp.Packet (TcpHeader(..),putTcpHeader,emptyTcpHeader)
+import           Hans.Tcp.Packet
+                     (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck)
 import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Tcp.Tcb
@@ -35,36 +35,31 @@ import           Data.Word (Word32)
 
 -- Sending with a TCB ----------------------------------------------------------
 
--- | Send a single ACK to the other side of this connection.
-sendDelayedAck :: NetworkStack -> Tcb -> IO ()
-sendDelayedAck ns Tcb { .. } =
-  do seqNum <- undefined -- from the send window
-     ackNum <- undefined -- from the recv window
-     ack    <- mkAck seqNum ackNum tcbLocalPort tcbRemotePort
-     _      <- sendTcp ns tcbRouteInfo tcbRemote ack L.empty
+-- | Send a single ACK immediately.
+sendAck :: NetworkStack -> Tcb -> IO ()
+sendAck ns tcb =
+  do _ <- sendWithTcb ns tcb emptyTcpHeader L.empty
      return ()
 
-
--- | Send as much data as the remote window will permit, adding the data to the
--- retransmit queue. Return how many bytes of the message were queued.
-sendData :: NetworkStack -> Tcb -> L.ByteString -> IO Int64
-sendData ns Tcb { .. } body =
+-- | Send a segment and queue it in the remote window. The number of bytes that
+-- were sent is returned.
+sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO Int64
+sendWithTcb ns Tcb { .. } hdr body =
   do recvWindow <- readIORef tcbRecvWindow
-     let mkHdr seqNum =
-             emptyTcpHeader { tcpSeqNum     = seqNum
+     let mkHdr seqNum = set tcpAck True
+                      $ hdr { tcpSeqNum     = seqNum
                             , tcpAckNum     = view Recv.rcvNxt recvWindow
                             , tcpDestPort   = tcbRemotePort
-                            , tcpSourcePort = tcbLocalPort
-                            }
+                            , tcpSourcePort = tcbLocalPort }
 
      mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body)
 
      case mbRes of
 
-       Just (startRT,hdr,body') ->
+       Just (startRT,hdr',body') ->
          do when startRT $ atomicModifyIORef' tcbTimers
                          $ \ tt -> (resetRetransmit tt, ())
-            _ <- sendTcp ns tcbRouteInfo tcbRemote hdr body'
+            _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
             return (L.length body')
 
        Nothing ->
@@ -119,8 +114,8 @@ renderTcpPacket :: Network addr
                 => ChecksumOffload -> addr -> addr -> TcpHeader -> L.ByteString
                 -> L.ByteString
 renderTcpPacket ChecksumOffload { .. } src dst hdr body
-  | coTcp     = beforeCS `L.append` csBytes
-  | otherwise = bytes
+  | coTcp     = bytes
+  | otherwise = beforeCS `L.append` csBytes
   where
   bytes  = runPutPacket 20 40 body (putTcpHeader hdr)
 

@@ -3,7 +3,6 @@
 module Hans.Tcp.Message where
 
 import Hans.Lens
-import Hans.Addr
 import Hans.Tcp.Packet
 import Hans.Tcp.Tcb
 
