@@ -4,7 +4,6 @@
 module Hans.Socket.Tcp where
 
 import           Hans.Addr
-import qualified Hans.Buffer.Stream as Stream
 import qualified Hans.HashTable as HT
 import           Hans.Lens (view,to)
 import           Hans.Network
@@ -14,17 +13,16 @@ import           Hans.Tcp.Message
 import           Hans.Tcp.Output
 import           Hans.Types
 
-import           Control.Concurrent (newMVar,newEmptyMVar,tryPutMVar,takeMVar)
+import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar)
+import           Control.Exception (throwIO)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 
 
 -- TCP Sockets -----------------------------------------------------------------
 
-data TcpSocket addr = TcpSocket { tcpNS         :: !NetworkStack
-                                , tcpTcb        :: !Tcb
-                                -- , tcbSendBuffer :: !Stream.Buffer
-                                -- , tcbRecvBuffer :: !Stream.Buffer
+data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
+                                , tcpTcb :: !Tcb
                                 }
 
 instance HasNetworkStack (TcpSocket addr) where
@@ -66,10 +64,10 @@ activeOpen ns ri srcPort dst dstPort =
 
 instance Socket TcpSocket where
 
-  sClose sock@TcpSocket { .. } =
+  sClose TcpSocket { .. } =
     do st <- readIORef (tcbState tcpTcb)
        case st of
-         Closed -> throwSE' sock DoesNotExist
+         Closed -> throwIO DoesNotExist
 
          -- impossible for a data socket
          Listen -> fail "sClose(TcpSocket): socket was in Listen"
@@ -88,7 +86,7 @@ instance DataSocket TcpSocket where
                       do mb <- nextTcpPort tcpNS (toAddr src) (toAddr dst) dstPort
                          case mb of
                            Just port -> return port
-                           Nothing   -> throwSE dst NoPortAvailable
+                           Nothing   -> throwIO NoPortAvailable
 
        -- activeOpen will start the connection for us, sending a SYN to the
        -- remote end of the connection.
@@ -96,7 +94,7 @@ instance DataSocket TcpSocket where
        case mbTcb of
          -- XXX need to wait until the connection is finalized
          Just tcpTcb -> return TcpSocket { .. }
-         Nothing     -> throwSE dst (AlreadyConnected src srcPort dst dstPort)
+         Nothing     -> throwIO AlreadyConnected
 
   sWrite sock bytes = undefined
 

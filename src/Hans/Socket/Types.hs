@@ -73,37 +73,35 @@ class Socket sock => DataSocket sock where
 
 -- Exceptions ------------------------------------------------------------------
 
-data SocketException addr = AlreadyConnected !addr !SockPort !addr !SockPort
-                            -- ^ This connection already exists.
+data ConnectionException = AlreadyConnected
+                           -- ^ This connection already exists.
 
-                          | AlreadyListening !addr !SockPort
-                            -- ^ Something is already listening on this
-                            -- host/port combination.
+                         | NoConnection
+                           -- ^ No information about the other end of the
+                           -- socket was present.
 
-                          | NoRouteToHost
-                            -- ^ It's not possible to reach this host from this
-                            -- source address.
+                         | NoPortAvailable
+                           -- ^ All ports are in use.
 
-                          | NoConnection
-                            -- ^ No information about the other end of the
-                            -- socket was present.
+                         | ConnectionRefused
 
-                          | NoPortAvailable
-                            -- ^ All ports are in use.
+                         | DoesNotExist
+                           -- ^ The connection is already closed.
+                           deriving (Show,Typeable)
 
-                          | DoesNotExist
-                            -- ^ The connection is already closed.
-                            deriving (Show,Typeable)
+data ListenException = AlreadyListening
+                       -- ^ Something is already listening on this
+                       -- host/port combination.
+                       deriving (Show,Typeable)
 
-instance (Show addr, Typeable addr) => Exception (SocketException addr)
+data RoutingException = NoRouteToHost
+                        -- ^ It's not possible to reach this host from this
+                        -- source address.
+                        deriving (Show,Typeable)
 
-throwSE :: (Show addr, Typeable addr) => addr -> SocketException addr -> IO a
-throwSE _ = throwIO
-{-# INLINE throwSE #-}
-
-throwSE' :: (Show addr, Typeable addr) => f addr -> SocketException addr -> IO a
-throwSE' _ = throwIO
-{-# INLINE throwSE' #-}
+instance Exception ConnectionException
+instance Exception ListenException
+instance Exception RoutingException
 
 
 -- Utilities -------------------------------------------------------------------
@@ -116,7 +114,7 @@ route ns mbDev src dst =
   do mbRoute <- route' ns mbDev src dst
      case mbRoute of
        Just ri -> return ri
-       Nothing -> throwSE dst NoRouteToHost
+       Nothing -> throwIO NoRouteToHost
 
 
 -- | Return source routing information, when a route exists to the destination.

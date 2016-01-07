@@ -58,7 +58,7 @@ newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
                  Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
                                case mb of
                                  Just port -> return port
-                                 Nothing   -> throwSE src NoPortAvailable
+                                 Nothing   -> throwIO NoPortAvailable
 
                  Just p  -> return p
 
@@ -71,7 +71,7 @@ newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
      mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
      udpClose <- case mbClose of
                    Just unreg -> return unreg
-                   Nothing    -> throwIO (AlreadyListening src srcPort)
+                   Nothing    -> throwIO AlreadyListening
 
      return $! UdpSocket { .. }
 
@@ -90,7 +90,7 @@ instance DataSocket UdpSocket where
                     Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
                                   case mb of
                                     Just port -> return port
-                                    Nothing   -> throwSE src NoPortAvailable
+                                    Nothing   -> throwIO NoPortAvailable
 
        udpSockState <- newIORef (KnownRoute ri dst srcPort dstPort)
 
@@ -99,7 +99,7 @@ instance DataSocket UdpSocket where
        mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
        udpClose <- case mbClose of
                      Just unreg -> return unreg
-                     Nothing    -> throwIO (AlreadyConnected src srcPort dst dstPort)
+                     Nothing    -> throwIO AlreadyConnected
 
        return UdpSocket { .. }
 
@@ -113,8 +113,8 @@ instance DataSocket UdpSocket where
                  then return (fromIntegral (L.length bytes))
                  else return (-1)
 
-         KnownSource _ src _ ->
-              throwSE src NoConnection
+         KnownSource{} ->
+              throwIO NoConnection
 
   sRead UdpSocket { .. } len =
     do (_,buf) <- DGram.readChunk udpBuffer
@@ -169,11 +169,11 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
                      return ()
 
               _ ->
-                  throwSE dst NoRouteToHost
+                  throwIO NoRouteToHost
 
        -- we can't use sendto if sConnect has been used already
-       KnownRoute ri dst' srcPort dstPort' ->
-         throwSE dst (AlreadyConnected (riSource ri) srcPort dst' dstPort')
+       KnownRoute{} ->
+         throwIO AlreadyConnected
 {-# INLINE sendto #-}
 
 
