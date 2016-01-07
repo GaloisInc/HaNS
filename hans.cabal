@@ -51,7 +51,9 @@ library
                                 array,
                                 BoundedChan,
                                 random,
-                                monadLib
+                                monadLib,
+                                cryptonite,
+                                memory
 
         ghc-prof-options:       -fprof-auto-top
 

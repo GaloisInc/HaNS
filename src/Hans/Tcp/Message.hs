@@ -34,6 +34,18 @@ mkRstAck hdr @ TcpHeader { .. } payload =
 {-# INLINE mkRstAck #-}
 
 
+mkSyn :: Tcb -> IO TcpHeader
+mkSyn Tcb { .. } =
+  do iss <- readIORef tcbIss
+     return $ set tcpSyn True
+            $ emptyTcpHeader { tcpSourcePort = tcbRemotePort
+                             , tcpDestPort   = tcbLocalPort
+                             , tcpSeqNum     = iss
+                             , tcpAckNum     = 0
+                             }
+{-# INLINE mkSyn #-}
+
+
 -- | @<SEQ=ISS><ACK=RCV.NXT><CTL=SYN,ACK>@
 mkSynAck :: Tcb -> TcpHeader -> IO TcpHeader
 mkSynAck Tcb { .. } TcpHeader { .. } =

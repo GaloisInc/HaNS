@@ -1,16 +1,19 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import Hans
 import Hans.Dns
 import Hans.Device
-import Hans.IP4.Packet (unpackIP4)
+import Hans.Socket
+import Hans.IP4.Packet (pattern WildcardIP4)
 import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
 
 import           Control.Concurrent (forkIO,threadDelay)
 import           Control.Monad (forever)
 import qualified Data.ByteString.Char8 as S8
 import           System.Environment (getArgs)
+import           System.Exit (exitFailure)
 
 
 main :: IO ()
@@ -40,10 +43,10 @@ main  =
                Just lease ->
                  do putStrLn ("Assigned IP: " ++ show (unpackIP4 (dhcpAddr lease)))
                     print =<< getHostByName ns "galois.com"
-                    threadDelay (1000000 * 60)
 
                Nothing ->
-                    putStrLn "Dhcp failed"
+                 do putStrLn "Dhcp failed"
+                    exitFailure
 
         else
           do putStrLn "Static IP: 192.168.71.11/24"
@@ -60,4 +63,9 @@ main  =
                , routeDevice  = dev
                }
 
-             threadDelay (1000000 * 60)
+
+     con <- sConnect ns defaultSocketConfig Nothing WildcardIP4 Nothing
+                (packIP4 172 16 181 128) 9000
+     sClose (con :: TcpSocket IP4)
+
+     threadDelay (1000000 * 60)

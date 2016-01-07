@@ -1,10 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Hans.Tcp.State where
 
-import           Hans.Addr (Addr,wildcardAddr)
+import           Hans.Addr (Addr,wildcardAddr,putAddr)
 import           Hans.Config (HasConfig(..),Config(..))
 import qualified Hans.HashTable as HT
 import           Hans.Lens
@@ -13,13 +14,20 @@ import           Hans.Tcp.Packet
 import           Hans.Tcp.Tcb
 import           Hans.Time
 
-import           Control.Concurrent (forkIO,threadDelay)
+import           Control.Concurrent (forkIO,threadDelay,MVar,newMVar,modifyMVar)
 import           Control.Monad (guard)
+import           Crypto.Hash (hash,Digest,MD5)
+import           Data.ByteArray (withByteArray)
+import qualified Data.ByteString as S
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
+import           Data.Serialize (runPut,putByteString)
 import           Data.Time.Clock (UTCTime,getCurrentTime,addUTCTime,diffUTCTime)
+import           Data.Word (Word32)
+import           Foreign.Storable (peek)
 import           GHC.Generics (Generic)
+import           System.Random (newStdGen,random,randoms)
 
 
 -- General State ---------------------------------------------------------------
@@ -45,6 +53,9 @@ data TcpState =
            , tcpSynBacklog_ :: {-# UNPACK #-} !(IORef Int)
              -- ^ Decrements when a connection enters SynReceived or SynSent,
              -- and increments back up once it's closed, or enters Established.
+
+           , tcpPorts       :: {-# UNPACK #-} !(MVar TcpPort)
+           , tcpISSTimer    :: {-# UNPACK #-} !(IORef Tcp4USTimer)
            }
 
 tcpListen :: HasTcpState state => Getting r state (HT.HashTable ListenKey ListenTcb)
@@ -72,12 +83,30 @@ instance HasTcpState TcpState where
   {-# INLINE tcpState #-}
 
 
+
+data Tcp4USTimer = Tcp4USTimer { tcpTimer      :: {-# UNPACK #-} !Word32
+                               , tcpSecret     :: {-# UNPACK #-} !S.ByteString
+                               , tcpLastUpdate :: !UTCTime
+                               }
+
+newTcp4USTimer :: IO Tcp4USTimer
+newTcp4USTimer  =
+  do tcpLastUpdate <- getCurrentTime
+     gen           <- newStdGen
+     let (tcpTimer,gen') = random gen
+         tcpSecret       = S.pack (take 256 (randoms gen'))
+     return Tcp4USTimer { .. }
+
+
+
 newTcpState :: Config -> IO TcpState
 newTcpState Config { .. } =
   do tcpListen_     <- HT.newHashTable cfgTcpListenTableSize
      tcpActive_     <- HT.newHashTable cfgTcpActiveTableSize
      tcpTimeWait_   <- newIORef emptyHeap
      tcpSynBacklog_ <- newIORef cfgTcpMaxSynBacklog
+     tcpPorts       <- newMVar 32767
+     tcpISSTimer    <- newIORef =<< newTcp4USTimer
      return TcpState { .. }
 
 
@@ -244,3 +273,60 @@ deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
 deleteTimeWait state tw =
   atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
       (filterHeap (/= tw) heap, ())
+
+
+-- Port Management -------------------------------------------------------------
+
+-- | Pick a fresh port for a connection.
+nextTcpPort :: HasTcpState state
+            => state -> Addr -> Addr -> TcpPort -> IO (Maybe TcpPort)
+nextTcpPort state src dst dstPort =
+  modifyMVar tcpPorts (pickFreshPort tcpActive_ (Key dst dstPort src))
+  where
+  TcpState { .. } = view tcpState state
+
+pickFreshPort :: HT.HashTable Key Tcb -> (TcpPort -> Key) -> TcpPort
+              -> IO (TcpPort, Maybe TcpPort)
+pickFreshPort ht mkKey p0 = go 0 p0
+  where
+
+  go :: Int -> TcpPort -> IO (TcpPort,Maybe TcpPort)
+  go i _ | i > 65535 = return (p0, Nothing)
+  go i 0             = go (i+1) 1025
+  go i port          =
+    do used <- HT.hasKey (mkKey port) ht
+       if not used
+          then return (port, Just port)
+          else go (i + 1) (port + 1)
+
+
+-- Sequence Numbers ------------------------------------------------------------
+
+-- | Use 
+nextISS :: HasTcpState state
+        => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO TcpSeqNum
+nextISS state src srcPort dst dstPort =
+  do let TcpState { .. } = view tcpState state
+     now <- getCurrentTime
+     (m,f_digest) <- atomicModifyIORef' tcpISSTimer $ \ Tcp4USTimer { .. } ->
+       let diff    = diffUTCTime now tcpLastUpdate
+           ticks   = tcpTimer + truncate (diff * 250000) -- 4us chunks
+           timers' = Tcp4USTimer { tcpTimer      = ticks
+                                 , tcpLastUpdate = now
+                                 , .. }
+
+           digest :: Digest MD5
+           digest  = hash $ runPut $
+             do putAddr src
+                putTcpPort srcPort
+                putAddr dst
+                putTcpPort dstPort
+                putByteString tcpSecret
+
+        in (timers', (ticks, digest))
+
+     -- NOTE: MD5 digests are always 128 bytes, so peeking the first 4 bytes off
+     -- of the front should never fail.
+     withByteArray f_digest $ \ ptr ->
+       do w32 <- peek ptr
+          return (fromIntegral (m + w32))

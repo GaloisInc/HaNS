@@ -245,16 +245,17 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
 newTcb :: HasConfig state
        => state
        -> Maybe ListenTcb
+       -> TcpSeqNum -- ^ ISS
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
        -> State -> IO Tcb
-newTcb cxt tcbParent tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
+newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
   do let Config { .. } = view config cxt
      tcbState  <- newIORef state
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
-     tcbSendWindow <- newIORef (Send.emptyWindow 0 0)
-     tcbIss    <- newIORef 0
+     tcbSendWindow <- newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
+     tcbIss    <- newIORef iss
      tcbRecvWindow <- newIORef (Recv.emptyWindow 0 (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0
      tcbNeedsDelayedAck <- newIORef False

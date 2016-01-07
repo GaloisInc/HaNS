@@ -8,7 +8,7 @@ module Hans.Tcp.Packet (
 
     -- * Header
     TcpHeader(..),
-    TcpPort,
+    TcpPort, putTcpPort,
     emptyTcpHeader,
 
     -- ** Sequence Numbers

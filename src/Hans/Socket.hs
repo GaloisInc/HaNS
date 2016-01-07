@@ -25,13 +25,18 @@ module Hans.Socket (
 import           Hans.Addr
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device)
+import qualified Hans.HashTable as HT
 import           Hans.Lens
 import           Hans.Network
 import           Hans.Types
                      (HasNetworkStack(..),NetworkStack,registerRecv,UdpBuffer
-                     ,nextUdpPort)
+                     ,nextUdpPort,nextTcpPort)
 import           Hans.Udp.Input ()
 import           Hans.Udp.Output (primSendUdp)
+import qualified Hans.Tcp.Message as Tcp
+import qualified Hans.Tcp.Output as Tcp
+import qualified Hans.Tcp.State as Tcp
+import           Hans.Tcp.Tcb (Tcb(..),newTcb,State(..))
 
 import           Control.Exception
 import qualified Data.ByteString as S
@@ -79,7 +84,7 @@ class Socket sock => DataSocket sock where
            => ns
            -> SocketConfig
            -> Maybe Device
-           -> Maybe addr     -- ^ Local address
+           -> addr           -- ^ Local address
            -> Maybe SockPort -- ^ Local port
            -> addr           -- ^ Remote host
            -> SockPort       -- ^ Remote port
@@ -100,13 +105,12 @@ class Socket sock => DataSocket sock where
 
 -- Exceptions ------------------------------------------------------------------
 
-data SocketException addr = AlreadyOpen !addr !SockPort
+data SocketException addr = AlreadyConnected !addr !SockPort !addr !SockPort
+                            -- ^ This connection already exists.
+
+                          | AlreadyListening !addr !SockPort
                             -- ^ Something is already listening on this
                             -- host/port combination.
-
-                          | AlreadyConnected
-                            -- ^ The socket is already connected to another
-                            -- host.
 
                           | NoRouteToHost
                             -- ^ It's not possible to reach this host from this
@@ -180,7 +184,7 @@ newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
      mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
      udpClose <- case mbClose of
                    Just unreg -> return unreg
-                   Nothing    -> throwIO (AlreadyOpen src srcPort)
+                   Nothing    -> throwIO (AlreadyListening src srcPort)
 
      return $! UdpSocket { .. }
 
@@ -189,17 +193,10 @@ instance DataSocket UdpSocket where
 
   -- Always lookup the route before modifying the state of the socket, so that
   -- the state can be manipulated atomically.
-  sConnect ns SocketConfig { .. } mbDev mbSrc mbPort dst dstPort =
+  sConnect ns SocketConfig { .. } mbDev src mbPort dst dstPort =
     do let udpNS = view networkStack ns
 
-       mbRoute <- lookupRoute udpNS dst
-       ri      <- case mbRoute of
-                    Just ri | maybe True (riDev ri ==) mbDev -> return ri
-                    _                                        -> throwSE dst NoRouteToHost
-
-       src <- case mbSrc of
-                Just src | src == riSource ri -> return src
-                _                             -> throwSE dst NoRouteToHost
+       ri <- route udpNS mbDev src dst
 
        srcPort <- case mbPort of
                     Just p  -> return p
@@ -215,7 +212,7 @@ instance DataSocket UdpSocket where
        mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
        udpClose <- case mbClose of
                      Just unreg -> return unreg
-                     Nothing    -> throwIO (AlreadyOpen src srcPort)
+                     Nothing    -> throwIO (AlreadyConnected src srcPort dst dstPort)
 
        return UdpSocket { .. }
 
@@ -268,16 +265,10 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
      case state of
 
        KnownSource mbDev src srcPort ->
-         do mbRoute <- lookupRoute udpNS dst
-            let sameDev = case mbDev of
-                            Just dev' -> \ ri -> dev' == riDev ri
-                            Nothing   -> \ _  -> True
-
+         do mbRoute <- route' udpNS mbDev src dst
             case mbRoute of
-              -- the device holds the same address we were expecting to send
-              -- from, or we're sending from the wildcard address
-              Just ri
-                | sameDev ri && (src == riSource ri || isWildcardAddr src) ->
+
+              Just ri ->
                   do _ <- primSendUdp udpNS ri dst srcPort dstPort bytes
                      return ()
 
@@ -294,24 +285,70 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
                   throwSE dst NoRouteToHost
 
        -- we can't use sendto if sConnect has been used already
-       KnownRoute {} ->
-         throwSE dst AlreadyConnected
+       KnownRoute ri dst' srcPort dstPort' ->
+         throwSE dst (AlreadyConnected (riSource ri) srcPort dst' dstPort')
 {-# INLINE sendto #-}
 
 
 -- TCP Sockets -----------------------------------------------------------------
 
-data TcpSocket addr = TcpSocket { tcpNS :: !NetworkStack
+data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
+                                , tcpTcb :: !Tcb
                                 }
+
+-- | Add a new active connection to the TCP state. The connection will initially
+-- be in the 'SynSent' state, as a Syn will be sent when the 'Tcb' is created.
+activeOpen :: Network addr
+           => NetworkStack -> RouteInfo addr -> SockPort -> addr -> SockPort
+           -> IO (Maybe Tcb)
+activeOpen ns ri srcPort dst dstPort =
+  do let ri'  = toAddr `fmap` ri
+         dst' = toAddr dst
+
+     iss <- Tcp.nextISS (view Tcp.tcpState ns) (riSource ri') srcPort dst' dstPort
+     tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed
+
+     let key            = Tcp.Key dst' dstPort (riSource ri') srcPort
+         update Nothing = (Just tcb, True)
+         update Just{}  = (Nothing, False)
+     success <- HT.alter update key (view Tcp.tcpActive ns)
+
+     if success
+        then
+          do syn <- Tcp.mkSyn tcb
+             _   <- Tcp.sendWithTcb ns tcb syn L.empty
+
+             return (Just tcb)
+
+        else return Nothing
+
 
 instance Socket TcpSocket where
 
   sClose sock = undefined
 
-
 instance DataSocket TcpSocket where
 
-  sConnect ns mbDev src mbSrcPort dst dstPort = undefined
+  sConnect ns SocketConfig { .. } mbDev src mbSrcPort dst dstPort =
+    do let tcpNS = view networkStack ns
+
+       ri <- route tcpNS mbDev src dst
+
+       srcPort <- case mbSrcPort of
+                    Just port -> return port
+                    Nothing   ->
+                      do mb <- nextTcpPort tcpNS (toAddr src) (toAddr dst) dstPort
+                         case mb of
+                           Just port -> return port
+                           Nothing   -> throwSE dst NoPortAvailable
+
+       -- activeOpen will start the connection for us, sending a SYN to the
+       -- remote end of the connection.
+       mbTcb <- activeOpen tcpNS ri srcPort dst dstPort
+       case mbTcb of
+         -- XXX need to wait until the connection is finalized
+         Just tcpTcb -> return TcpSocket { .. }
+         Nothing     -> throwSE dst (AlreadyConnected src srcPort dst dstPort)
 
   sWrite sock bytes = undefined
 
@@ -336,3 +373,33 @@ instance ListenSocket TcpListenSocket where
   sListen ns src srcPort = undefined
 
   sAccept sock = undefined
+
+
+
+
+-- Utilities -------------------------------------------------------------------
+
+-- | Raise an exception when no route can be found to the destination.
+route :: Network addr
+      => NetworkStack -> Maybe Device -> addr -> addr -> IO (RouteInfo addr)
+
+route ns mbDev src dst =
+  do mbRoute <- route' ns mbDev src dst
+     case mbRoute of
+       Just ri -> return ri
+       Nothing -> throwSE dst NoRouteToHost
+
+
+-- | Return source routing information, when a route exists to the destination.
+route' :: Network addr
+       => NetworkStack -> Maybe Device -> addr -> addr
+       -> IO (Maybe (RouteInfo addr))
+
+route' ns mbDev src dst =
+  do mbRoute <- lookupRoute ns dst
+     case mbRoute of
+       Just ri | maybe True (riDev ri ==) mbDev
+                 && (src == riSource ri || isWildcardAddr src) ->
+                 return (Just ri)
+
+       _ -> return Nothing

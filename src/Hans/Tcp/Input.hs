@@ -234,9 +234,10 @@ createChildTcb ns dev remote local hdr parent =
                   Nothing -> escape
 
      -- construct a new tcb, and initialize it as specified on (page 65)
-     io $ do child <- newTcb ns (Just parent) ri (tcpDestPort hdr) remote
+     io $ do iss   <- nextIss parent
+
+             child <- newTcb ns (Just parent) iss ri (tcpDestPort hdr) remote
                           (tcpSourcePort hdr) SynReceived
-             iss   <- nextIss parent
 
              atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
              atomicWriteIORef (tcbIss child)  iss

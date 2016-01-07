@@ -16,14 +16,13 @@ module Hans (
     startDevice,
 
     -- * Network Layer
-    Addr(),
+    Addr(), sameFamily,
     NetworkAddr(..),
     Network(..),
     RouteInfo(..),
-    lookupRoute,
 
     -- ** IP4
-    IP4.IP4(), IP4.packIP4,
+    IP4.IP4(), IP4.packIP4, IP4.unpackIP4,
     IP4.IP4Mask(..),
     IP4.Route(..), IP4.RouteType(Direct,Indirect),
     addIP4Route,

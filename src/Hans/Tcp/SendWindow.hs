@@ -106,7 +106,9 @@ data Window = Window { wRetransmitQueue :: !Segments
                      }
 
 
-emptyWindow :: TcpSeqNum -> TcpSeqNum -> Window
+emptyWindow :: TcpSeqNum -- ^ SND.NXT
+            -> TcpSeqNum -- ^ SND.WND
+            -> Window
 emptyWindow wSndNxt wSndWnd =
   Window { wRetransmitQueue = []
          , wSndAvail        = fromTcpSeqNum wSndWnd

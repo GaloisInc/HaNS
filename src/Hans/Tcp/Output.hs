@@ -38,16 +38,15 @@ import           Data.Word (Word32)
 -- | Send a single ACK immediately.
 sendAck :: NetworkStack -> Tcb -> IO ()
 sendAck ns tcb =
-  do _ <- sendWithTcb ns tcb emptyTcpHeader L.empty
+  do _ <- sendWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
      return ()
 
 -- | Send a segment and queue it in the remote window. The number of bytes that
 -- were sent is returned.
-sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO Int64
+sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO (Maybe Int64)
 sendWithTcb ns Tcb { .. } hdr body =
   do recvWindow <- readIORef tcbRecvWindow
-     let mkHdr seqNum = set tcpAck True
-                      $ hdr { tcpSeqNum     = seqNum
+     let mkHdr seqNum = hdr { tcpSeqNum     = seqNum
                             , tcpAckNum     = view Recv.rcvNxt recvWindow
                             , tcpDestPort   = tcbRemotePort
                             , tcpSourcePort = tcbLocalPort }
@@ -60,10 +59,10 @@ sendWithTcb ns Tcb { .. } hdr body =
          do when startRT $ atomicModifyIORef' tcbTimers
                          $ \ tt -> (resetRetransmit tt, ())
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
-            return (L.length body')
+            return (Just (L.length body'))
 
        Nothing ->
-            return 0
+            return Nothing
 
 
 
