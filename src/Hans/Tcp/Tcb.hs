@@ -146,7 +146,12 @@ whenState tcb state m =
 
 -- | The Tcb type is the only one that supports changing state.
 setState :: Tcb -> State -> IO ()
-setState Tcb { .. } = atomicWriteIORef tcbState
+setState tcb state =
+  do atomicWriteIORef (tcbState tcb) state
+     case state of
+       Established -> tcbEstablished tcb tcb
+       Closed      -> tcbClosed      tcb tcb
+       _           -> return ()
 
 getStateFrom :: GetState tcb => Getting tcb s tcb -> s -> IO State
 getStateFrom l s = getState (view l s)
@@ -211,7 +216,9 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                  -- ^ Parent to notify if this tcb was generated from a socket
                  -- in the LISTEN state
 
-               , tcbState :: !(IORef State)
+               , tcbState       :: !(IORef State)
+               , tcbEstablished :: Tcb -> IO ()
+               , tcbClosed      :: Tcb -> IO ()
 
                  -- Sender variables
                , tcbSndUp  :: !SeqNumVar -- ^ SND.UP
@@ -247,14 +254,19 @@ newTcb :: HasConfig state
        -> Maybe ListenTcb
        -> TcpSeqNum -- ^ ISS
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
-       -> State -> IO Tcb
-newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state =
+       -> State
+       -> (Tcb -> IO ())
+       -> (Tcb -> IO ())
+       -> IO Tcb
+newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
+  tcbEstablished tcbClosed =
   do let Config { .. } = view config cxt
      tcbState  <- newIORef state
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
-     tcbSendWindow <- newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
+     tcbSendWindow <-
+         newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
      tcbIss    <- newIORef iss
      tcbRecvWindow <- newIORef (Recv.emptyWindow 0 (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0

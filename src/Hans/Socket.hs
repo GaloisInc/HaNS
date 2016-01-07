@@ -36,8 +36,9 @@ import           Hans.Udp.Output (primSendUdp)
 import qualified Hans.Tcp.Message as Tcp
 import qualified Hans.Tcp.Output as Tcp
 import qualified Hans.Tcp.State as Tcp
-import           Hans.Tcp.Tcb (Tcb(..),newTcb,State(..))
+import qualified Hans.Tcp.Tcb as Tcp
 
+import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar)
 import           Control.Exception
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -293,32 +294,39 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
 -- TCP Sockets -----------------------------------------------------------------
 
 data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
-                                , tcpTcb :: !Tcb
+                                , tcpTcb :: !Tcp.Tcb
                                 }
 
 -- | Add a new active connection to the TCP state. The connection will initially
 -- be in the 'SynSent' state, as a Syn will be sent when the 'Tcb' is created.
 activeOpen :: Network addr
            => NetworkStack -> RouteInfo addr -> SockPort -> addr -> SockPort
-           -> IO (Maybe Tcb)
+           -> IO (Maybe Tcp.Tcb)
 activeOpen ns ri srcPort dst dstPort =
   do let ri'  = toAddr `fmap` ri
          dst' = toAddr dst
 
+     done <- newEmptyMVar
+
      iss <- Tcp.nextISS (view Tcp.tcpState ns) (riSource ri') srcPort dst' dstPort
-     tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed
+     tcb <- Tcp.newTcb ns Nothing iss ri' srcPort dst' dstPort Tcp.Closed
+                (\_ -> tryPutMVar done True  >> return ())
+                (\_ -> tryPutMVar done False >> return ())
 
      let key            = Tcp.Key dst' dstPort (riSource ri') srcPort
          update Nothing = (Just tcb, True)
          update Just{}  = (Nothing, False)
      success <- HT.alter update key (view Tcp.tcpActive ns)
-
      if success
         then
           do syn <- Tcp.mkSyn tcb
              _   <- Tcp.sendWithTcb ns tcb syn L.empty
+             Tcp.setState tcb Tcp.SynSent
 
-             return (Just tcb)
+             established <- takeMVar done
+             if established
+                then return (Just tcb)
+                else return Nothing
 
         else return Nothing
 

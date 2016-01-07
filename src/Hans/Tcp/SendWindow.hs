@@ -156,8 +156,12 @@ queueSegment mkHdr body win
   trimmedBody = L.take (wSndAvail win) body
   seg         = mkSegment hdr trimmedBody
 
+  size        = view segLen seg
+
   win' = win { wRetransmitQueue = wRetransmitQueue win ++ [seg]
-             , wSndAvail        = wSndAvail win - view segLen seg }
+             , wSndAvail        = wSndAvail win - size
+             , wSndNxt          = wSndNxt win + fromIntegral size
+             }
 
   -- start the retransmit timer when the queue was empty.
   startRTO = null (wRetransmitQueue win)

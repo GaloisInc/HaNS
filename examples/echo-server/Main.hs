@@ -66,6 +66,9 @@ main  =
 
      con <- sConnect ns defaultSocketConfig Nothing WildcardIP4 Nothing
                 (packIP4 172 16 181 128) 9000
+
+     putStrLn "Connected"
+
      sClose (con :: TcpSocket IP4)
 
      threadDelay (1000000 * 60)

@@ -120,8 +120,10 @@ handleSynSent ns _dev hdr _payload tcb =
      when (view tcpAck hdr) $
        do sndNxt <- getSndNxt tcb
 
-          when (tcpSeqNum hdr <= iss || tcpAckNum hdr > sndNxt) $
-            do rst <- io (mkRst hdr)
+          when (tcpAckNum hdr <= iss || tcpAckNum hdr > sndNxt) $
+            do when (view tcpRst hdr) escape
+
+               rst <- io (mkRst hdr)
                _   <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) rst L.empty)
                escape
 
@@ -132,7 +134,6 @@ handleSynSent ns _dev hdr _payload tcb =
             -- would have not made it this far otherwise.
             do setState tcb Closed
                deleteActive ns tcb
-               -- XXX: notify the user
 
           escape
 
@@ -150,7 +151,7 @@ handleSynSent ns _dev hdr _payload tcb =
           -- the SYN?
           unless res escape
 
-          io (atomicWriteIORef (tcbIrs    tcb) (tcpSeqNum hdr))
+          io (atomicWriteIORef (tcbIrs tcb) (tcpSeqNum hdr))
 
           sndUna <- io $
             if view tcpAck hdr
@@ -161,15 +162,13 @@ handleSynSent ns _dev hdr _payload tcb =
                else getSndUna tcb
 
           when (sndUna > iss) $
-            do io (setState tcb Established)
-
-               -- increment the syn backlog if this socket originated with a
+            do -- increment the syn backlog if this socket originated with a
                -- listening connection
                when (isJust (tcbParent tcb)) (io (incrSynBacklog ns))
 
-               -- XXX: notify the user
                -- XXX: include any queued data/controls
                io (sendAck ns tcb)
+               io (setState tcb Established)
 
                -- XXX: not processing additional data/controls from the ack
                escape
@@ -238,6 +237,9 @@ createChildTcb ns dev remote local hdr parent =
 
              child <- newTcb ns (Just parent) iss ri (tcpDestPort hdr) remote
                           (tcpSourcePort hdr) SynReceived
+                          -- XXX fix these
+                          (\_ -> return ())
+                          (\_ -> return ())
 
              atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
              atomicWriteIORef (tcbIss child)  iss
