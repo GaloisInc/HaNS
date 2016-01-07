@@ -3,13 +3,8 @@
 
 module Hans.Udp.Packet where
 
-import Hans.Checksum (finalizeChecksum,extendChecksum)
-import Hans.IP4.Packet (IP4,ip4PseudoHeader)
-import Hans.Serialize
-
-import qualified Data.ByteString.Lazy as L
-import           Data.Serialize (Get,getWord16be,label,Putter,Put,putWord16be)
-import           Data.Word (Word16)
+import Data.Serialize (Get,getWord16be,label,Putter,Put,putWord16be)
+import Data.Word (Word16)
 
 
 -- Udp Ports -------------------------------------------------------------------

@@ -1,6 +1,5 @@
 module Hans.Serialize where
 
-import qualified Data.ByteString as S
 import qualified Data.ByteString.Builder.Extra as B
 import qualified Data.ByteString.Lazy as L
 import           Data.Serialize (Put,execPut)

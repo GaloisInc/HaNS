@@ -61,7 +61,6 @@ library
         exposed-modules:        Hans
                                 Hans.Addr
                                 Hans.Addr.Types
-                                Hans.Buffer.Datagram
                                 Hans.Checksum
                                 Hans.Config
                                 Hans.Device
@@ -107,6 +106,12 @@ library
                                 Hans.Udp.Output
                                 Hans.Udp.Packet
                                 Hans.Udp.State
+
+        other-modules:          Hans.Buffer.Datagram
+                                Hans.Buffer.Stream
+                                Hans.Socket.Tcp
+                                Hans.Socket.Types
+                                Hans.Socket.Udp
 
 executable echo-server
         if flag(examples)
