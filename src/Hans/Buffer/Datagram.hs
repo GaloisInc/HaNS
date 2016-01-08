@@ -8,8 +8,8 @@ module Hans.Buffer.Datagram (
     tryReadChunk,
   ) where
 
-import           Control.Concurrent
-                     (MVar,newEmptyMVar,tryPutMVar,takeMVar,tryTakeMVar)
+import Hans.Buffer.Signal
+
 import           Control.Monad (when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
@@ -19,10 +19,8 @@ import qualified Data.Sequence as Seq
 
 -- Buffers ---------------------------------------------------------------------
 
-type Signal = MVar ()
-
 data Buffer a = Buffer { bufContents :: {-# UNPACK #-} !(IORef (BufContents a))
-                       , bufNotify   :: {-# UNPACK #-} !Signal
+                       , bufSignal   :: {-# UNPACK #-} !Signal
                          -- ^ The wait queue. Waiters queue up trying to take the
                          -- MVar, and are unblocked when there are chunks
                          -- available in the queue.
@@ -31,44 +29,37 @@ data Buffer a = Buffer { bufContents :: {-# UNPACK #-} !(IORef (BufContents a))
 newBuffer :: Int -> IO (Buffer a)
 newBuffer size =
   do bufContents <- newIORef (emptyBufContents size)
-     bufNotify   <- newEmptyMVar
+     bufSignal   <- newSignal
      return Buffer { .. }
-
-signal :: Signal -> IO ()
-signal mvar =
-  do _ <- tryPutMVar mvar ()
-     return ()
 
 -- | Write a chunk to the buffer. Returns 'False' if the chunk could not be
 -- written.
 writeChunk :: Buffer a -> a -> S.ByteString -> IO Bool
 writeChunk Buffer { .. } a bytes =
   do (written,more) <- atomicModifyIORef' bufContents (queueChunk a bytes)
-     when more (signal bufNotify)
+     when more (signal bufSignal)
      return written
 
 
 -- | Read a chunk from the buffer, blocking until one is ready. 
 readChunk :: Buffer a -> IO (a,S.ByteString)
 readChunk Buffer { .. } =
-  do ()           <- takeMVar bufNotify
+  do waitSignal bufSignal
      (bytes,more) <- atomicModifyIORef' bufContents dequeueChunk
-     when more (signal bufNotify)
+     when more (signal bufSignal)
      return bytes
 
 
 -- | Poll for a ready chunk.
 tryReadChunk :: Buffer a -> IO (Maybe (a,S.ByteString))
 tryReadChunk Buffer { .. } =
-  do mb <- tryTakeMVar bufNotify
-     case mb of
+  do available <- tryWaitSignal bufSignal
+     if available
+        then do (bytes,more) <- atomicModifyIORef' bufContents dequeueChunk
+                when more (signal bufSignal)
+                return (Just bytes)
 
-       Just () ->
-         do (bytes,more) <- atomicModifyIORef' bufContents dequeueChunk
-            when more (signal bufNotify)
-            return (Just bytes)
-
-       Nothing -> return Nothing
+        else return Nothing
 
 
 -- Buffer State ----------------------------------------------------------------

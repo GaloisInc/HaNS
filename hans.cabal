@@ -108,6 +108,7 @@ library
                                 Hans.Udp.State
 
         other-modules:          Hans.Buffer.Datagram
+                                Hans.Buffer.Signal
                                 Hans.Buffer.Stream
                                 Hans.Socket.Tcp
                                 Hans.Socket.Types
