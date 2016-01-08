@@ -15,6 +15,7 @@ import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 
 import           Control.Monad (when)
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef
                      (IORef,newIORef,atomicModifyIORef',readIORef
@@ -288,6 +289,9 @@ newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
      tcbTimers <- newIORef emptyTcpTimers
      return Tcb { .. }
 
+-- | Record that a delayed ack should be sent.
+signalDelayedAck :: Tcb -> IO ()
+signalDelayedAck Tcb { .. } = atomicWriteIORef tcbNeedsDelayedAck True
 
 -- | Set the value of RCV.NXT. Returns 'True' when the value has been set
 -- successfully, and 'False' if the receive queue was not empty.
@@ -307,6 +311,9 @@ setSndNxt sndNxt Tcb { .. } =
 finalizeTcb :: Tcb -> IO ()
 finalizeTcb Tcb { .. } = undefined
 
+-- | Queue bytes in the receive buffer.
+queueBytes :: S.ByteString -> Tcb -> IO ()
+queueBytes bytes Tcb { .. } = Stream.putBytes bytes tcbRecvBuffer
 
 -- | Remove data from the receive buffer, and move the right-side of the receive
 -- window.

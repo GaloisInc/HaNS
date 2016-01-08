@@ -102,42 +102,143 @@ handleActive ns dev hdr payload tcb =
                  return ()
 
        Just segs ->
-         do mapM_ (handleActiveSeg ns dev tcb) segs
+         do handleActiveSegs ns dev tcb segs
             escape
 
 
 -- | At this point, the list of segments is contiguous, and starts at the old
 -- value of RCV.NXT. RCV.NXT has been advanced to point at the end of the
 -- segment list.
-handleActiveSeg :: NetworkStack -> Device -> Tcb -> (TcpHeader,S.ByteString)
-                -> Hans ()
-handleActiveSeg ns _dev tcb (hdr,payload) =
-  do -- page 70 and page 71
-     -- check RST/check SYN
-     when (view tcpRst hdr || view tcpSyn hdr) $
-       do io $ do when (view tcpSyn hdr) $
-                    do let rst = set tcpRst True emptyTcpHeader
-                       _ <- sendWithTcb ns tcb rst L.empty
-                       return ()
+handleActiveSegs :: NetworkStack -> Device -> Tcb -> [(TcpHeader,S.ByteString)]
+                 -> Hans ()
+handleActiveSegs ns _dev tcb = go
+  where
+  go []                   = return ()
+  go ((hdr,payload):segs) =
+    do let continue = go segs
 
-                  -- NOTE: we don't set the state of a passive socket to Closed,
-                  -- as that might provoke action by the listening socket.
-                  state <- getState tcb
-                  if state == SynReceived && isJust (tcbParent tcb)
-                     then incrSynBacklog ns
-                     else setState tcb Closed
+       -- page 70 and page 71
+       -- check RST/check SYN
+       when (view tcpRst hdr || view tcpSyn hdr) $
+         do io $ do when (view tcpSyn hdr) $
+                      do let rst = set tcpRst True emptyTcpHeader
+                         _ <- sendWithTcb ns tcb rst L.empty
+                         return ()
 
-                  deleteActive ns tcb
+                    -- NOTE: we don't set the state of a passive socket to Closed,
+                    -- as that might provoke action by the listening socket.
+                    state <- getState tcb
+                    if state == SynReceived && isJust (tcbParent tcb)
+                       then incrSynBacklog ns
+                       else setState tcb Closed
 
-          escape
+                    deleteActive ns tcb
 
-     -- page 71
-     -- skipping security/precedence
+            escape
 
-     -- page 72
-     -- check ACK
-     when (view tcpAck hdr) $
-       do undefined
+       -- page 71
+       -- skipping security/precedence
+
+       -- page 72
+       -- check ACK
+       unless (view tcpAck hdr) continue
+
+       -- update the send window
+       mbAck <- io (atomicModifyIORef' (tcbSendWindow tcb) (ackSegment (tcpAckNum hdr)))
+
+       state <- io (getState tcb)
+       case state of
+
+         SynReceived ->
+           case mbAck of
+             Just True  -> io (setState tcb Established)
+             Just False -> return ()
+             Nothing    -> do let hdr = set tcpRst True emptyTcpHeader
+                              _ <- io (sendWithTcb ns tcb hdr L.empty)
+                              continue
+
+         FinWait1 ->
+           case mbAck of
+             Just True ->
+               do io (setState tcb FinWait2)
+                  io (processFinWait2 ns tcb hdr)
+                  continue
+
+             _ -> continue
+
+         FinWait2 ->
+           case mbAck of
+             Just True ->
+               do io (processFinWait2 ns tcb hdr)
+                  continue
+
+             _ -> continue
+
+         Closing ->
+           case mbAck of
+             Just True -> enterTimeWait ns tcb
+             _         -> continue
+
+         LastAck ->
+           case mbAck of
+             Just True ->
+               do io (setState tcb Closed)
+                  io (deleteActive ns tcb)
+                  escape
+
+             _ -> continue
+
+         -- TimeWait processing is done in handleTimeWait
+
+         -- CloseWait | Established
+         _ -> return ()
+
+       -- page 73
+       -- check URG
+
+       -- page 74
+       -- process the segment text
+       when (view tcpPsh hdr || S.length payload > 0) $
+         do io $ do queueBytes payload tcb
+                    signalDelayedAck tcb
+
+       -- page 75
+       -- check FIN
+       when (view tcpFin hdr) $
+         do -- send an ACK to the FIN
+            _ <- io (sendAck ns tcb)
+
+            state' <- io (getState tcb)
+            case state' of
+
+              SynReceived -> io (setState tcb CloseWait)
+              Established -> io (setState tcb CloseWait)
+
+              FinWait1 ->
+                case mbAck of
+                  Just True -> enterTimeWait ns tcb
+                  _         -> io (setState tcb Closing)
+
+              FinWait2 -> enterTimeWait ns tcb
+
+              _ -> continue
+
+       continue
+
+
+-- | Processing for the FinWait2 state, when the retransmit queue is known to be
+-- empty.
+processFinWait2 :: NetworkStack -> Tcb -> TcpHeader -> IO ()
+processFinWait2 ns Tcb { .. } hdr =
+  do () <- error "FinWait2"
+     -- XXX acknowledge the user's close request
+     return ()
+
+
+enterTimeWait :: NetworkStack -> Tcb -> Hans ()
+enterTimeWait ns Tcb { .. } =
+  do () <- error "enterTimeWait"
+     escape
 
 
 -- Half-open Connections -------------------------------------------------------
@@ -186,8 +287,7 @@ handleSynSent ns _dev hdr _payload tcb =
 
           sndUna <- io $
             if view tcpAck hdr
-               then do atomicModifyIORef' (tcbSendWindow tcb)
-                           $ \win -> (ackSegment (tcpAckNum hdr) win, ())
+               then do _ <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment (tcpAckNum hdr))
                        return (tcpAckNum hdr)
 
                else getSndUna tcb

@@ -65,8 +65,6 @@ leftEdge f seg@Segment { segHeader = hdr@TcpHeader { .. }, .. } =
       in Segment { segHeader = hdr' { tcpSeqNum = sn } -- NOTE: use old sn here
                  , segBody   = L.drop len' segBody
                  , .. }
-
-
 {-# INLINE leftEdge #-}
 
 
@@ -97,6 +95,8 @@ type Segments = [Segment]
 -- | This structure holds bookkeeping variables for the remote end's receive
 -- window, as well as the retransmit queue.
 data Window = Window { wRetransmitQueue :: !Segments
+                       -- ^ The retransmit queue contains segments that fall
+                       -- between SND.UNA and SND.NXT
 
                      , wSndAvail        :: !Int64
                        -- ^ The effective window
@@ -179,13 +179,21 @@ retransmitTimeout win = (win', mbSeg)
 
 
 -- | Remove all segments of the send window that occur before this sequence
--- number, and increase the size of the available window.
-ackSegment :: TcpSeqNum -> Window -> Window
-ackSegment ack win =
-  win { wRetransmitQueue = go (wRetransmitQueue win)
-      , wSndAvail        = wSndAvail win + fromTcpSeqNum (ack - view sndUna win)
-      , wSndNxt          = ack }
+-- number, and increase the size of the available window. When the segment
+-- doesn't acknowledge anything in the window, 'Nothing' as the second
+-- parameter. Otherwise, return a boolean that is 'True' when there are no
+-- outstanding segments.
+ackSegment :: TcpSeqNum -> Window -> (Window, Maybe Bool)
+ackSegment ack win
+  | view sndUna win <= ack && ack <= view sndNxt win =
+    ( win', Just (null (wRetransmitQueue win)) )
+
+  | otherwise =
+    ( win, Nothing )
   where
+  win' = win { wRetransmitQueue = go (wRetransmitQueue win)
+             , wSndAvail        = wSndAvail win + fromTcpSeqNum (ack - view sndUna win)
+             , wSndNxt          = ack }
 
   go (seg:rest)
       -- this segment is acknowledged by the ack
