@@ -16,7 +16,7 @@ import qualified Hans.Tcp.SendWindow as Send
 import Control.Monad (when)
 import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime,NominalDiffTime)
 import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef,atomicWriteIORef)
-import Data.Word (Word32)
+import Data.Word (Word32,Word16)
 import MonadLib (BaseM(..))
 
 
@@ -265,8 +265,10 @@ newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
+
      tcbSendWindow <-
          newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
+
      tcbIss    <- newIORef iss
      tcbRecvWindow <- newIORef (Recv.emptyWindow 0 (fromIntegral cfgTcpInitialWindow))
      tcbRcvUp  <- newIORef 0
@@ -302,7 +304,7 @@ data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
                                , twSndNxt     :: !TcpSeqNum     -- ^ SND.NXT
 
                                , twRcvNxt     :: !SeqNumVar     -- ^ RCV.NXT
-                               , twRcvWnd     :: !TcpSeqNum     -- ^ RCV.WND
+                               , twRcvWnd     :: !Word16        -- ^ RCV.WND
 
                                  -- Port information
                                , twSourcePort :: !TcpPort
@@ -355,19 +357,28 @@ getRcvNxt sock =
      return nxt
 {-# INLINE getRcvNxt #-}
 
-getRcvWnd :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
+getRcvWnd :: (BaseM io IO, CanReceive sock) => sock -> io Word16
 getRcvWnd sock =
-  do (_,wnd) <- getRecvWindow sock
-     return wnd
+  do (nxt,right) <- getRecvWindow sock
+     return (fromTcpSeqNum (right - nxt))
 {-# INLINE getRcvWnd #-}
 
+getRcvRight :: (BaseM io IO, CanReceive sock) => sock -> io TcpSeqNum
+getRcvRight sock =
+  do (_,right) <- getRecvWindow sock
+     return right
+{-# INLINE getRcvRight #-}
+
 class CanReceive sock where
+  -- | Retrieve the left and right edges of the receive window:
+  --
+  -- (RCV.NXT, RCV.NXT + RCV.WND)
   getRecvWindow :: BaseM io IO => sock -> io (TcpSeqNum,TcpSeqNum)
 
 instance CanReceive (IORef Recv.Window) where
   getRecvWindow ref = inBase $
     do rw <- readIORef ref
-       return (view Recv.rcvNxt rw, view Recv.rcvWnd rw)
+       return (view Recv.rcvNxt rw, view Recv.rcvRight rw)
   {-# INLINE getRecvWindow #-}
 
 instance CanReceive Tcb where
@@ -377,5 +388,5 @@ instance CanReceive Tcb where
 instance CanReceive TimeWaitTcb where
   getRecvWindow TimeWaitTcb { .. } = inBase $
     do rcvNxt <- readIORef twRcvNxt
-       return (rcvNxt,twRcvWnd)
+       return (rcvNxt,rcvNxt + fromIntegral twRcvWnd)
   {-# INLINE getRecvWindow #-}

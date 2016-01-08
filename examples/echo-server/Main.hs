@@ -69,6 +69,7 @@ main  =
 
      putStrLn "Connected"
 
+     threadDelay (1000000 * 60)
+
      sClose (con :: TcpSocket IP4)
 
-     threadDelay (1000000 * 60)

@@ -49,7 +49,9 @@ sendWithTcb ns Tcb { .. } hdr body =
      let mkHdr seqNum = hdr { tcpSeqNum     = seqNum
                             , tcpAckNum     = view Recv.rcvNxt recvWindow
                             , tcpDestPort   = tcbRemotePort
-                            , tcpSourcePort = tcbLocalPort }
+                            , tcpSourcePort = tcbLocalPort
+                            , tcpWindow     = view Recv.rcvWnd recvWindow
+                            }
 
      mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body)
 

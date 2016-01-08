@@ -15,7 +15,7 @@ import Hans.Tcp.Message
 import Hans.Tcp.Output (routeTcp,sendTcp,sendAck,sendWithTcb)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
-           (sequenceNumberValid,recvSegment,Segment(..))
+           (sequenceNumberValid,recvSegment)
 import Hans.Tcp.SendWindow (ackSegment)
 import Hans.Tcp.Tcb
 import Hans.Types
@@ -90,23 +90,54 @@ handleActive ns dev hdr payload tcb =
 
      -- page 69
      -- check sequence numbers
-     (valid,segs) <- io (atomicModifyIORef' (tcbRecvWindow tcb) (recvSegment hdr payload))
-     when (not valid) $
-       do unless (view tcpRst hdr) $ io $
-            do (rcvNxt,_) <- getRecvWindow tcb
-               sndNxt     <- getSndNxt tcb
-               ack        <- mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
-               _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
-               return ()
+     mbSegs <- io (atomicModifyIORef' (tcbRecvWindow tcb) (recvSegment hdr payload))
+     case mbSegs of
+
+       Nothing ->
+         do unless (view tcpRst hdr) $ io $
+              do (rcvNxt,_) <- getRecvWindow tcb
+                 sndNxt     <- getSndNxt tcb
+                 ack        <- mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
+                 _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
+                 return ()
+
+       Just segs ->
+         do mapM_ (handleActiveSeg ns dev tcb) segs
+            escape
+
+
+-- | At this point, the list of segments is contiguous, and starts at the old
+-- value of RCV.NXT. RCV.NXT has been advanced to point at the end of the
+-- segment list.
+handleActiveSeg :: NetworkStack -> Device -> Tcb -> (TcpHeader,S.ByteString)
+                -> Hans ()
+handleActiveSeg ns _dev tcb (hdr,payload) =
+  do -- page 70 and page 71
+     -- check RST/check SYN
+     when (view tcpRst hdr || view tcpSyn hdr) $
+       do io $ do when (view tcpSyn hdr) $
+                    do let rst = set tcpRst True emptyTcpHeader
+                       _ <- sendWithTcb ns tcb rst L.empty
+                       return ()
+
+                  -- NOTE: we don't set the state of a passive socket to Closed,
+                  -- as that might provoke action by the listening socket.
+                  state <- getState tcb
+                  if state == SynReceived && isJust (tcbParent tcb)
+                     then incrSynBacklog ns
+                     else setState tcb Closed
+
+                  deleteActive ns tcb
 
           escape
 
-     -- the segment was queued
-     when (null segs) escape
+     -- page 71
+     -- skipping security/precedence
 
-     -- At this point, the list of segments is contiguous, and starts at the old
-     -- value of RCV.NXT. RCV.NXT has been advanced to point at the end of the
-     -- segment list.
+     -- page 72
+     -- check ACK
+     when (view tcpAck hdr) $
+       do undefined
 
 
 -- Half-open Connections -------------------------------------------------------
@@ -259,8 +290,8 @@ createChildTcb ns dev remote local hdr parent =
 handleTimeWait :: NetworkStack -> TcpHeader -> S.ByteString -> TimeWaitTcb -> Hans ()
 handleTimeWait ns hdr payload tcb =
      -- page 69
-  do rcvNxt <- io (readIORef (twRcvNxt tcb))
-     unless (isJust (sequenceNumberValid rcvNxt (twRcvWnd tcb) hdr payload)) $
+  do (rcvNxt,rcvRight) <- getRecvWindow tcb
+     unless (isJust (sequenceNumberValid rcvNxt rcvRight hdr payload)) $
        do unless (view tcpRst hdr) $ io $
             do ack <- mkAck (twSndNxt tcb) rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
                _   <- sendTcp ns (twRouteInfo tcb) (twDest tcb) ack L.empty
