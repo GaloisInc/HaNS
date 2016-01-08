@@ -13,9 +13,10 @@ import           Hans.IP4.Packet
 import           Hans.Lens (view)
 import           Hans.Monad
 import           Hans.Network.Types (NetworkProtocol)
+import           Hans.Threads (forkNamed)
 import           Hans.Time (toUSeconds)
 
-import           Control.Concurrent (forkIO,ThreadId,threadDelay,killThread)
+import           Control.Concurrent (ThreadId,threadDelay,killThread)
 import           Control.Monad (forever)
 import qualified Data.ByteString as S
 import           Data.Time.Clock
@@ -36,7 +37,8 @@ data FragTable = FragTable { ftEntries     :: !Table
 newFragTable :: Config -> IO FragTable
 newFragTable Config { .. } =
   do ftEntries     <- HT.newHashTable 31
-     ftPurgeThread <- forkIO (purgeEntries cfgIP4FragTimeout ftEntries)
+     ftPurgeThread <- forkNamed "IP4 Fragment Purge Thread"
+                          (purgeEntries cfgIP4FragTimeout ftEntries)
      return FragTable { ftDuration = cfgIP4FragTimeout, .. }
 
 

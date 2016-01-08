@@ -40,15 +40,14 @@ activeOpen ns ri srcPort dst dstPort =
 
      done <- newEmptyMVar
 
-     iss <- nextISS (view tcpState ns) (riSource ri') srcPort dst' dstPort
+     iss <- nextIss (view tcpState ns) (riSource ri') srcPort dst' dstPort
      tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed
                 (\_ -> tryPutMVar done True  >> return ())
                 (\_ -> tryPutMVar done False >> return ())
 
-     let key            = Key dst' dstPort (riSource ri') srcPort
-         update Nothing = (Just tcb, True)
+     let update Nothing = (Just tcb, True)
          update Just{}  = (Nothing, False)
-     success <- HT.alter update key (view tcpActive ns)
+     success <- HT.alter update (view tcbKey tcb) (view tcpActive ns)
      if success
         then
           do syn <- mkSyn tcb
@@ -161,23 +160,29 @@ instance DataSocket TcpSocket where
   sTryRead TcpSocket { .. } len = guardRecv tcpTcb (tryReceiveBytes len tcpTcb)
 
 
-data TcpListenSocket addr = TcpListenSocket { tlNS :: !NetworkStack
+data TcpListenSocket addr = TcpListenSocket { tlNS  :: !NetworkStack
+                                            , tlTcb :: !ListenTcb
                                             }
 
 
 instance Socket TcpListenSocket where
 
-  sClose sock = undefined
+  -- NOTE: as listen sockets are always in the Listen state, we don't need to
+  -- consider any of the other cases on page 60 of RFC 793.
+  sClose TcpListenSocket { .. } = deleteListening tlNS tlTcb
+  {-# INLINE sClose #-}
 
 
 instance ListenSocket TcpListenSocket where
 
   type Client TcpListenSocket = TcpSocket
 
-  sListen ns src srcPort = undefined
+  sListen ns SocketConfig { .. } src srcPort backlog =
+    do let tlNS = view networkStack ns
+       tlTcb <- newListenTcb (toAddr src) srcPort backlog
+       registerListening tlNS tlTcb
+       return $! TcpListenSocket { .. }
 
-  sAccept sock = undefined
-
-
-
-
+  sAccept TcpListenSocket { .. } =
+    do tcpTcb <- acceptTcb tlTcb
+       return $! TcpSocket { tcpNS = tlNS, .. }

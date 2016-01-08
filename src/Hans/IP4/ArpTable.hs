@@ -20,10 +20,11 @@ import           Hans.Device.Types (DeviceStats,updateError,statTX)
 import           Hans.Ethernet (Mac)
 import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet (IP4)
+import           Hans.Threads (forkNamed)
 import           Hans.Time (toUSeconds)
 
 import           Control.Concurrent
-                     (threadDelay,MVar,newEmptyMVar,forkIO,ThreadId,tryPutMVar)
+                     (threadDelay,MVar,newEmptyMVar,ThreadId,tryPutMVar)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (forever)
 import           Data.Time.Clock
@@ -52,7 +53,8 @@ data Entry = Waiting [Maybe Mac -> IO ()]
 newArpTable :: Config -> IO ArpTable
 newArpTable Config { .. } =
   do atMacs        <- HT.newHashTable cfgArpTableSize
-     atPurgeThread <- forkIO (purgeArpTable cfgArpTableLifetime atMacs)
+     atPurgeThread <- forkNamed "Arp Purge Thread"
+                          (purgeArpTable cfgArpTableLifetime atMacs)
      return ArpTable { atLifetime = cfgArpTableLifetime, .. }
 
 

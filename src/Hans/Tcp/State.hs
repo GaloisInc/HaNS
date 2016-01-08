@@ -3,7 +3,38 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Hans.Tcp.State where
+module Hans.Tcp.State (
+    -- * Tcp State
+    HasTcpState(..), TcpState(),
+    newTcpState,
+
+    -- ** Listen Sockets
+    incrSynBacklog,
+    decrSynBacklog,
+    registerListening,
+    lookupListening,
+    deleteListening,
+
+    -- ** Active Sockets
+    Key(), tcbKey,
+    tcpActive,
+    lookupActive,
+    registerActive,
+    closeActive,
+    deleteActive,
+
+    -- ** TimeWait Sockets
+    registerTimeWait,
+    lookupTimeWait,
+    resetTimeWait,
+    deleteTimeWait,
+
+    -- ** Port Management
+    nextTcpPort,
+
+    -- ** Sequence Numbers
+    nextIss,
+  ) where
 
 import           Hans.Addr (Addr,wildcardAddr,putAddr)
 import           Hans.Config (HasConfig(..),Config(..))
@@ -12,9 +43,10 @@ import           Hans.Lens
 import           Hans.Network.Types (RouteInfo(..))
 import           Hans.Tcp.Packet
 import           Hans.Tcp.Tcb
+import           Hans.Threads (forkNamed)
 import           Hans.Time
 
-import           Control.Concurrent (forkIO,threadDelay,MVar,newMVar,modifyMVar)
+import           Control.Concurrent (threadDelay,MVar,newMVar,modifyMVar)
 import           Control.Monad (guard)
 import           Crypto.Hash (hash,Digest,MD5)
 import           Data.ByteArray (withByteArray)
@@ -35,11 +67,23 @@ import           System.Random (newStdGen,random,randoms)
 data ListenKey = ListenKey !Addr !TcpPort
                  deriving (Show,Eq,Ord,Generic)
 
+listenKey :: Getting r ListenTcb ListenKey
+listenKey  = to (\ ListenTcb { .. } -> ListenKey lSrc lPort)
+{-# INLINE listenKey #-}
+
+
 data Key = Key !Addr    -- ^ Remote address
                !TcpPort -- ^ Remote port
                !Addr    -- ^ Local address
                !TcpPort -- ^ Local port
            deriving (Show,Eq,Ord,Generic)
+
+tcbKey :: Getting r Tcb Key
+tcbKey  = to $ \Tcb { tcbRouteInfo = RouteInfo { .. }, .. } ->
+                Key tcbRemote tcbRemotePort riSource tcbLocalPort
+{-# INLINE tcbKey #-}
+
+
 
 instance Hashable ListenKey
 instance Hashable Key
@@ -126,19 +170,38 @@ incrSynBacklog state =
                      (\ backlog -> (backlog + 1, ()))
 
 
+-- Listening Sockets -----------------------------------------------------------
+
 -- | Register a new listening socket.
 registerListening :: HasTcpState state
-                  => state -> Addr -> TcpPort -> ListenTcb -> IO ()
-registerListening state addr port val =
-  HT.insert (ListenKey addr port) val (view tcpListen state)
+                  => state -> ListenTcb -> IO ()
+registerListening state tcb =
+  HT.insert (view listenKey tcb) tcb (view tcpListen state)
+{-# INLINE registerListening #-}
 
 
--- | Register a new active socket.
-registerActive :: HasTcpState state
-               => state -> Addr -> TcpPort -> Addr -> TcpPort -> Tcb -> IO ()
-registerActive state remote remotePort local localPort val =
-  HT.insert (Key remote remotePort local localPort) val (view tcpActive state)
+-- | Remove a listening socket.
+deleteListening :: HasTcpState state
+                => state -> ListenTcb -> IO ()
+deleteListening state tcb =
+  print ("deleting", view listenKey tcb) >>
+  HT.delete (view listenKey tcb) (view tcpListen state)
+{-# INLINE deleteListening #-}
 
+
+-- | Lookup a socket in the Listen state.
+lookupListening :: HasTcpState state
+                => state -> Addr -> TcpPort -> IO (Maybe ListenTcb)
+lookupListening state src port =
+  do mb <- HT.lookup (ListenKey src port) (view tcpListen state)
+     case mb of
+       Just {} -> return mb
+       Nothing ->
+         HT.lookup (ListenKey (wildcardAddr src) port) (view tcpListen state)
+{-# INLINE lookupListening #-}
+
+
+-- TimeWait Sockets ------------------------------------------------------------
 
 -- | Register a socket in the TimeWait state. If the heap was empty, fork off a
 -- thread to reap its contents after the timeWaitTimeout.
@@ -183,7 +246,7 @@ updateTimeWait state update =
             in (heap', reaper)
 
      case mbReap of
-       Just reaper -> do _ <- forkIO reaper
+       Just reaper -> do _ <- forkNamed "TimeWait Reaper" reaper
                          return ()
 
        Nothing     -> return ()
@@ -210,26 +273,6 @@ updateTimeWait state update =
          Nothing     -> return ()
 
 
--- | Lookup a socket in the Listen state.
-lookupListening :: HasTcpState state
-                => state -> Addr -> TcpPort -> IO (Maybe ListenTcb)
-lookupListening state src port =
-  do mb <- HT.lookup (ListenKey src port) (view tcpListen state)
-     case mb of
-       Just {} -> return mb
-       Nothing ->
-         HT.lookup (ListenKey (wildcardAddr src) port) (view tcpListen state)
-{-# INLINE lookupListening #-}
-
-
--- | Lookup an active socket.
-lookupActive :: HasTcpState state
-             => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
-lookupActive state dst dstPort src srcPort =
-  HT.lookup (Key dst dstPort src srcPort) (view tcpActive state)
-{-# INLINE lookupActive #-}
-
-
 -- | Lookup a socket in the TimeWait state.
 lookupTimeWait :: HasTcpState state
              => state -> Addr -> TcpPort -> Addr -> TcpPort
@@ -246,11 +289,28 @@ lookupTimeWait state dst dstPort src srcPort =
 {-# INLINE lookupTimeWait #-}
 
 
-tcbKey :: Tcb -> Key
-tcbKey Tcb { .. } =
-  let RouteInfo { .. } = tcbRouteInfo
-   in Key tcbRemote tcbRemotePort riSource tcbLocalPort
-{-# INLINE tcbKey #-}
+-- | Delete an entry from the TimeWait heap.
+deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
+deleteTimeWait state tw =
+  atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
+      (filterHeap (/= tw) heap, ())
+{-# INLINE deleteTimeWait #-}
+
+
+-- Active Sockets --------------------------------------------------------------
+
+-- | Register a new active socket.
+registerActive :: HasTcpState state => state -> Tcb -> IO ()
+registerActive state tcb = HT.insert (view tcbKey tcb) tcb (view tcpActive state)
+{-# INLINE registerActive #-}
+
+
+-- | Lookup an active socket.
+lookupActive :: HasTcpState state
+             => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
+lookupActive state dst dstPort src srcPort =
+  HT.lookup (Key dst dstPort src srcPort) (view tcpActive state)
+{-# INLINE lookupActive #-}
 
 
 -- | Delete the 'Tcb', and notify any waiting processes.
@@ -264,15 +324,8 @@ closeActive state tcb =
 -- | Delete an active connection from the tcp state.
 deleteActive :: HasTcpState state => state -> Tcb -> IO ()
 deleteActive state tcb =
-  HT.delete (tcbKey tcb) (view tcpActive state)
+  HT.delete (view tcbKey tcb) (view tcpActive state)
 {-# INLINE deleteActive #-}
-
-
--- | Delete an entry from the TimeWait heap.
-deleteTimeWait :: HasTcpState state => state -> TimeWaitTcb -> IO ()
-deleteTimeWait state tw =
-  atomicModifyIORef' (view tcpTimeWait state) $ \ heap ->
-      (filterHeap (/= tw) heap, ())
 
 
 -- Port Management -------------------------------------------------------------
@@ -302,10 +355,9 @@ pickFreshPort ht mkKey p0 = go 0 p0
 
 -- Sequence Numbers ------------------------------------------------------------
 
--- | Use 
-nextISS :: HasTcpState state
+nextIss :: HasTcpState state
         => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO TcpSeqNum
-nextISS state src srcPort dst dstPort =
+nextIss state src srcPort dst dstPort =
   do let TcpState { .. } = view tcpState state
      now <- getCurrentTime
      (m,f_digest) <- atomicModifyIORef' tcpISSTimer $ \ Tcp4USTimer { .. } ->

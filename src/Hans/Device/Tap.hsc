@@ -9,10 +9,11 @@ module Hans.Device.Tap (listDevices,openDevice) where
 
 import           Hans.Ethernet.Types (Mac(..))
 import           Hans.Device.Types
+import           Hans.Threads (forkNamed)
 import           Hans.Types (NetworkStack(..),InputPacket(..))
 
 import           Control.Concurrent
-                     (threadWaitRead,forkIO,killThread,newMVar,withMVar)
+                     (threadWaitRead,killThread,newMVar,withMVar)
 import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
@@ -57,8 +58,8 @@ openDevice ns devName devConfig =
            do mbTids <- readIORef threadIds
 
               when (mbTids == Nothing) $
-                do recvThread <- forkIO (tapRecvLoop ns dev fd)
-                   sendThread <- forkIO (tapSendLoop devStats fd devSendQueue)
+                do recvThread <- forkNamed "tapRecvLoop" (tapRecvLoop ns dev fd)
+                   sendThread <- forkNamed "tapSendLoop" (tapSendLoop devStats fd devSendQueue)
                    writeIORef threadIds (Just (recvThread,sendThread))
 
          devStop = withMVar lock $ \ () ->

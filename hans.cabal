@@ -113,6 +113,7 @@ library
                                 Hans.Socket.Tcp
                                 Hans.Socket.Types
                                 Hans.Socket.Udp
+                                Hans.Threads
 
 executable echo-server
         if flag(examples)

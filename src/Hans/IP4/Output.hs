@@ -24,9 +24,10 @@ import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Lens
 import Hans.Network.Types (NetworkProtocol)
 import Hans.Serialize (runPutPacket)
+import Hans.Threads (forkNamed)
 import Hans.Types
 
-import           Control.Concurrent (forkIO,threadDelay)
+import           Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (when,forever,unless)
 import qualified Data.ByteString.Lazy as L
@@ -157,7 +158,8 @@ arpOutgoing ns dev src next packets =
        -- The mac wasn't present in the table. If this was the first request for
        -- this address, start a request thread.
        Unknown newRequest () ->
-         when newRequest $ do _ <- forkIO (arpRequestThread ns dev src next)
+         when newRequest $ do _ <- forkNamed "arpRequestThread"
+                                       (arpRequestThread ns dev src next)
                               return ()
 
   where

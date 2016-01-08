@@ -10,6 +10,7 @@ import Hans.IP4.Packet (pattern WildcardIP4)
 import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
 
 import           Control.Concurrent (forkIO,threadDelay)
+import           Control.Exception
 import           Control.Monad (forever)
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy.Char8 as L8
@@ -31,7 +32,7 @@ main  =
      _ <- forkIO $ forever $ do threadDelay 1000000
                                 dumpStats (devStats dev)
 
-     _ <- forkIO (processPackets ns)
+     _ <- forkIO (showExceptions "processPackets" (processPackets ns))
 
      -- start receiving data
      startDevice dev
@@ -65,17 +66,31 @@ main  =
                }
 
 
-     con <- sConnect ns defaultSocketConfig Nothing WildcardIP4 Nothing
-                (packIP4 172 16 181 128) 9000
+     sock <- sListen ns defaultSocketConfig WildcardIP4 9001 10
+     _    <- forkIO $ forever $
+         do putStrLn "Waiting for a client"
+            client <- showExceptions "sAccept" (sAccept (sock :: TcpListenSocket IP4))
+            putStrLn "Got a client"
+            _ <- forkIO (handleClient client)
+            return ()
 
-     putStrLn "Connected"
-     let loop =
-           do bs <- sRead con 1024
-              if L8.null bs
-                 then sClose con
-                 else do sWrite con bs
-                         loop
-     loop
+     threadDelay (100 * 1000000)
 
-     sClose (con :: TcpSocket IP4)
+     putStrLn "done?"
 
+
+showExceptions :: String -> IO a -> IO a
+showExceptions l m = m `catch` \ e ->
+  do print (l, e :: SomeException)
+     throwIO e
+
+
+handleClient :: TcpSocket IP4 -> IO ()
+handleClient sock = loop
+  where
+  loop =
+    do str <- sRead sock 1024
+       if L8.null str
+          then sClose sock
+          else do sWrite sock str
+                  loop

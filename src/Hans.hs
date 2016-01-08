@@ -39,12 +39,12 @@ import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Network
+import           Hans.Threads (forkNamed)
 import           Hans.Types
 import qualified Hans.Udp.State as Udp
 import qualified Hans.Tcp.State as Tcp
 import qualified Hans.Tcp.Timers as Tcp
 
-import Control.Concurrent (forkIO)
 import Control.Concurrent.BoundedChan (newBoundedChan)
 import Data.IORef (newIORef,atomicModifyIORef')
 
@@ -59,8 +59,8 @@ newNetworkStack nsConfig =
      nsTcpState     <- Tcp.newTcpState nsConfig
      nsNameServers4 <- newIORef []
 
-     rec nsIP4Responder <- forkIO (IP4.responder ns)
-         nsTcpTimers    <- forkIO (Tcp.tcpTimers ns)
+     rec nsIP4Responder <- forkNamed "IP4.responder" (IP4.responder ns)
+         nsTcpTimers    <- forkNamed "Tcp.tcpTimers" (Tcp.tcpTimers ns)
          let ns = NetworkStack { .. }
 
      registerLoopback ns

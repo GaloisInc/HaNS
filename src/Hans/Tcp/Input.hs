@@ -345,7 +345,7 @@ handleListening ns dev remote local hdr _payload tcb =
      -- XXX we're not queueing any other control/data that arrived
      when (view tcpSyn hdr) $
        do canAccept <- io (decrSynBacklog ns)
-          unless canAccept escape
+          unless canAccept (rejectSyn ns dev remote local hdr)
 
           createChildTcb ns dev remote local hdr tcb
           escape
@@ -355,8 +355,6 @@ handleListening ns dev remote local hdr _payload tcb =
 
 
 -- | Create a child TCB from a listening one.
---
--- XXX this doesn't register the child on the syn queue of the parent
 createChildTcb :: NetworkStack -> Device -> Addr -> Addr -> TcpHeader -> ListenTcb
                -> Hans ()
 createChildTcb ns dev remote local hdr parent =
@@ -366,28 +364,31 @@ createChildTcb ns dev remote local hdr parent =
   do mbRoute <- io (findNextHop ns (Just dev) (Just local) remote)
      ri      <- case mbRoute of
                   Just ri -> return ri
-                  Nothing -> escape
+                  Nothing -> rejectSyn ns dev remote local hdr
+
+     -- reserve a spot in the accept queue
+     canAccept <- io (reserveSlot parent)
+     unless canAccept (rejectSyn ns dev remote local hdr)
 
      -- construct a new tcb, and initialize it as specified on (page 65)
-     io $ do iss   <- nextIss parent
-
-             child <- newTcb ns (Just parent) iss ri (tcpDestPort hdr) remote
-                          (tcpSourcePort hdr) SynReceived
-                          -- XXX fix these
-                          (\_ -> return ())
-                          (\_ -> return ())
-
-             atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
-             atomicWriteIORef (tcbIss child)  iss
+     io $ do iss   <- nextIss ns local (tcpDestPort hdr) remote (tcpSourcePort hdr)
+             child <- createChild ns iss parent ri remote hdr
 
              -- queueing a SYN/ACK in the send window will advance SND.NXT
              -- automatically
-             _ <- setSndNxt iss child
              let synAck = set tcpSyn True
                         $ set tcpAck True emptyTcpHeader
              _ <- sendWithTcb ns child synAck L.empty
 
-             registerActive ns remote (tcpSourcePort hdr) local (tcpDestPort hdr) child
+             registerActive ns child
+
+
+-- | Reject the SYN by sending an RST, drop the segment and return.
+rejectSyn :: NetworkStack -> Device -> Addr -> Addr -> TcpHeader -> Hans a
+rejectSyn ns dev remote local hdr =
+  do hdr' <- io (mkRst hdr)
+     _    <- io (routeTcp ns dev local remote hdr' L.empty)
+     escape
 
 
 -- TimeWait Connections --------------------------------------------------------

@@ -3,9 +3,61 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module Hans.Tcp.Tcb where
+module Hans.Tcp.Tcb (
+    -- * Timers
+    SlowTicks,
+    TcpTimers(..),
+    emptyTcpTimers,
+    resetRetransmit,
+    retryRetransmit,
+    stopRetransmit,
+    reset2MSL,
+    updateTimers,
+    calibrateRTO,
+
+    -- * TCB States
+    State(..),
+    GetState(..),
+    whenState,
+    setState,
+
+    -- * Sending
+    CanSend(..),
+    getSndNxt,
+    getSndWnd,
+
+    -- * Receiving
+    CanReceive(..),
+    getRcvNxt,
+    getRcvWnd,
+    getRcvRight,
+
+    -- * Listening TCBs
+    ListenTcb(..),
+    newListenTcb,
+    createChild,
+    reserveSlot,
+    acceptTcb,
+
+    -- * Active TCBs
+    Tcb(..),
+    newTcb,
+    signalDelayedAck,
+    setRcvNxt,
+    finalizeTcb,
+    getSndUna,
+
+    -- ** Windowing
+    queueBytes,
+    receiveBytes, tryReceiveBytes,
+
+    -- * TimeWait TCBs
+    TimeWaitTcb(..),
+    mkTimeWaitTcb,
+  ) where
 
 import           Hans.Addr (Addr)
+import           Hans.Buffer.Signal
 import qualified Hans.Buffer.Stream as Stream
 import           Hans.Config (HasConfig(..),Config(..))
 import           Hans.Lens
@@ -20,9 +72,10 @@ import qualified Data.ByteString.Lazy as L
 import           Data.IORef
                      (IORef,newIORef,atomicModifyIORef',readIORef
                      ,atomicWriteIORef)
+import qualified Data.Sequence as Seq
 import           Data.Time.Clock
-                     (UTCTime,getCurrentTime,diffUTCTime,NominalDiffTime)
-import           Data.Word (Word32,Word16)
+                     (UTCTime,diffUTCTime,NominalDiffTime)
+import           Data.Word (Word16)
 import           MonadLib (BaseM(..))
 
 
@@ -102,7 +155,7 @@ reset2MSL Config { .. } tt = (tt { tt2MSL = 4 * cfgTcpMSL }, ())
 
 
 -- | Update all slow-tick timers. Return the old timers, for use with
--- 'atomicModifyIORef'.
+-- 'atomicModifyIORef\''.
 updateTimers :: TcpTimers -> (TcpTimers, TcpTimers)
 updateTimers tt = (tt',tt)
   where
@@ -163,9 +216,6 @@ setState tcb state =
 
        _           -> return ()
 
-getStateFrom :: GetState tcb => Getting tcb s tcb -> s -> IO State
-getStateFrom l s = getState (view l s)
-
 class GetState tcb where
   getState :: tcb -> IO State
 
@@ -194,28 +244,74 @@ data State = Listen
 
 -- Listening Sockets -----------------------------------------------------------
 
-data IssGen = IssGen { issLastSeqNum :: !TcpSeqNum
-                     , issLastUpdate :: !UTCTime
-                     }
+data ListenTcb = ListenTcb { lSrc    :: !Addr
+                           , lPort   :: !TcpPort
 
--- | Update the ISS, based on a 128khz incrementing counter.
-genIss :: UTCTime -> IssGen -> (IssGen,TcpSeqNum)
-genIss now IssGen { .. } = (IssGen iss' now, iss')
-  where
-  increment :: Word32
-  increment  = round (diffUTCTime now issLastUpdate * 128000)
-  iss'       = issLastSeqNum + fromIntegral increment
-
-
-data ListenTcb = ListenTcb { lIss  :: !(IORef IssGen)
-                           , lSrc  :: !Addr
-                           , lPort :: !TcpPort
+                             -- accept
+                           , lAccept :: !(IORef AcceptQueue)
+                           , lAcceptSignal :: !Signal
                            }
 
-nextIss :: ListenTcb -> IO TcpSeqNum
-nextIss ListenTcb { .. } =
-  do now <- getCurrentTime
-     atomicModifyIORef' lIss (genIss now)
+-- | Create a new listening socket.
+newListenTcb :: Addr -> TcpPort -> Int -> IO ListenTcb
+newListenTcb lSrc lPort aqFree =
+  do lAccept       <- newIORef (AcceptQueue { aqTcbs = Seq.empty, .. })
+     lAcceptSignal <- newSignal
+     return ListenTcb { .. }
+
+
+-- | Create a child from a Syn request.
+createChild :: HasConfig cfg
+            => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo Addr -> Addr -> TcpHeader -> IO Tcb
+createChild cxt iss parent ri remote hdr =
+  do child <- newTcb cxt (Just parent) iss ri (tcpDestPort hdr) remote
+                  (tcpSourcePort hdr) SynReceived
+                  (queueTcb parent)
+                  (\_ -> return ())
+
+     atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
+     atomicWriteIORef (tcbIss child)  iss
+
+     _ <- setSndNxt iss child
+
+     return child
+
+
+data AcceptQueue = AcceptQueue { aqFree :: !Int
+                               , aqTcbs :: Seq.Seq Tcb
+                               }
+
+
+-- | Reserve a slot in the accept queue, returns True when the space has been
+-- reserved.
+reserveSlot :: ListenTcb -> IO Bool
+reserveSlot ListenTcb { .. } =
+  atomicModifyIORef' lAccept $ \ aq ->
+    if aqFree aq > 0
+       then (aq { aqFree = aqFree aq - 1 }, True)
+       else (aq, False)
+
+
+-- | Add a Tcb to the accept queue for this listening connection.
+queueTcb :: ListenTcb -> Tcb -> IO ()
+queueTcb ListenTcb { .. } tcb =
+  do atomicModifyIORef' lAccept $ \ aq ->
+         (aq { aqTcbs = aqTcbs aq Seq.|> tcb }, ())
+     signal lAcceptSignal
+
+
+-- | Wait until a Tcb is available in the accept queue.
+acceptTcb :: ListenTcb -> IO Tcb
+acceptTcb ListenTcb { .. } =
+  do waitSignal lAcceptSignal
+     atomicModifyIORef' lAccept $ \ AcceptQueue { .. } ->
+         case Seq.viewl aqTcbs of
+
+           tcb Seq.:< tcbs ->
+             (AcceptQueue { aqTcbs = tcbs, aqFree = aqFree + 1 }, tcb)
+
+           Seq.EmptyL ->
+             error "Accept queue signaled with an empty queue"
 
 
 -- Active Sockets --------------------------------------------------------------

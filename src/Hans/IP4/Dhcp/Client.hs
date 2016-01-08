@@ -19,10 +19,11 @@ import Hans.Socket
            (UdpSocket,newUdpSocket,sClose,sendto,recvfrom,SockPort
            ,defaultSocketConfig)
 import Hans.Serialize (runPutPacket)
+import Hans.Threads (forkNamed)
 import Hans.Time (toUSeconds)
 import Hans.Types (NetworkStack,networkStack,addRoute,addNameServer4)
 
-import           Control.Concurrent (forkIO,threadDelay,killThread)
+import           Control.Concurrent (threadDelay,killThread)
 import           Control.Monad (when,guard)
 import qualified Data.ByteString.Lazy as L
 import           Data.Maybe (fromMaybe,mapMaybe)
@@ -209,7 +210,7 @@ handleAck ns cfg dev offer Ack { .. } =
        if dcAutoRenew cfg
           then -- wait for half of the lease time, then automatically renew
                -- XXX: what happens on a 32-bit system here?
-               do tid <- forkIO $
+               do tid <- forkNamed "dhcpRenew" $
                          do threadDelay (fromIntegral ackLeaseTime * 500000)
                             renew ns cfg dev offer
 
