@@ -6,6 +6,7 @@
 module Hans.Tcp.Tcb where
 
 import           Hans.Addr (Addr)
+import qualified Hans.Buffer.Stream as Stream
 import           Hans.Config (HasConfig(..),Config(..))
 import           Hans.Lens
 import           Hans.Network.Types (RouteInfo)
@@ -13,11 +14,15 @@ import           Hans.Tcp.Packet
 import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 
-import Control.Monad (when)
-import Data.Time.Clock (UTCTime,getCurrentTime,diffUTCTime,NominalDiffTime)
-import Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef,atomicWriteIORef)
-import Data.Word (Word32,Word16)
-import MonadLib (BaseM(..))
+import           Control.Monad (when)
+import qualified Data.ByteString.Lazy as L
+import           Data.IORef
+                     (IORef,newIORef,atomicModifyIORef',readIORef
+                     ,atomicWriteIORef)
+import           Data.Time.Clock
+                     (UTCTime,getCurrentTime,diffUTCTime,NominalDiffTime)
+import           Data.Word (Word32,Word16)
+import           MonadLib (BaseM(..))
 
 
 -- Timers ----------------------------------------------------------------------
@@ -233,6 +238,7 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
 
                , tcbNeedsDelayedAck :: !(IORef Bool)
                , tcbRecvWindow :: !(IORef Recv.Window)
+               , tcbRecvBuffer :: !Stream.Buffer
 
                  -- Port information
                , tcbLocalPort  :: !TcpPort -- ^ Local port
@@ -270,7 +276,11 @@ newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
          newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
 
      tcbIss    <- newIORef iss
+
+     -- NOTE: the size of the receive buffer is gated by the local window
      tcbRecvWindow <- newIORef (Recv.emptyWindow 0 (fromIntegral cfgTcpInitialWindow))
+     tcbRecvBuffer <- Stream.newBuffer
+
      tcbRcvUp  <- newIORef 0
      tcbNeedsDelayedAck <- newIORef False
      tcbIrs    <- newIORef 0
@@ -296,6 +306,30 @@ setSndNxt sndNxt Tcb { .. } =
 -- | Cleanup the Tcb.
 finalizeTcb :: Tcb -> IO ()
 finalizeTcb Tcb { .. } = undefined
+
+
+-- | Remove data from the receive buffer, and move the right-side of the receive
+-- window.
+receiveBytes :: Int -> Tcb -> IO L.ByteString
+receiveBytes len Tcb { .. } =
+  do bytes <- Stream.takeBytes len tcbRecvBuffer
+     atomicModifyIORef' tcbRecvWindow
+         (Recv.moveRcvRight (fromIntegral (L.length bytes)))
+     return bytes
+
+-- | Non-blocking version of 'receiveBytes'.
+tryReceiveBytes :: Int -> Tcb -> IO (Maybe L.ByteString)
+tryReceiveBytes len Tcb { .. } =
+  do mbBytes <- Stream.tryTakeBytes len tcbRecvBuffer
+     case mbBytes of
+
+       Just bytes ->
+         do atomicModifyIORef' tcbRecvWindow
+                (Recv.moveRcvRight (fromIntegral (L.length bytes)))
+            return (Just bytes)
+
+       Nothing ->
+            return Nothing
 
 
 -- TimeWait Sockets ------------------------------------------------------------

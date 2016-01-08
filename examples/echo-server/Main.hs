@@ -68,6 +68,7 @@ main  =
                 (packIP4 172 16 181 128) 9000
 
      putStrLn "Connected"
+     print =<< sRead con 100
 
      threadDelay (1000000 * 60)
 

@@ -32,7 +32,7 @@ instance HasNetworkStack (TcpSocket addr) where
 -- be in the 'SynSent' state, as a Syn will be sent when the 'Tcb' is created.
 activeOpen :: Network addr
            => NetworkStack -> RouteInfo addr -> SockPort -> addr -> SockPort
-           -> IO (Maybe Tcb)
+           -> IO Tcb
 activeOpen ns ri srcPort dst dstPort =
   do let ri'  = toAddr `fmap` ri
          dst' = toAddr dst
@@ -56,10 +56,10 @@ activeOpen ns ri srcPort dst dstPort =
 
              established <- takeMVar done
              if established
-                then return (Just tcb)
-                else return Nothing
+                then return tcb
+                else throwIO ConnectionRefused
 
-        else return Nothing
+        else throwIO AlreadyConnected
 
 
 instance Socket TcpSocket where
@@ -90,17 +90,13 @@ instance DataSocket TcpSocket where
 
        -- activeOpen will start the connection for us, sending a SYN to the
        -- remote end of the connection.
-       mbTcb <- activeOpen tcpNS ri srcPort dst dstPort
-       case mbTcb of
-         -- XXX need to wait until the connection is finalized
-         Just tcpTcb -> return TcpSocket { .. }
-         Nothing     -> throwIO AlreadyConnected
+       tcpTcb <- activeOpen tcpNS ri srcPort dst dstPort
+       return TcpSocket { .. }
 
   sWrite sock bytes = undefined
 
-  sRead sock len = undefined
-
-  sTryRead ns len = undefined
+  sRead    TcpSocket { .. } len = receiveBytes len tcpTcb
+  sTryRead TcpSocket { .. } len = tryReceiveBytes len tcpTcb
 
 
 data TcpListenSocket addr = TcpListenSocket { tlNS :: !NetworkStack

@@ -10,6 +10,7 @@ module Hans.Tcp.RecvWindow (
     rcvWnd,
     rcvNxt, setRcvNxt,
     rcvRight,
+    moveRcvRight,
 
     -- ** Sequence Numbers
     sequenceNumberValid,
@@ -146,6 +147,15 @@ recvSegment hdr body win
     -- drop the invalid frame
   | otherwise =
     (win, Nothing)
+
+
+-- | Increase the right edge of the window by n, clamping at the maximum window
+-- size.
+moveRcvRight :: Int -> Window -> (Window, ())
+moveRcvRight n = \ win ->
+  let rcvRight' = min (view rcvRight win + fromIntegral n) (wMax win)
+   in (win { wRcvRight = rcvRight' }, ())
+{-# INLINE moveRcvRight #-}
 
 
 -- | Add a validated segment to the receive window, and return 
