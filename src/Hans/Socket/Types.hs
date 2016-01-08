@@ -85,6 +85,8 @@ data ConnectionException = AlreadyConnected
 
                          | ConnectionRefused
 
+                         | ConnectionClosing
+
                          | DoesNotExist
                            -- ^ The connection is already closed.
                            deriving (Show,Typeable)

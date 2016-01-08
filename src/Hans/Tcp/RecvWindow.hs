@@ -153,7 +153,7 @@ recvSegment hdr body win
 -- size.
 moveRcvRight :: Int -> Window -> (Window, ())
 moveRcvRight n = \ win ->
-  let rcvRight' = min (view rcvRight win + fromIntegral n) (wMax win)
+  let rcvRight' = view rcvRight win + min (max 0 (fromIntegral n)) (wMax win)
    in (win { wRcvRight = rcvRight' }, ())
 {-# INLINE moveRcvRight #-}
 

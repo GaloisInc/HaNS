@@ -8,6 +8,7 @@
 module Hans.Buffer.Stream (
     Buffer(),
     newBuffer,
+    bytesAvailable,
     putBytes,
     takeBytes,
     tryTakeBytes,
@@ -18,7 +19,7 @@ import Hans.Buffer.Signal
 import           Control.Monad (when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
+import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
 import qualified Data.Sequence as Seq
 
 
@@ -37,10 +38,16 @@ newBuffer  =
      bufSignal <- newSignal
      return Buffer { .. }
 
+bytesAvailable :: Buffer -> IO Bool
+bytesAvailable Buffer { .. } =
+  do st <- readIORef bufState
+     return (not (Seq.null st))
+
 putBytes :: S.ByteString -> Buffer -> IO ()
-putBytes bytes Buffer { .. } =
-  do atomicModifyIORef' bufState (sPut bytes)
-     signal bufSignal
+putBytes bytes Buffer { .. }
+  | S.null bytes = signal bufSignal
+  | otherwise    = do atomicModifyIORef' bufState (sPut bytes)
+                      signal bufSignal
 
 -- | Take up to n bytes from the buffer, blocking until some data is ready.
 takeBytes :: Int -> Buffer -> IO L.ByteString

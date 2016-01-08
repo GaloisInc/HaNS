@@ -239,10 +239,10 @@ lookupTimeWait state dst dstPort src srcPort =
      return (payload `fmap` F.find isConn heap)
   where
   isConn Entry { payload = TimeWaitTcb { .. } } =
-    and [ twDest               == dst
-        , twDestPort           == dstPort
+    and [ twRemote             == dst
+        , twRemotePort         == dstPort
         , riSource twRouteInfo == src
-        , twSourcePort         == srcPort ]
+        , twLocalPort          == srcPort ]
 {-# INLINE lookupTimeWait #-}
 
 

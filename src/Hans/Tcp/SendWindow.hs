@@ -2,14 +2,20 @@
 {-# LANGUAGE MultiWayIf #-}
 
 module Hans.Tcp.SendWindow (
+    -- * Remote Window
     Window(),
     emptyWindow,
     sndNxt, setSndNxt,
     sndUna,
     sndWnd,
+    nullWindow,
+
+    -- ** Packet Processing
     queueSegment,
     retransmitTimeout,
     ackSegment,
+
+    -- ** Selective Ack
     handleSack,
   ) where
 
@@ -17,7 +23,6 @@ import Hans.Lens
 import Hans.Tcp.Packet
 
 import qualified Data.ByteString.Lazy as L
-import           Data.Int (Int64)
 import           Data.List (sortBy)
 import           Data.Ord (comparing)
 
@@ -35,11 +40,6 @@ mkSegment segHeader segBody =
   Segment { segRightEdge = tcpSegNextAckNum segHeader (fromIntegral (L.length segBody))
           , segSACK      = False
           , .. }
-
--- | The length of the whole segment, including syn/fin.
-segLen :: Getting r Segment Int64
-segLen  = to $ \ Segment { .. } ->
-  fromIntegral (tcpSegLen segHeader (fromIntegral (L.length segBody)))
 
 -- | The sequence number of the frame.
 --
@@ -98,7 +98,7 @@ data Window = Window { wRetransmitQueue :: !Segments
                        -- ^ The retransmit queue contains segments that fall
                        -- between SND.UNA and SND.NXT
 
-                     , wSndAvail        :: !Int64
+                     , wSndAvail        :: !Int
                        -- ^ The effective window
 
                      , wSndNxt          :: !TcpSeqNum
@@ -114,6 +114,10 @@ emptyWindow wSndNxt wSndWnd =
          , wSndAvail        = fromTcpSeqNum wSndWnd
          , .. }
 
+
+-- | True when the window is empty.
+nullWindow :: Window -> Bool
+nullWindow Window { .. } = null wRetransmitQueue
 
 -- | The value of SND.NXT.
 --
@@ -148,22 +152,23 @@ queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString
              -> Window -> (Window,Maybe (Bool,TcpHeader,L.ByteString))
 queueSegment mkHdr body win
   | wSndAvail win == 0 = (win,Nothing)
+  | size == 0          = (win, Just (False,hdr,L.empty))
   | otherwise          = (win',Just (startRTO,hdr,trimmedBody))
   where
 
   hdr         = mkHdr (wSndNxt win)
 
-  trimmedBody = L.take (wSndAvail win) body
+  trimmedBody = L.take (fromIntegral (wSndAvail win)) body
   seg         = mkSegment hdr trimmedBody
 
-  size        = view segLen seg
+  size        = tcpSegLen hdr (fromIntegral (L.length trimmedBody))
 
   win' = win { wRetransmitQueue = wRetransmitQueue win ++ [seg]
              , wSndAvail        = wSndAvail win - size
              , wSndNxt          = wSndNxt win + fromIntegral size
              }
 
-  -- start the retransmit timer when the queue was empty.
+  -- start the retransmit timer when the queue was empty
   startRTO = null (wRetransmitQueue win)
 
 

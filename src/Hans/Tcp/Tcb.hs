@@ -157,6 +157,10 @@ setState tcb state =
      case state of
        Established -> tcbEstablished tcb tcb
        Closed      -> tcbClosed      tcb tcb
+
+       -- unblock the recv queue, so that the user can close the socket
+       CloseWait   -> Stream.putBytes S.empty (tcbRecvBuffer tcb)
+
        _           -> return ()
 
 getStateFrom :: GetState tcb => Getting tcb s tcb -> s -> IO State
@@ -172,7 +176,7 @@ instance GetState Tcb where
   getState Tcb { .. } = readIORef tcbState
 
 instance GetState TimeWaitTcb where
-  getState TimeWaitTcb { .. } = readIORef twState
+  getState _ = return TimeWait
 
 data State = Listen
            | SynSent
@@ -316,7 +320,8 @@ queueBytes :: S.ByteString -> Tcb -> IO ()
 queueBytes bytes Tcb { .. } = Stream.putBytes bytes tcbRecvBuffer
 
 -- | Remove data from the receive buffer, and move the right-side of the receive
--- window.
+-- window. Reading 0 bytes indicates that the remote side has closed the
+-- connection.
 receiveBytes :: Int -> Tcb -> IO L.ByteString
 receiveBytes len Tcb { .. } =
   do bytes <- Stream.takeBytes len tcbRecvBuffer
@@ -324,7 +329,8 @@ receiveBytes len Tcb { .. } =
          (Recv.moveRcvRight (fromIntegral (L.length bytes)))
      return bytes
 
--- | Non-blocking version of 'receiveBytes'.
+-- | Non-blocking version of 'receiveBytes'. Reading 0 bytes indicates that the
+-- remote side has closed the connection.
 tryReceiveBytes :: Int -> Tcb -> IO (Maybe L.ByteString)
 tryReceiveBytes len Tcb { .. } =
   do mbBytes <- Stream.tryTakeBytes len tcbRecvBuffer
@@ -341,20 +347,34 @@ tryReceiveBytes len Tcb { .. } =
 
 -- TimeWait Sockets ------------------------------------------------------------
 
-data TimeWaitTcb = TimeWaitTcb { twState      :: !(IORef State)
-                               , twSndNxt     :: !TcpSeqNum     -- ^ SND.NXT
+data TimeWaitTcb = TimeWaitTcb { twSndNxt     :: !TcpSeqNum     -- ^ SND.NXT
 
                                , twRcvNxt     :: !SeqNumVar     -- ^ RCV.NXT
                                , twRcvWnd     :: !Word16        -- ^ RCV.WND
 
                                  -- Port information
-                               , twSourcePort :: !TcpPort
-                               , twDestPort   :: !TcpPort
+                               , twLocalPort  :: !TcpPort
+                               , twRemotePort :: !TcpPort
 
                                  -- Routing information
                                , twRouteInfo  :: !(RouteInfo Addr)
-                               , twDest       :: !Addr
+                               , twRemote     :: !Addr
                                } deriving (Eq)
+
+mkTimeWaitTcb :: Tcb -> IO TimeWaitTcb
+mkTimeWaitTcb Tcb { .. } =
+  do send     <- readIORef tcbSendWindow
+     recv     <- readIORef tcbRecvWindow
+     twRcvNxt <- newIORef (view Recv.rcvNxt recv)
+
+     return $! TimeWaitTcb { twSndNxt     = view Send.sndNxt send
+                           , twRcvWnd     = view Recv.rcvWnd recv
+                           , twLocalPort  = tcbLocalPort
+                           , twRemotePort = tcbRemotePort
+                           , twRouteInfo  = tcbRouteInfo
+                           , twRemote     = tcbRemote
+                           , .. }
+
 
 
 -- Sockets that send -----------------------------------------------------------

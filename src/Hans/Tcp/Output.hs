@@ -9,6 +9,7 @@ module Hans.Tcp.Output (
     -- ** With a TCB
     sendWithTcb,
     sendAck,
+    sendFin,
 
     -- $notes
   ) where
@@ -19,7 +20,7 @@ import           Hans.Lens (view,set)
 import           Hans.Network
 import           Hans.Serialize (runPutPacket)
 import           Hans.Tcp.Packet
-                     (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck)
+                     (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck,tcpFin)
 import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Tcp.Tcb
@@ -27,7 +28,7 @@ import           Hans.Types
 
 import           Control.Monad (when)
 import qualified Data.ByteString.Lazy as L
-import           Data.IORef (readIORef,atomicModifyIORef')
+import           Data.IORef (readIORef,atomicModifyIORef',atomicWriteIORef)
 import           Data.Int (Int64)
 import           Data.Serialize.Put (putWord16be)
 import           Data.Word (Word32)
@@ -39,6 +40,14 @@ import           Data.Word (Word32)
 sendAck :: NetworkStack -> Tcb -> IO ()
 sendAck ns tcb =
   do _ <- sendWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
+     return ()
+
+-- | Send a single FIN packet.
+sendFin :: NetworkStack -> Tcb -> IO ()
+sendFin ns tcb =
+  do let hdr = set tcpFin True
+             $ set tcpAck True emptyTcpHeader
+     _ <- sendWithTcb ns tcb hdr L.empty
      return ()
 
 -- | Send a segment and queue it in the remote window. The number of bytes that
@@ -53,19 +62,20 @@ sendWithTcb ns Tcb { .. } hdr body =
                             , tcpWindow     = view Recv.rcvWnd recvWindow
                             }
 
+     -- only enter the retransmit queue if the segment contains data
      mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body)
-
      case mbRes of
 
        Just (startRT,hdr',body') ->
-         do when startRT $ atomicModifyIORef' tcbTimers
+         do when (view tcpAck hdr') (atomicWriteIORef tcbNeedsDelayedAck False)
+
+            when startRT $ atomicModifyIORef' tcbTimers
                          $ \ tt -> (resetRetransmit tt, ())
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
             return (Just (L.length body'))
 
        Nothing ->
             return Nothing
-
 
 
 -- Primitive Send --------------------------------------------------------------

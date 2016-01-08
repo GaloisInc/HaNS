@@ -46,7 +46,7 @@ updateActive ns runSlow tcb@Tcb { .. } =
 
      -- the fast timer
      shouldAck <- atomicModifyIORef' tcbNeedsDelayedAck (\ b -> (False,b))
-     when shouldAck (sendAck ns tcb)
+     when shouldAck (print "delayed ack" >> sendAck ns tcb)
 
 
 -- | Handle the retransmit timer. When the timer expires, if there is anything

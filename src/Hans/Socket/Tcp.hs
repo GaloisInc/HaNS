@@ -4,8 +4,9 @@
 module Hans.Socket.Tcp where
 
 import           Hans.Addr
+import qualified Hans.Buffer.Stream as Stream
 import qualified Hans.HashTable as HT
-import           Hans.Lens (view,to)
+import           Hans.Lens (view,to,set)
 import           Hans.Network
 import           Hans.Socket.Types
 import           Hans.Tcp.Tcb
@@ -65,12 +66,49 @@ activeOpen ns ri srcPort dst dstPort =
 instance Socket TcpSocket where
 
   sClose TcpSocket { .. } =
-    do st <- readIORef (tcbState tcpTcb)
-       case st of
-         Closed -> throwIO DoesNotExist
+    do state <- readIORef (tcbState tcpTcb)
+       case state of
 
-         -- impossible for a data socket
-         Listen -> fail "sClose(TcpSocket): socket was in Listen"
+         -- the remote side closed the connection, so we just need to cleanup.
+         CloseWait ->
+           do sendFin tcpNS tcpTcb
+              setState tcpTcb LastAck
+
+         Established ->
+           do sendFin tcpNS tcpTcb
+              setState tcpTcb FinWait1
+
+         -- SynSent, Listen, Closed, Closing, LastAck
+         _ -> return ()
+
+
+-- | Guard an action that will use the receive buffer.
+guardRecv :: Tcb -> IO r -> IO r
+guardRecv tcb recv =
+  do st <- getState tcb
+     case st of
+       Closed      -> throwIO NoConnection
+
+       -- these three cases will block until data is available
+       Listen      -> recv
+       SynSent     -> recv
+       SynReceived -> recv
+
+       -- the common case
+       Established -> recv
+       FinWait1    -> recv
+       FinWait2    -> recv
+
+       -- XXX: this should check the receive buffer before throwing an error
+       CloseWait   -> do avail <- Stream.bytesAvailable (tcbRecvBuffer tcb)
+                         if avail
+                            then recv
+                            else throwIO ConnectionClosing
+
+       Closing     -> throwIO ConnectionClosing
+       LastAck     -> throwIO ConnectionClosing
+       TimeWait    -> throwIO ConnectionClosing
+
 
 
 instance DataSocket TcpSocket where
@@ -95,8 +133,8 @@ instance DataSocket TcpSocket where
 
   sWrite sock bytes = undefined
 
-  sRead    TcpSocket { .. } len = receiveBytes len tcpTcb
-  sTryRead TcpSocket { .. } len = tryReceiveBytes len tcpTcb
+  sRead    TcpSocket { .. } len = guardRecv tcpTcb (receiveBytes    len tcpTcb)
+  sTryRead TcpSocket { .. } len = guardRecv tcpTcb (tryReceiveBytes len tcpTcb)
 
 
 data TcpListenSocket addr = TcpListenSocket { tlNS :: !NetworkStack

@@ -12,6 +12,7 @@ import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
 import           Control.Concurrent (forkIO,threadDelay)
 import           Control.Monad (forever)
 import qualified Data.ByteString.Char8 as S8
+import qualified Data.ByteString.Lazy.Char8 as L8
 import           System.Environment (getArgs)
 import           System.Exit (exitFailure)
 
@@ -68,9 +69,12 @@ main  =
                 (packIP4 172 16 181 128) 9000
 
      putStrLn "Connected"
-     print =<< sRead con 100
-
-     threadDelay (1000000 * 60)
+     let loop =
+           do bs <- sRead con 1024
+              if L8.null bs
+                 then sClose con
+                 else print bs >> loop
+     loop
 
      sClose (con :: TcpSocket IP4)
 
