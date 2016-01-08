@@ -6,7 +6,7 @@ module Hans.Socket.Tcp where
 import           Hans.Addr
 import qualified Hans.Buffer.Stream as Stream
 import qualified Hans.HashTable as HT
-import           Hans.Lens (view,to,set)
+import           Hans.Lens (view,to)
 import           Hans.Network
 import           Hans.Socket.Types
 import           Hans.Tcp.Tcb
@@ -82,6 +82,26 @@ instance Socket TcpSocket where
          _ -> return ()
 
 
+-- | Guard an action that will use the send window.
+guardSend :: Tcb -> IO r -> IO r
+guardSend tcb send =
+  do st <- getState tcb
+     case st of
+       Closed -> throwIO NoConnection
+
+       Listen -> error "guardSend: Listen state for active tcb"
+
+       -- the send window should queue these
+       SynReceived -> send
+       SynSent     -> send
+
+       Established -> send
+       CloseWait   -> send
+
+       -- FinWait1, FinWait2, Closing, LastAck, TimeWait
+       _ -> throwIO ConnectionClosing
+
+
 -- | Guard an action that will use the receive buffer.
 guardRecv :: Tcb -> IO r -> IO r
 guardRecv tcb recv =
@@ -99,7 +119,7 @@ guardRecv tcb recv =
        FinWait1    -> recv
        FinWait2    -> recv
 
-       -- XXX: this should check the receive buffer before throwing an error
+       -- XXX: is this enough?
        CloseWait   -> do avail <- Stream.bytesAvailable (tcbRecvBuffer tcb)
                          if avail
                             then recv
@@ -131,7 +151,11 @@ instance DataSocket TcpSocket where
        tcpTcb <- activeOpen tcpNS ri srcPort dst dstPort
        return TcpSocket { .. }
 
-  sWrite sock bytes = undefined
+  -- segmentize the bytes, and return to the user the number of bytes that have
+  -- been moved into the send window
+  sWrite TcpSocket { .. } bytes =
+    guardSend tcpTcb $ do len <- sendData tcpNS tcpTcb bytes
+                          return $! fromIntegral len
 
   sRead    TcpSocket { .. } len = guardRecv tcpTcb (receiveBytes    len tcpTcb)
   sTryRead TcpSocket { .. } len = guardRecv tcpTcb (tryReceiveBytes len tcpTcb)

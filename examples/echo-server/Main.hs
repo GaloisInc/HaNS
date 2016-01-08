@@ -73,7 +73,8 @@ main  =
            do bs <- sRead con 1024
               if L8.null bs
                  then sClose con
-                 else print bs >> loop
+                 else do sWrite con bs
+                         loop
      loop
 
      sClose (con :: TcpSocket IP4)

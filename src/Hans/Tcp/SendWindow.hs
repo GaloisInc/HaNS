@@ -151,8 +151,8 @@ sndUna  = to $ \ Window { .. } ->
 queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString
              -> Window -> (Window,Maybe (Bool,TcpHeader,L.ByteString))
 queueSegment mkHdr body win
-  | wSndAvail win == 0 = (win,Nothing)
   | size == 0          = (win, Just (False,hdr,L.empty))
+  | wSndAvail win == 0 = (win,Nothing)
   | otherwise          = (win',Just (startRTO,hdr,trimmedBody))
   where
 

@@ -10,6 +10,7 @@ module Hans.Tcp.Output (
     sendWithTcb,
     sendAck,
     sendFin,
+    sendData,
 
     -- $notes
   ) where
@@ -20,7 +21,8 @@ import           Hans.Lens (view,set)
 import           Hans.Network
 import           Hans.Serialize (runPutPacket)
 import           Hans.Tcp.Packet
-                     (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck,tcpFin)
+                     (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck,tcpFin
+                     ,tcpPsh)
 import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Tcp.Tcb
@@ -50,6 +52,16 @@ sendFin ns tcb =
      _ <- sendWithTcb ns tcb hdr L.empty
      return ()
 
+-- | Send a data segment. When the remote window is full, this returns 0.
+sendData :: NetworkStack -> Tcb -> L.ByteString -> IO Int64
+sendData ns tcb bytes =
+  do let hdr = set tcpAck True
+             $ set tcpPsh True emptyTcpHeader
+     mb <- sendWithTcb ns tcb hdr bytes
+     case mb of
+       Just len -> return len
+       Nothing  -> return 0
+
 -- | Send a segment and queue it in the remote window. The number of bytes that
 -- were sent is returned.
 sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO (Maybe Int64)
@@ -67,11 +79,18 @@ sendWithTcb ns Tcb { .. } hdr body =
      case mbRes of
 
        Just (startRT,hdr',body') ->
-         do when (view tcpAck hdr') (atomicWriteIORef tcbNeedsDelayedAck False)
+         do -- clear the delayed ack flag, when an ack is present
+            when (view tcpAck hdr') (atomicWriteIORef tcbNeedsDelayedAck False)
 
+            -- reset the retransmit timer, if the retransmit queue is now
+            -- non-empty
             when startRT $ atomicModifyIORef' tcbTimers
                          $ \ tt -> (resetRetransmit tt, ())
+
+            -- send the frame
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
+
+            -- return how much of the segment was actually delivered
             return (Just (L.length body'))
 
        Nothing ->
