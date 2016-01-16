@@ -132,7 +132,6 @@ handleActiveSegs ns tcb now = go
                        then incrSynBacklog ns
                        else setState tcb Closed
 
-                    print "page 70 RST"
                     closeActive ns tcb
 
             escape
