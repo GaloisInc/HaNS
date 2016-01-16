@@ -86,8 +86,7 @@ sendWithTcb ns Tcb { .. } hdr body =
 
             -- reset the retransmit timer, if the retransmit queue is now
             -- non-empty
-            when startRT $ atomicModifyIORef' tcbTimers
-                         $ \ tt -> (resetRetransmit tt, ())
+            when startRT (atomicModifyIORef' tcbTimers resetRetransmit)
 
             -- send the frame
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'

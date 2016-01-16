@@ -9,6 +9,7 @@ module Hans.Tcp.SendWindow (
     sndUna,
     sndWnd,
     nullWindow,
+    flushWindow,
 
     -- ** Packet Processing
     queueSegment,
@@ -118,6 +119,11 @@ emptyWindow wSndNxt wSndWnd =
   Window { wRetransmitQueue = []
          , wSndAvail        = fromTcpSeqNum wSndWnd
          , .. }
+
+
+-- | Remove everything from the remote window.
+flushWindow :: Window -> (Window, ())
+flushWindow Window { .. } = (Window { wRetransmitQueue = [], .. }, ())
 
 
 -- | True when the window is empty.

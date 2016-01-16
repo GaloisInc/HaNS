@@ -12,7 +12,6 @@ import Hans.Buffer.Signal
 
 import           Control.Monad (when)
 import qualified Data.ByteString as S
-import qualified Data.ByteString.Lazy as L
 import           Data.IORef (IORef,newIORef,atomicModifyIORef')
 import qualified Data.Sequence as Seq
 
@@ -43,23 +42,31 @@ writeChunk Buffer { .. } a bytes =
 
 -- | Read a chunk from the buffer, blocking until one is ready. 
 readChunk :: Buffer a -> IO (a,S.ByteString)
-readChunk Buffer { .. } =
-  do waitSignal bufSignal
-     (bytes,more) <- atomicModifyIORef' bufContents dequeueChunk
-     when more (signal bufSignal)
-     return bytes
+readChunk Buffer { .. } = loop
+  where
+  loop =
+    do mb <- atomicModifyIORef' bufContents dequeueChunk
+       case mb of
+         Just (c,more) ->
+           do when more (signal bufSignal)
+              return c
+
+         Nothing ->
+           do waitSignal bufSignal
+              loop
 
 
 -- | Poll for a ready chunk.
 tryReadChunk :: Buffer a -> IO (Maybe (a,S.ByteString))
 tryReadChunk Buffer { .. } =
-  do available <- tryWaitSignal bufSignal
-     if available
-        then do (bytes,more) <- atomicModifyIORef' bufContents dequeueChunk
-                when more (signal bufSignal)
-                return (Just bytes)
+  do mb <- atomicModifyIORef' bufContents dequeueChunk
+     case mb of
+       Just (a,more) ->
+         do when more (signal bufSignal)
+            return (Just a)
 
-        else return Nothing
+       Nothing ->
+            return Nothing
 
 
 -- Buffer State ----------------------------------------------------------------
@@ -98,15 +105,12 @@ queueChunk a chunk buf
   where
   chunkLen = S.length chunk
 
-dequeueChunk :: BufContents a -> (BufContents a, ((a,S.ByteString),Bool))
+dequeueChunk :: BufContents a -> (BufContents a, Maybe ((a,S.ByteString),Bool))
 dequeueChunk buf =
   case Seq.viewl (bufChunks buf) of
     c Seq.:< cs ->
       let buf' = BufContents { bufAvail  = bufAvail buf + S.length (snd c)
                              , bufChunks = cs }
-       in (buf', (c, chunksAvailable buf'))
+       in (buf', Just (c, chunksAvailable buf'))
 
-    _ -> error $ unlines
-         [ "PANIC: Hans.Buffer.Datagram.dequeueChunk:"
-         , "  Invariant violated: dequeueChunk called on empty buffer"
-         ]
+    _ -> (buf, Nothing)

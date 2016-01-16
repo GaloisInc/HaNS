@@ -56,10 +56,13 @@ handleRTO ns Tcb { .. } TcpTimers { .. }
   | ttRetransmitValid && ttRetransmit <= 0 =
     do mbSeg <- atomicModifyIORef' tcbSendWindow retransmitTimeout
        case mbSeg of
-         Just (hdr,body) -> do _ <- sendTcp ns tcbRouteInfo tcbRemote hdr body
-                               return ()
+         Just (hdr,body) ->
+           do atomicModifyIORef' tcbTimers retryRetransmit
+              _ <- sendTcp ns tcbRouteInfo tcbRemote hdr body
+              return ()
 
-         Nothing -> return ()
+         Nothing ->
+              return ()
 
   | otherwise =
     return ()

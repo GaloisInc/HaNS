@@ -96,16 +96,14 @@ handleActive ns dev hdr payload tcb =
 
        Nothing ->
          do unless (view tcpRst hdr) $ io $
-              do (rcvNxt,_) <- getRecvWindow tcb
-                 sndNxt     <- getSndNxt tcb
-                 ack        <- mkAck sndNxt rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
-                 _          <- sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) ack L.empty
+              do _ <- sendWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
                  return ()
 
        Just segs ->
          do now <- io getCurrentTime
             handleActiveSegs ns tcb now segs
-            escape
+
+     escape
 
 
 -- | At this point, the list of segments is contiguous, and starts at the old
@@ -134,7 +132,8 @@ handleActiveSegs ns tcb now = go
                        then incrSynBacklog ns
                        else setState tcb Closed
 
-                    deleteActive ns tcb
+                    print "page 70 RST"
+                    closeActive ns tcb
 
             escape
 
@@ -187,7 +186,7 @@ handleActiveSegs ns tcb now = go
            case mbAck of
              Just True ->
                do io (setState tcb Closed)
-                  io (deleteActive ns tcb)
+                  io (closeActive ns tcb)
                   escape
 
              _ -> continue
@@ -202,9 +201,11 @@ handleActiveSegs ns tcb now = go
 
        -- page 74
        -- process the segment text
-       when (view tcpPsh hdr || S.length payload > 0) $
-         do io $ do queueBytes payload tcb
-                    signalDelayedAck tcb
+       -- XXX: we're ignoring PSH for now, just making the data immediately
+       -- available
+       unless (S.null payload) $ io $
+         do queueBytes payload tcb
+            signalDelayedAck tcb
 
        -- page 75
        -- check FIN

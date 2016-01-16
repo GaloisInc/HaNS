@@ -119,31 +119,31 @@ emptyTcpTimers  = TcpTimers { ttDelayedAck = False
 
 
 -- | Reset retransmit info.
-resetRetransmit :: TcpTimers -> TcpTimers
+resetRetransmit :: TcpTimers -> (TcpTimers, ())
 resetRetransmit TcpTimers { .. } =
-  TcpTimers { ttRetransmitValid = True
-            , ttRetransmit      = ttRTO
-            , ttRetries         = 0
-            , .. }
+  (TcpTimers { ttRetransmitValid = True
+             , ttRetransmit      = ttRTO
+             , ttRetries         = 0
+             , .. }, ())
 
 
 -- | Increment the retry count, and double the last retransmit timer.
-retryRetransmit :: TcpTimers -> TcpTimers
+retryRetransmit :: TcpTimers -> (TcpTimers, ())
 retryRetransmit TcpTimers { .. } =
-  TcpTimers { ttRetransmitValid = True
-            , ttRetransmit      = ttRTO * 2 ^ retries
-            , ttRetries         = retries
-            , .. }
+  (TcpTimers { ttRetransmitValid = True
+             , ttRetransmit      = ttRTO * 2 ^ retries
+             , ttRetries         = retries
+             , .. }, ())
   where
   retries = ttRetries + 1
 
 
 -- | Invalidate the retransmit timer.
-stopRetransmit :: TcpTimers -> TcpTimers
+stopRetransmit :: TcpTimers -> (TcpTimers, ())
 stopRetransmit TcpTimers { .. } =
-  TcpTimers { ttRetransmitValid = False
-            , ttRetries         = 0
-            , .. }
+  (TcpTimers { ttRetransmitValid = False
+             , ttRetries         = 0
+             , .. }, ())
 
 
 reset2MSL :: Config -> TcpTimers -> (TcpTimers, ())
@@ -207,10 +207,7 @@ setState tcb state =
      case state of
        Established -> tcbEstablished tcb tcb
        Closed      -> tcbClosed      tcb tcb
-
-       -- unblock the recv queue, so that the user can close the socket
-       CloseWait   -> Stream.putBytes S.empty (tcbRecvBuffer tcb)
-
+       CloseWait   -> Stream.closeBuffer (tcbRecvBuffer tcb)
        _           -> return ()
 
 class GetState tcb where
@@ -416,7 +413,10 @@ setSndNxt sndNxt Tcb { .. } =
 
 -- | Cleanup the Tcb.
 finalizeTcb :: Tcb -> IO ()
-finalizeTcb Tcb { .. } = undefined
+finalizeTcb Tcb { .. } =
+  do Stream.closeBuffer tcbRecvBuffer
+     atomicModifyIORef' tcbTimers stopRetransmit
+     atomicModifyIORef' tcbSendWindow Send.flushWindow
 
 -- | Queue bytes in the receive buffer.
 queueBytes :: S.ByteString -> Tcb -> IO ()

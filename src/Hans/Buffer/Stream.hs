@@ -8,6 +8,7 @@
 module Hans.Buffer.Stream (
     Buffer(),
     newBuffer,
+    closeBuffer,
     bytesAvailable,
     putBytes,
     takeBytes,
@@ -16,7 +17,7 @@ module Hans.Buffer.Stream (
 
 import Hans.Buffer.Signal
 
-import           Control.Monad (when)
+import           Control.Monad (when,unless)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
@@ -34,64 +35,97 @@ data Buffer = Buffer { bufState :: !(IORef State)
 
 newBuffer :: IO Buffer
 newBuffer  =
-  do bufState  <- newIORef Seq.empty
+  do bufState  <- newIORef emptyState
      bufSignal <- newSignal
      return Buffer { .. }
+
+closeBuffer :: Buffer -> IO ()
+closeBuffer Buffer { .. } =
+  do atomicModifyIORef' bufState sClose
+     signal bufSignal
 
 bytesAvailable :: Buffer -> IO Bool
 bytesAvailable Buffer { .. } =
   do st <- readIORef bufState
-     return (not (Seq.null st))
+     return (not (sNull st))
 
 putBytes :: S.ByteString -> Buffer -> IO ()
-putBytes bytes Buffer { .. }
-  | S.null bytes = signal bufSignal
-  | otherwise    = do atomicModifyIORef' bufState (sPut bytes)
-                      signal bufSignal
+putBytes bytes Buffer { .. } =
+  do unless (S.null bytes) (atomicModifyIORef' bufState (sPut bytes))
+     signal bufSignal
 
 -- | Take up to n bytes from the buffer, blocking until some data is ready.
 takeBytes :: Int -> Buffer -> IO L.ByteString
-takeBytes n Buffer { .. } =
-  do waitSignal bufSignal
-     (bytes,more) <- atomicModifyIORef' bufState (sTake n)
-     when more (signal bufSignal)
-     return bytes
+takeBytes n Buffer { .. }
+  | n <= 0    = return L.empty
+  | otherwise = loop
+  where
+  loop =
+    do (bytes,more,closed) <- atomicModifyIORef' bufState (sTake n)
+       if L.null bytes && not closed
+          then do waitSignal bufSignal
+                  loop
+          else do when (more || closed) (signal bufSignal)
+                  return bytes
 
 -- | Take up to n bytes from the buffer, returning immediately if no data is
 -- available.
 tryTakeBytes :: Int -> Buffer -> IO (Maybe L.ByteString)
-tryTakeBytes n Buffer { .. } =
-  do available <- tryWaitSignal bufSignal
-     if available
-        then do (bytes,more) <- atomicModifyIORef' bufState (sTake n)
-                when more (signal bufSignal)
-                return (Just bytes)
-
-        else return Nothing
+tryTakeBytes n Buffer { .. }
+  | n <= 0    = return Nothing
+  | otherwise =
+    do (bytes,more,closed) <- atomicModifyIORef' bufState (sTake n)
+       when (more || closed) (signal bufSignal)
+       if L.null bytes
+          then return Nothing
+          else return (Just bytes)
 
 
 -- Internal State --------------------------------------------------------------
 
-type State = Seq.Seq S.ByteString
+data State = State { stBuf    :: !(Seq.Seq S.ByteString)
+                   , stClosed :: !Bool
+                   }
+
+emptyState :: State
+emptyState  = State { stBuf = Seq.empty, stClosed = False }
+
+sNull :: State -> Bool
+sNull State { .. } = Seq.null stBuf
+
+sClose :: State -> (State, ())
+sClose State { .. } = (State { stClosed = True, .. }, ())
 
 -- | Remove up to n bytes of data from the internal state.
-sTake :: Int -> State -> (State, (L.ByteString,Bool))
-sTake n0 = go L.empty n0
+sTake :: Int -> State -> (State, (L.ByteString,Bool,Bool))
+sTake n0 State { .. } = go [] n0 stBuf
   where
-  go acc n mem = case Seq.viewl mem of
 
-    buf Seq.:< mem' ->
-      case compare (S.length buf) n of
-        LT -> go (L.append acc (L.fromStrict buf)) (n - S.length buf) mem'
-        EQ -> finalize acc mem'
-        GT -> let (as,bs) = S.splitAt n buf
-               in finalize (L.append acc (L.fromStrict as)) (bs Seq.<| mem')
+  go acc n mem
+    | n > 0 =
+      case Seq.viewl mem of
 
-    Seq.EmptyL ->
-      finalize acc Seq.empty
+        buf Seq.:< mem'
 
-  finalize acc mem = (mem,(acc, not (Seq.null mem)))
+          | S.length buf > n ->
+            let (as,bs) = S.splitAt n buf
+             in finalize (L.fromStrict as:acc) (bs Seq.<| mem')
+
+          | otherwise ->
+            go (L.fromStrict buf:acc) (n - S.length buf) mem'
+
+
+        Seq.EmptyL ->
+          finalize acc Seq.empty
+
+    | otherwise =
+      finalize acc mem
+
+  finalize acc mem =
+    ( State { stBuf = mem, .. }
+    , (L.concat (reverse acc), not (Seq.null mem), stClosed)
+    )
 
 
 sPut :: S.ByteString -> State -> (State, ())
-sPut bytes buf = (buf Seq.|> bytes, ())
+sPut bytes State { .. } = (State { stBuf = stBuf Seq.|> bytes, .. }, ())

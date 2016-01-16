@@ -29,10 +29,6 @@ main  =
      ns  <- newNetworkStack defaultConfig
      dev <- addDevice ns name defaultDeviceConfig
 
-     -- dump interface stats every 10s
-     _ <- forkIO $ forever $ do threadDelay 10000000
-                                dumpStats (devStats dev)
-
      _ <- forkIO (showExceptions "processPackets" (processPackets ns))
 
      -- start receiving data
@@ -67,14 +63,12 @@ main  =
                }
 
      sock <- sListen ns defaultSocketConfig WildcardIP4 9001 10
-     _    <- forkIO $ forever $
-         do putStrLn "Waiting for a client"
-            client <- showExceptions "sAccept" (sAccept (sock :: TcpListenSocket IP4))
-            putStrLn "Got a client"
-            _ <- forkIO (handleClient client)
-            return ()
+     putStrLn "Waiting for a client"
+     client <- showExceptions "sAccept" (sAccept (sock :: TcpListenSocket IP4))
+     putStrLn "Got a client"
+     handleClient client
 
-     threadDelay (100 * 1000000)
+     dumpStats (devStats dev)
 
      putStrLn "done?"
 
@@ -86,13 +80,12 @@ showExceptions l m = m `catch` \ e ->
 
 
 handleClient :: TcpSocket IP4 -> IO ()
-handleClient sock = loop
+handleClient sock = loop `finally` sClose sock
   where
   loop =
     do str <- sRead sock 1024
        if L8.null str
-          then do putStrLn "Closing client"
-                  sClose sock
+          then putStrLn "Closing client"
           else do sWrite sock str
                   sWrite sock "foo\n"
                   loop
