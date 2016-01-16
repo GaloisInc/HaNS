@@ -371,16 +371,24 @@ createChildTcb ns dev remote local hdr parent =
      unless canAccept (rejectSyn ns dev remote local hdr)
 
      -- construct a new tcb, and initialize it as specified on (page 65)
-     io $ do iss   <- nextIss ns local (tcpDestPort hdr) remote (tcpSourcePort hdr)
-             child <- createChild ns iss parent ri remote hdr
+     (added,child) <- io $
+       do iss   <- nextIss ns local (tcpDestPort hdr) remote (tcpSourcePort hdr)
+          child <- createChild ns iss parent ri remote hdr
+          added <- registerActive ns child
+          return (added,child)
 
-             -- queueing a SYN/ACK in the send window will advance SND.NXT
-             -- automatically
-             let synAck = set tcpSyn True
-                        $ set tcpAck True emptyTcpHeader
-             _ <- sendWithTcb ns child synAck L.empty
+     -- if we couldn't add the entry to the active connections, reject it
+     unless added $
+       do io (releaseSlot parent)
+          rejectSyn ns dev remote local hdr
 
-             registerActive ns child
+     -- queueing a SYN/ACK in the send window will advance SND.NXT
+     -- automatically
+     let synAck = set tcpSyn True
+                $ set tcpAck True emptyTcpHeader
+     _ <- io (sendWithTcb ns child synAck L.empty)
+
+     return ()
 
 
 -- | Reject the SYN by sending an RST, drop the segment and return.

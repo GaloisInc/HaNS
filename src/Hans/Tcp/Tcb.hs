@@ -36,7 +36,7 @@ module Hans.Tcp.Tcb (
     ListenTcb(..),
     newListenTcb,
     createChild,
-    reserveSlot,
+    reserveSlot, releaseSlot,
     acceptTcb,
 
     -- * Active TCBs
@@ -207,6 +207,7 @@ whenState tcb state m =
 setState :: Tcb -> State -> IO ()
 setState tcb state =
   do atomicWriteIORef (tcbState tcb) state
+     print (state)
      case state of
        Established -> tcbEstablished tcb tcb
        Closed      -> tcbClosed      tcb tcb
@@ -272,6 +273,8 @@ createChild cxt iss parent ri remote hdr =
      atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
      atomicWriteIORef (tcbIss child)  iss
 
+     -- advance RCV.NXT over the SYN
+     _ <- setRcvNxt (tcpSeqNum hdr + 1) child
      _ <- setSndNxt iss child
 
      return child
@@ -290,6 +293,14 @@ reserveSlot ListenTcb { .. } =
     if aqFree aq > 0
        then (aq { aqFree = aqFree aq - 1 }, True)
        else (aq, False)
+{-# INLINE reserveSlot #-}
+
+
+-- | Release a slot back to the accept queue.
+releaseSlot :: ListenTcb -> IO ()
+releaseSlot ListenTcb { .. } =
+  atomicModifyIORef' lAccept (\ aq -> (aq { aqFree = aqFree aq + 1 }, ()))
+{-# INLINE releaseSlot #-}
 
 
 -- | Add a Tcb to the accept queue for this listening connection.

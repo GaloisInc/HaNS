@@ -3,7 +3,6 @@
 module Hans.HashTable (
     HashTable(),
     newHashTable,
-    insert,
     lookup,
     delete,
     mapHashTable, mapHashTableM_,
@@ -83,17 +82,6 @@ modifyBucket :: Hashable k
              => HashTable k a -> k -> ([(k,a)] -> ([(k,a)],b)) -> IO b
 modifyBucket ht k = atomicModifyIORef' (getBucket ht k)
 {-# INLINE modifyBucket #-}
-
-insert :: (Eq k, Hashable k) => k -> a -> HashTable k a -> IO ()
-insert k a ht = modifyBucket ht k (\ bucket -> (addEntry bucket, ()))
-  where
-  addEntry (entry @ (k',_) : rest)
-    | k' == k   = (k,a) : rest
-    | otherwise = let rest' = addEntry rest
-                   in rest' `seq` (entry : rest')
-
-  addEntry []   = []
-{-# INLINE insert #-}
 
 lookup :: (Eq k, Hashable k) => k -> HashTable k a -> IO (Maybe a)
 lookup k ht =

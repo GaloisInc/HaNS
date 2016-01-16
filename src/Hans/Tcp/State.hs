@@ -174,9 +174,12 @@ incrSynBacklog state =
 
 -- | Register a new listening socket.
 registerListening :: HasTcpState state
-                  => state -> ListenTcb -> IO ()
+                  => state -> ListenTcb -> IO Bool
 registerListening state tcb =
-  HT.insert (view listenKey tcb) tcb (view tcpListen state)
+  HT.alter update (view listenKey tcb) (view tcpListen state)
+  where
+  update Nothing   = (Just tcb, True)
+  update mb@Just{} = (mb, False)
 {-# INLINE registerListening #-}
 
 
@@ -184,7 +187,6 @@ registerListening state tcb =
 deleteListening :: HasTcpState state
                 => state -> ListenTcb -> IO ()
 deleteListening state tcb =
-  print ("deleting", view listenKey tcb) >>
   HT.delete (view listenKey tcb) (view tcpListen state)
 {-# INLINE deleteListening #-}
 
@@ -300,8 +302,12 @@ deleteTimeWait state tw =
 -- Active Sockets --------------------------------------------------------------
 
 -- | Register a new active socket.
-registerActive :: HasTcpState state => state -> Tcb -> IO ()
-registerActive state tcb = HT.insert (view tcbKey tcb) tcb (view tcpActive state)
+registerActive :: HasTcpState state => state -> Tcb -> IO Bool
+registerActive state tcb =
+  HT.alter update (view tcbKey tcb) (view tcpActive state)
+  where
+  update Nothing = (Just tcb, True)
+  update mb      = (mb, False)
 {-# INLINE registerActive #-}
 
 

@@ -16,6 +16,7 @@ import           Hans.Types
 
 import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar)
 import           Control.Exception (throwIO)
+import           Control.Monad (unless)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 
@@ -180,7 +181,10 @@ instance ListenSocket TcpListenSocket where
   sListen ns SocketConfig { .. } src srcPort backlog =
     do let tlNS = view networkStack ns
        tlTcb <- newListenTcb (toAddr src) srcPort backlog
-       registerListening tlNS tlTcb
+
+       created <- registerListening tlNS tlTcb
+       unless created (throwIO AlreadyListening)
+
        return $! TcpListenSocket { .. }
 
   sAccept TcpListenSocket { .. } =

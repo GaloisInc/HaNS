@@ -65,7 +65,6 @@ main  =
                , routeDevice  = dev
                }
 
-
      sock <- sListen ns defaultSocketConfig WildcardIP4 9001 10
      _    <- forkIO $ forever $
          do putStrLn "Waiting for a client"
