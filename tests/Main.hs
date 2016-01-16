@@ -1,16 +1,18 @@
 module Main where
 
-import Icmp4 (icmp4Tests)
-import IP4 (ip4Tests)
-import Tcp (tcpTests)
-import Udp (udpTests)
+import Tests.Checksum
+import Tests.Ethernet
+import Tests.IP4
 
-import Test.Framework (defaultMain)
+import Test.Tasty
+import Test.Tasty.Runners (consoleTestReporter)
+import Test.Tasty.Runners.AntXML (antXMLRunner)
 
 
-main = defaultMain
-  [ tcpTests
-  , udpTests
-  , icmp4Tests
-  , ip4Tests
-  ]
+main :: IO ()
+main  = defaultMainWithIngredients [antXMLRunner,consoleTestReporter] $
+  testGroup "Properties"
+    [ checksumTests
+    , ethernetTests
+    , ip4Tests
+    ]

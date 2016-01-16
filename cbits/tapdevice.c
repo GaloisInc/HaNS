@@ -9,8 +9,8 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
-int init_tap_device(char *name) {
-  int fd, ret;
+int init_tap_device(char *name, unsigned char *mac) {
+  int fd, ret, sock;
   struct ifreq ifr;
 
   if(name == NULL) {
@@ -32,6 +32,25 @@ int init_tap_device(char *name) {
     return -3;
   }
 
+  // generate a MAC address based on the one in the linux side.
+  sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if(sock == -1) {
+    close(fd);
+    return -4;
+  }
+
+  if(ioctl(sock,SIOCGIFHWADDR,&ifr) == -1) {
+    close(fd);
+    close(sock);
+    return -5;
+  }
+
+  // flip the last bit of the mac to generate a new one on the same link
+  memcpy(mac, ifr.ifr_hwaddr.sa_data, 6);
+  mac[5] ^= 1;
+
+  close(sock);
+
   return fd;
 }
 
@@ -43,19 +62,24 @@ int init_tap_device(char *name) {
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <net/if_dl.h>
+#include <ifaddrs.h>
 #include <errno.h>
 #include <string.h>
 
-int init_tap_device(char *name)
+int init_tap_device(char *name, char *mac)
 {
   char *pathname = alloca(32);
   struct ifreq ifr;
-  int fd, sock, flags;
+  int fd, sock, flags, found, i;
+  struct ifaddrs *iflist;
+  struct ifaddrs *cur;
+  struct sockaddr_dl *sdl;
 
   snprintf(pathname, 32, "/dev/%s", name);
   fd = open(pathname, O_RDWR);
   if(fd < 0) {
-    printf("Open failed (%s)\n", pathname);
+    printf("Open failed (%s) (%d)\n", pathname, fd);
     return -2;
   }
   printf("fd = %d\n", fd);
@@ -78,6 +102,31 @@ int init_tap_device(char *name)
     printf("Set failed: %d (%s)\n", errno, strerror(errno));
     return -errno;
   }
+
+  found = 0;
+  if(getifaddrs(&iflist) == 0) {
+    for(cur = iflist; cur; cur = cur->ifa_next) {
+      if((cur->ifa_addr->sa_family == AF_LINK) &&
+              cur->ifa_addr &&
+              strcmp(cur->ifa_name, name) == 0) {
+        sdl = (struct sockaddr_dl*)cur->ifa_addr;
+        memcpy(mac, LLADDR(sdl), sdl->sdl_alen);
+
+        // flip the last bit of the mac address to generate a new address.
+        mac[5] ^= 1;
+        found = 1;
+        break;
+      }
+    }
+  }
+
+  if(found == 0) {
+    return -2;
+  }
+
+
+
+  close(sock);
 
   flags = fcntl(fd, F_GETFL, 0);
   if(flags == -1) {
