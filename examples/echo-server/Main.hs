@@ -68,6 +68,8 @@ main  =
      putStrLn "Got a client"
      handleClient client
 
+     threadDelay (10 * 1000000)
+
      dumpStats (devStats dev)
 
      putStrLn "done?"
