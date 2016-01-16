@@ -4,6 +4,8 @@ The Haskell Network Stack.
 
 ## Running Echo-Server Examples in Xen
 
+*NOTE: This example is out of date*
+
 You first need to set up a bridge device, `br0`; the echo servers are
 configured to use this bridge in Xen. The configuration files are
 `udp-test/udp-test.config` and `tcp-test/tcp-test.config`.
