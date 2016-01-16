@@ -25,6 +25,7 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (atomicModifyIORef',atomicWriteIORef,readIORef)
 import           Data.Maybe (isJust)
+import           Data.Time.Clock (UTCTime,NominalDiffTime,getCurrentTime)
 
 
 -- | Process incoming tcp segments.
@@ -102,15 +103,17 @@ handleActive ns dev hdr payload tcb =
                  return ()
 
        Just segs ->
-         do handleActiveSegs ns tcb segs
+         do now <- io getCurrentTime
+            handleActiveSegs ns tcb now segs
             escape
 
 
 -- | At this point, the list of segments is contiguous, and starts at the old
 -- value of RCV.NXT. RCV.NXT has been advanced to point at the end of the
 -- segment list.
-handleActiveSegs :: NetworkStack -> Tcb -> [(TcpHeader,S.ByteString)] -> Hans ()
-handleActiveSegs ns tcb = go
+handleActiveSegs :: NetworkStack -> Tcb -> UTCTime -> [(TcpHeader,S.ByteString)]
+                 -> Hans ()
+handleActiveSegs ns tcb now = go
   where
   go []                   = return ()
   go ((hdr,payload):segs) =
@@ -143,7 +146,9 @@ handleActiveSegs ns tcb = go
        unless (view tcpAck hdr) continue
 
        -- update the send window
-       mbAck <- io (atomicModifyIORef' (tcbSendWindow tcb) (ackSegment (tcpAckNum hdr)))
+       mbAck <- io $
+         do mbAck <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment now (tcpAckNum hdr))
+            handleRTTMeasurement tcb mbAck
 
        state <- io (getState tcb)
        case state of
@@ -245,6 +250,23 @@ enterTimeWait ns tcb =
      escape
 
 
+-- | Apply an RTT measurement to the timers in a tcb, and return the relevant
+-- information about the state of the send queue.
+handleRTTMeasurement :: Tcb -> Maybe (Bool, Maybe NominalDiffTime)
+                     -> IO (Maybe Bool)
+handleRTTMeasurement Tcb { .. } mb =
+  case mb of
+    Just (b, Just rtt) ->
+      do atomicModifyIORef' tcbTimers (calibrateRTO rtt)
+         return (Just b)
+
+    Just (b,_) ->
+         return (Just b)
+
+    Nothing ->
+         return Nothing
+
+
 -- Half-open Connections -------------------------------------------------------
 
 -- | Handle incoming packets destined for a tcb that's in the SYN-SENT state.
@@ -291,7 +313,9 @@ handleSynSent ns _dev hdr _payload tcb =
 
           sndUna <- io $
             if view tcpAck hdr
-               then do _ <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment (tcpAckNum hdr))
+               then do now <- getCurrentTime
+                       mb  <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment now (tcpAckNum hdr))
+                       _   <- handleRTTMeasurement tcb mb
                        return (tcpAckNum hdr)
 
                else getSndUna tcb

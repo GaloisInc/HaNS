@@ -29,7 +29,8 @@ main  =
      ns  <- newNetworkStack defaultConfig
      dev <- addDevice ns name defaultDeviceConfig
 
-     _ <- forkIO $ forever $ do threadDelay 1000000
+     -- dump interface stats every 10s
+     _ <- forkIO $ forever $ do threadDelay 10000000
                                 dumpStats (devStats dev)
 
      _ <- forkIO (showExceptions "processPackets" (processPackets ns))
@@ -90,6 +91,8 @@ handleClient sock = loop
   loop =
     do str <- sRead sock 1024
        if L8.null str
-          then sClose sock
+          then do putStrLn "Closing client"
+                  sClose sock
           else do sWrite sock str
+                  sWrite sock "foo\n"
                   loop

@@ -73,8 +73,7 @@ import           Data.IORef
                      (IORef,newIORef,atomicModifyIORef',readIORef
                      ,atomicWriteIORef)
 import qualified Data.Sequence as Seq
-import           Data.Time.Clock
-                     (UTCTime,diffUTCTime,NominalDiffTime)
+import           Data.Time.Clock (NominalDiffTime)
 import           Data.Word (Word16)
 import           MonadLib (BaseM(..))
 
@@ -164,15 +163,13 @@ updateTimers tt = (tt',tt)
            , ttIdle       = ttIdle tt + 1 }
 
 
--- | Calibrate the RTO timer, as specified by RFC-6298.
-calibrateRTO :: UTCTime -> UTCTime -> TcpTimers -> TcpTimers
-calibrateRTO sent ackd tt
-  | ttSRTT tt > 0 = rolling
-  | otherwise     = initial
+-- | Calibrate the RTO timer, given a round-trip measurement, as specified by
+-- RFC-6298.
+calibrateRTO :: NominalDiffTime -> TcpTimers -> (TcpTimers, ())
+calibrateRTO r tt
+  | ttSRTT tt > 0 = (rolling, ())
+  | otherwise     = (initial, ())
   where
-
-  -- round trip measurement
-  r = diffUTCTime ackd sent
 
   -- no data has been sent before, seed the RTO values.
   initial = updateRTO tt
@@ -207,7 +204,6 @@ whenState tcb state m =
 setState :: Tcb -> State -> IO ()
 setState tcb state =
   do atomicWriteIORef (tcbState tcb) state
-     print (state)
      case state of
        Established -> tcbEstablished tcb tcb
        Closed      -> tcbClosed      tcb tcb

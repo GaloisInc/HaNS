@@ -33,6 +33,7 @@ import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef,atomicModifyIORef',atomicWriteIORef)
 import           Data.Int (Int64)
 import           Data.Serialize.Put (putWord16be)
+import           Data.Time.Clock (getCurrentTime)
 import           Data.Word (Word32)
 
 
@@ -75,7 +76,8 @@ sendWithTcb ns Tcb { .. } hdr body =
                             }
 
      -- only enter the retransmit queue if the segment contains data
-     mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body)
+     now   <- getCurrentTime
+     mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body now)
      case mbRes of
 
        Just (startRT,hdr',body') ->

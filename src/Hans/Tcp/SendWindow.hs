@@ -22,9 +22,12 @@ module Hans.Tcp.SendWindow (
 import Hans.Lens
 import Hans.Tcp.Packet
 
+import           Control.Monad (msum,guard)
 import qualified Data.ByteString.Lazy as L
 import           Data.List (sortBy)
+import           Data.Maybe (isJust)
 import           Data.Ord (comparing)
+import           Data.Time.Clock (UTCTime,NominalDiffTime,diffUTCTime)
 
 
 -- Segments --------------------------------------------------------------------
@@ -32,13 +35,15 @@ import           Data.Ord (comparing)
 data Segment = Segment { segHeader    :: !TcpHeader
                        , segRightEdge :: !TcpSeqNum -- ^ Cached right edge
                        , segBody      :: !L.ByteString
+                       , segSentAt    :: !(Maybe UTCTime)
                        , segSACK      :: !Bool
-                       } deriving (Show)
+                       }
 
-mkSegment :: TcpHeader -> L.ByteString -> Segment
-mkSegment segHeader segBody =
+mkSegment :: TcpHeader -> L.ByteString -> UTCTime -> Segment
+mkSegment segHeader segBody now  =
   Segment { segRightEdge = tcpSegNextAckNum segHeader (fromIntegral (L.length segBody))
           , segSACK      = False
+          , segSentAt    = Just now
           , .. }
 
 -- | The sequence number of the frame.
@@ -148,9 +153,9 @@ sndUna  = to $ \ Window { .. } ->
 
 -- | Returns the new send window, as well as boolean indicating whether or not
 -- the retransmit timer needs to be started.
-queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString
+queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString -> UTCTime
              -> Window -> (Window,Maybe (Bool,TcpHeader,L.ByteString))
-queueSegment mkHdr body win
+queueSegment mkHdr body now win
   | size == 0          = (win, Just (False,hdr,L.empty))
   | wSndAvail win == 0 = (win,Nothing)
   | otherwise          = (win',Just (startRTO,hdr,trimmedBody))
@@ -159,7 +164,7 @@ queueSegment mkHdr body win
   hdr         = mkHdr (wSndNxt win)
 
   trimmedBody = L.take (fromIntegral (wSndAvail win)) body
-  seg         = mkSegment hdr trimmedBody
+  seg         = mkSegment hdr trimmedBody now
 
   size        = tcpSegLen hdr (fromIntegral (L.length trimmedBody))
 
@@ -173,43 +178,62 @@ queueSegment mkHdr body win
 
 
 -- | A retransmit timer has gone off: reset the sack bit on all segments in the
--- queue, and return the segment at the left edge of the window, if it exists.
+-- queue; if the left-edge exists, mark it as having been retransmitted, and
+-- return it back to be sent.
 retransmitTimeout :: Window -> (Window,Maybe (TcpHeader,L.ByteString))
-retransmitTimeout win = (win', mbSeg)
+retransmitTimeout win = (win { wRetransmitQueue = queue' }, mbSeg)
   where
-  win'  = win { wRetransmitQueue = map (set sack False) (wRetransmitQueue win) }
-  mbSeg = case wRetransmitQueue win' of
-            Segment { .. } : _ -> Just (segHeader,segBody)
-            _                  -> Nothing
+
+  (mbSeg,queue') =
+    case wRetransmitQueue win of
+      Segment { .. } : rest ->
+        ( Just (segHeader,segBody)
+        , map (set sack False) (Segment { segSentAt = Nothing, .. } : rest ) )
+
+      [] -> (Nothing,[])
 
 
 -- | Remove all segments of the send window that occur before this sequence
 -- number, and increase the size of the available window. When the segment
 -- doesn't acknowledge anything in the window, 'Nothing' as the second
 -- parameter. Otherwise, return a boolean that is 'True' when there are no
--- outstanding segments.
-ackSegment :: TcpSeqNum -> Window -> (Window, Maybe Bool)
-ackSegment ack win
+-- outstanding segments, and a measurement of the RTT when the segment has not
+-- been retransmitted.
+ackSegment :: UTCTime -> TcpSeqNum -> Window
+           -> (Window, Maybe (Bool,Maybe NominalDiffTime))
+ackSegment now ack win
   | view sndUna win <= ack && ack <= view sndNxt win =
-    ( win', Just (null (wRetransmitQueue win)) )
+    ( win', Just (null (wRetransmitQueue win'), mbMeasurement) )
 
   | otherwise =
     ( win, Nothing )
   where
-  win' = win { wRetransmitQueue = go (wRetransmitQueue win)
+  win' = win { wRetransmitQueue = queue'
              , wSndAvail        = wSndAvail win + fromTcpSeqNum (ack - view sndUna win)
-             , wSndNxt          = ack }
+             }
 
-  go (seg:rest)
-      -- this segment is acknowledged by the ack
-    | view rightEdge seg <= ack = go rest
+  -- partition packets that have been acknowledged
+  (ackd,rest) = span (\seg -> view rightEdge seg <= ack) (wRetransmitQueue win)
 
-      -- the ack falls in the middle of this segment
-    | view leftEdge  seg <= ack = set leftEdge ack seg : rest
+  -- check to see if the ack was in the middle of a segment
+  (ackSplit,queue') =
+    case rest of
+      seg:segs | view leftEdge seg <= ack -> (Just seg, set leftEdge ack seg : segs)
+      _                                   -> (Nothing, rest)
 
-  -- either the segment queue was empty, or there were segments that had not
-  -- been acknowledged
-  go segs = segs
+  -- generate a measurement. If timestamps are present, this can be simplified
+  -- when the ack contains one.
+  mbMeasurement =
+    msum [ do Segment { .. } <- ackSplit
+              sent           <- segSentAt
+              return $! diffUTCTime sent now
+
+         , do let samples = filter (isJust . segSentAt) ackd
+              guard (not (null samples))
+              let Segment { .. } = last samples
+              sent <- segSentAt
+              return $! diffUTCTime sent now
+         ]
 
 
 -- Selective ACK ---------------------------------------------------------------
