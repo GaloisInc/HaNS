@@ -2,6 +2,12 @@
 
 set -ev
 
-cabal-dev install -fenable-tests
+if [ ! -d .cabal-sandbox ]; then
+	cabal sandbox init
+	cabal install --only-dep
+fi
 
-./cabal-dev/bin/test-suite --jxml=results.xml
+cabal configure --enable-tests
+cabal build
+
+./dist/build/hans-tests/hans-tests --xml=results.xml

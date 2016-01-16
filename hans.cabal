@@ -8,6 +8,7 @@ maintainer:     halvm-devel@community.galois.com
 category:       Networking
 synopsis:       Network Stack
 build-type:     Simple
+tested-with:    GHC == 7.8.4, GHC == 7.10.2, GHC == 7.10.3, GHC == 8.0.1
 description:
   HaNS is a lightweight, pure Haskell network stack that can be used for Haskell
   networking in the context of the HaLVM, or with a Linux tap device.
