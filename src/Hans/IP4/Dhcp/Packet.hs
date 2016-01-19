@@ -55,6 +55,7 @@ import Hans.IP4.Dhcp.Codec
 import Hans.IP4.Dhcp.Options
 import Hans.IP4.Packet (IP4(..),pattern WildcardIP4)
 
+import qualified Control.Applicative as A
 import           Control.Monad (unless)
 import           Data.Bits (testBit,bit)
 import qualified Data.ByteString as BS
@@ -321,7 +322,7 @@ getDhcp4Message =
      yiaddr      <- label "yiaddr" getAtom
      siaddr      <- label "siaddr" getAtom
      giaddr      <- label "giaddr" getAtom
-     chaddr      <- label "chaddr" $ isolate 16 $ getAtom <* (skip =<< remaining)
+     chaddr      <- label "chaddr" $ isolate 16 $ getAtom A.<* (skip =<< remaining)
      snameBytes  <- label "sname field" (getByteString 64)
      fileBytes   <- label "file field" (getByteString 128)
      (sname, file, opts) <- getDhcp4Options snameBytes fileBytes
