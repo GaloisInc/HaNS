@@ -722,7 +722,7 @@ putDhcp4Options opts =
      traverse_ putDhcp4Option opts
      putControlOption ControlEnd
 
-scrubControls :: (Applicative m, Monad m)
+scrubControls :: (A.Applicative m, Monad m)
               => [Either ControlTag Dhcp4Option] -> m [Dhcp4Option]
 
 scrubControls [] =
@@ -744,7 +744,7 @@ eatPad :: Monad m => Either ControlTag Dhcp4Option -> m ()
 eatPad (Left ControlPad) = return ()
 eatPad _                 = fail "Unexpected option after END option"
 
-replicateA :: Applicative f => Int -> f a -> f [a]
+replicateA :: A.Applicative f => Int -> f a -> f [a]
 replicateA n f = T.sequenceA (replicate n f)
 
 repeatedly :: Get a -> Get [a]
