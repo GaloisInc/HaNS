@@ -3,6 +3,7 @@ module Hans.IP4.Dhcp.Options where
 import Hans.IP4.Dhcp.Codec
 import Hans.IP4.Packet (IP4,IP4Mask)
 
+import qualified Control.Applicative as A
 import           Control.Monad (unless)
 import           Data.Maybe (fromMaybe)
 import           Data.Foldable (traverse_)
@@ -127,8 +128,8 @@ getDhcp4Option = do
     KnownTag tag -> do
       let r con = (Right . con) `fmap` getOption
       case tag of
-        OptTagPad                           -> pure (Left ControlPad)
-        OptTagEnd                           -> pure (Left ControlEnd)
+        OptTagPad                           -> A.pure (Left ControlPad)
+        OptTagEnd                           -> A.pure (Left ControlEnd)
         OptTagSubnetMask                    -> r OptSubnetMask
         OptTagTimeOffset                    -> r OptTimeOffset
         OptTagRouters                       -> r OptRouters
