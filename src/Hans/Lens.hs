@@ -23,6 +23,7 @@ module Hans.Lens (
 
   ) where
 
+import qualified Control.Applicative as A
 import qualified Data.Bits as B
 import           Data.Word (Word8)
 import           MonadLib (Id,runId)
@@ -71,11 +72,11 @@ type ASetter s t a b = (a -> Id b) -> (s -> Id t)
 type ASetter' s a = ASetter s s a a
 
 set :: Lens s t a b -> b -> s -> t
-set l b = \ s -> runId (l (\ _ -> pure b) s)
+set l b = \ s -> runId (l (\ _ -> A.pure b) s)
 {-# INLINE set #-}
 
 over :: ASetter s t a b -> (a -> b) -> (s -> t)
-over l f s = runId (l (pure . f) s)
+over l f s = runId (l (A.pure . f) s)
 {-# INLINE over #-}
 
 

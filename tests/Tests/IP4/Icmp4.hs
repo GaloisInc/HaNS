@@ -43,7 +43,7 @@ arbitraryIcmp4Packet  = oneof
        b <- listOf1 arbitraryRouterAddress
        return $! RouterAdvertisement a b
 
-  , pure RouterSolicitation
+  , return RouterSolicitation
 
   , do a <- arbitraryTimeExceededCode
        b <- arbitraryPayload

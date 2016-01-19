@@ -10,6 +10,7 @@ module Hans.Monad (
 
 import Hans.Device.Types (DeviceStats(),updateDropped,statRX)
 
+import qualified Control.Applicative as A
 import qualified Data.ByteString as S
 import           Data.IORef (newIORef,writeIORef,readIORef)
 import           Data.Serialize.Get (runGet,runGetState,Get)
@@ -22,7 +23,7 @@ instance Functor Hans where
   fmap f m = Hans (\ e k -> unHans m e (k . f))
   {-# INLINE fmap #-}
 
-instance Applicative Hans where
+instance A.Applicative Hans where
   pure x  = Hans (\ _ k -> k x)
 
   f <*> x = Hans $ \ e k -> unHans f e
@@ -33,7 +34,7 @@ instance Applicative Hans where
   {-# INLINE (<*>) #-}
 
 instance Monad Hans where
-  return  = pure
+  return  = A.pure
 
   m >>= f = Hans $ \ e k -> unHans m e
                  $ \ a   -> unHans (f a) e k
