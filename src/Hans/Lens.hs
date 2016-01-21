@@ -16,6 +16,7 @@ module Hans.Lens (
     ASetter, ASetter',
     set,
     over,
+    modify,
 
     -- * Utility Lenses
     bit,
@@ -78,6 +79,16 @@ set l b = \ s -> runId (l (\ _ -> A.pure b) s)
 over :: ASetter s t a b -> (a -> b) -> (s -> t)
 over l f s = runId (l (A.pure . f) s)
 {-# INLINE over #-}
+
+newtype Modify r a = Modify { runModify :: (a,r) }
+
+instance Functor (Modify r) where
+  fmap f = \ (Modify (a,r)) -> Modify (f a, r)
+  {-# INLINE fmap #-}
+
+modify :: Lens s t a b -> (a -> (b,r)) -> (s -> (t,r))
+modify l f = \ s -> runModify (l (\ a -> Modify (f a)) s)
+{-# INLINE modify #-}
 
 
 -- Utility Lenses --------------------------------------------------------------
