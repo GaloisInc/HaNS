@@ -65,7 +65,6 @@ to f = \ l s -> castConst' f (l (f s))
 {-# INLINE to #-}
 
 
-
 -- Setters ---------------------------------------------------------------------
 
 type ASetter s t a b = (a -> Id b) -> (s -> Id t)
@@ -77,7 +76,7 @@ set l b = \ s -> runId (l (\ _ -> A.pure b) s)
 {-# INLINE set #-}
 
 over :: ASetter s t a b -> (a -> b) -> (s -> t)
-over l f s = runId (l (A.pure . f) s)
+over l f = \ s -> runId (l (A.pure . f) s)
 {-# INLINE over #-}
 
 newtype Modify r a = Modify { runModify :: (a,r) }
