@@ -38,8 +38,6 @@ import           Data.Ord (comparing)
 import           Data.Time.Clock (UTCTime,NominalDiffTime,diffUTCTime)
 import           Data.Word (Word32)
 
-import Debug.Trace
-
 
 -- Segments --------------------------------------------------------------------
 
@@ -132,8 +130,7 @@ tsVal  = to tscVal
 -- | Given an echo'd timestamp, generate an RTT measurement.
 measureRTT :: Config -> Word32 -> TSClock -> NominalDiffTime
 measureRTT Config { .. } ecr clk =
-  traceShow (view tsVal clk, ecr) $
-  traceShowId $ fromIntegral (view tsVal clk - ecr) / cfgTcpTSClockFrequency
+  fromIntegral (view tsVal clk - ecr) / cfgTcpTSClockFrequency
 
 
 -- Send Window -----------------------------------------------------------------
