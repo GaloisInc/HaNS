@@ -9,6 +9,7 @@ module Hans.Lens (
 
     -- ** Getters
     Getting,
+    Getter,
     view,
     to,
 
@@ -46,6 +47,8 @@ lens get upd = \ f s -> upd s `fmap` f (get s)
 -- Getters ---------------------------------------------------------------------
 
 type Getting r s a = (a -> Const r a) -> (s -> Const r s)
+
+type Getter s a = forall r. Getting r s a
 
 newtype Const r a = Const { runConst :: r } deriving Functor
 
