@@ -30,13 +30,15 @@ import Hans.Config
 import Hans.Lens
 import Hans.Tcp.Packet
 
-import           Control.Monad (msum,guard)
+import           Control.Monad (guard)
 import qualified Data.ByteString.Lazy as L
 import           Data.List (sortBy)
 import           Data.Maybe (isJust)
 import           Data.Ord (comparing)
 import           Data.Time.Clock (UTCTime,NominalDiffTime,diffUTCTime)
 import           Data.Word (Word32)
+
+import Debug.Trace
 
 
 -- Segments --------------------------------------------------------------------
@@ -47,6 +49,13 @@ data Segment = Segment { segHeader    :: !TcpHeader
                        , segSentAt    :: !(Maybe UTCTime)
                        , segSACK      :: !Bool
                        }
+
+segHeaderL :: Lens' Segment TcpHeader
+segHeaderL f Segment { .. } =
+  fmap (\h -> Segment { segHeader = h, .. }) (f segHeader)
+
+instance HasTcpOptions Segment where
+  tcpOptions = segHeaderL . tcpOptions
 
 mkSegment :: TcpHeader -> L.ByteString -> UTCTime -> Segment
 mkSegment segHeader segBody now  =
@@ -119,6 +128,12 @@ updateTSClock Config { .. } now TSClock { .. } =
 -- | The current value of the TS clock.
 tsVal :: Getting r TSClock Word32
 tsVal  = to tscVal
+
+-- | Given an echo'd timestamp, generate an RTT measurement.
+measureRTT :: Config -> Word32 -> TSClock -> NominalDiffTime
+measureRTT Config { .. } ecr clk =
+  traceShow (view tsVal clk, ecr) $
+  traceShowId $ fromIntegral (view tsVal clk - ecr) / cfgTcpTSClockFrequency
 
 
 -- Send Window -----------------------------------------------------------------
@@ -218,6 +233,8 @@ queueSegment cfg now mkHdr body win
 -- | A retransmit timer has gone off: reset the sack bit on all segments in the
 -- queue; if the left-edge exists, mark it as having been retransmitted, and
 -- return it back to be sent.
+--
+-- XXX: does this need to update the TS clock?
 retransmitTimeout :: Window -> (Window,Maybe (TcpHeader,L.ByteString))
 retransmitTimeout win = (win { wRetransmitQueue = queue' }, mbSeg)
   where
@@ -237,9 +254,9 @@ retransmitTimeout win = (win { wRetransmitQueue = queue' }, mbSeg)
 -- parameter. Otherwise, return a boolean that is 'True' when there are no
 -- outstanding segments, and a measurement of the RTT when the segment has not
 -- been retransmitted.
-ackSegment :: UTCTime -> TcpSeqNum -> Window
+ackSegment :: Config -> UTCTime -> TcpSeqNum -> Window
            -> (Window, Maybe (Bool,Maybe NominalDiffTime))
-ackSegment now ack win
+ackSegment cfg now ack win
   | view sndUna win <= ack && ack <= view sndNxt win =
     ( win', Just (null (wRetransmitQueue win'), mbMeasurement) )
 
@@ -248,30 +265,39 @@ ackSegment now ack win
   where
   win' = win { wRetransmitQueue = queue'
              , wSndAvail        = wSndAvail win + fromTcpSeqNum (ack - view sndUna win)
+             , wTSClock         = updateTSClock cfg now (wTSClock win)
              }
 
+  -- zip down the send queue, partitioning it into (reversed) acknowledged
+  -- packets, and outstanding packets.
+  go acks segs@(seg : rest)
+    | view rightEdge seg <= ack = go (seg:acks) rest
+    | view leftEdge  seg <= ack = (seg:acks, set leftEdge ack seg : rest)
+    | otherwise                 = (acks,segs)
+
+  go acks [] = (acks,[])
+
   -- partition packets that have been acknowledged
-  (ackd,rest) = span (\seg -> view rightEdge seg <= ack) (wRetransmitQueue win)
+  (ackd,queue') = go [] (wRetransmitQueue win)
 
-  -- check to see if the ack was in the middle of a segment
-  (ackSplit,queue') =
-    case rest of
-      seg:segs | view leftEdge seg <= ack -> (Just seg, set leftEdge ack seg : segs)
-      _                                   -> (Nothing, rest)
-
-  -- generate a measurement. If timestamps are present, this can be simplified
-  -- when the ack contains one.
+  -- generate a measurement. If the timestamp option is available, that will be
+  -- used to generate the measurement, otherwise the sending time for the
+  -- segment will be diffed if it's valid.
   mbMeasurement =
-    msum [ do Segment { .. } <- ackSplit
-              sent           <- segSentAt
-              return $! diffUTCTime sent now
+    case ackd of
+      seg : _
 
-         , do let samples = filter (isJust . segSentAt) ackd
-              guard (not (null samples))
-              let Segment { .. } = last samples
-              sent <- segSentAt
-              return $! diffUTCTime sent now
-         ]
+        | Just (OptTimestamp val _) <- findTcpOption OptTagTimestamp seg ->
+          return (measureRTT cfg val (wTSClock win'))
+
+        | otherwise ->
+          do let samples = filter (isJust . segSentAt) ackd
+             guard (not (null samples))
+             let Segment { .. } = last samples
+             sent <- segSentAt
+             return $! diffUTCTime sent now
+
+      [] -> Nothing
 
 
 -- Selective ACK ---------------------------------------------------------------

@@ -90,5 +90,4 @@ handleClient sock = loop `finally` sClose sock
        if L8.null str
           then putStrLn "Closing client"
           else do _ <- sWrite sock str
-                  _ <- sWrite sock "foo\n"
                   loop

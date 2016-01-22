@@ -7,6 +7,7 @@ module Hans.Tcp.Input (
 
 import Hans.Addr (Addr,NetworkAddr(..))
 import Hans.Checksum (finalizeChecksum,extendChecksum)
+import Hans.Config (config)
 import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Lens (view,set)
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
@@ -87,7 +88,9 @@ handleActive :: NetworkStack
 
 handleActive ns dev hdr payload tcb =
      -- XXX it would be nice to add header prediction here
-  do whenState tcb SynSent (handleSynSent ns dev hdr payload tcb)
+  do updateTimestamp tcb hdr payload
+
+     whenState tcb SynSent (handleSynSent ns dev hdr payload tcb)
 
      -- page 69
      -- check sequence numbers
@@ -104,6 +107,29 @@ handleActive ns dev hdr payload tcb =
             handleActiveSegs ns tcb now segs
 
      escape
+
+
+-- | Update the internal timestamp. This follows the algorithm described on
+-- pages 15 and 16 of RFC-1323.
+updateTimestamp :: Tcb -> TcpHeader -> S.ByteString -> Hans ()
+updateTimestamp Tcb { .. } hdr payload =
+  do TcbConfig { .. } <- io (readIORef tcbConfig)
+
+     when tcUseTimestamp $
+       case findTcpOption OptTagTimestamp hdr of
+
+         -- update TS.recent when Last.ACK.sent falls within the segment, and
+         -- there isn't an outstanding delayed ack registered.
+         Just (OptTimestamp val _) ->
+           do lastAckSent <- io (readIORef tcbLastAckSent)
+              delayed     <- io (readIORef tcbNeedsDelayedAck)
+              let end = tcpSegNextAckNum hdr (S.length payload)
+              when (not delayed && withinWindow (tcpSeqNum hdr) end lastAckSent)
+                   (io (atomicWriteIORef tcbTSRecent val))
+
+         -- when the timestamp is missing, but we're using timestamps, drop the
+         -- segment
+         _ -> escape
 
 
 -- | At this point, the list of segments is contiguous, and starts at the old
@@ -145,7 +171,8 @@ handleActiveSegs ns tcb now = go
 
        -- update the send window
        mbAck <- io $
-         do mbAck <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment now (tcpAckNum hdr))
+         do mbAck <- atomicModifyIORef' (tcbSendWindow tcb)
+                         (ackSegment (view config ns) now (tcpAckNum hdr))
             handleRTTMeasurement tcb mbAck
 
        state <- io (getState tcb)
@@ -203,8 +230,8 @@ handleActiveSegs ns tcb now = go
        -- XXX: we're ignoring PSH for now, just making the data immediately
        -- available
        unless (S.null payload) $ io $
-         do queueBytes payload tcb
-            signalDelayedAck tcb
+         do signalDelayedAck tcb
+            queueBytes payload tcb
 
        -- page 75
        -- check FIN
@@ -314,7 +341,8 @@ handleSynSent ns _dev hdr _payload tcb =
           sndUna <- io $
             if view tcpAck hdr
                then do now <- getCurrentTime
-                       mb  <- atomicModifyIORef' (tcbSendWindow tcb) (ackSegment now (tcpAckNum hdr))
+                       mb  <- atomicModifyIORef' (tcbSendWindow tcb)
+                                  (ackSegment (view config ns) now (tcpAckNum hdr))
                        _   <- handleRTTMeasurement tcb mb
                        return (tcpAckNum hdr)
 
@@ -421,11 +449,11 @@ processSynOptions :: Tcb -> TcpHeader -> IO ()
 processSynOptions Tcb { .. } hdr =
   do case findTcpOption OptTagTimestamp hdr of
 
-       -- the timestamp is added by 
-       Just (OptTimestamp ecr 0) ->
+       -- the timestamp option is requested by the remote side
+       Just (OptTimestamp val 0) ->
          do atomicModifyIORef' tcbConfig $ \ TcbConfig { .. } ->
                 (TcbConfig { tcUseTimestamp = True, .. }, ())
-            atomicWriteIORef tcbTSRecent ecr
+            atomicWriteIORef tcbTSRecent val
 
        _ -> return ()
 
