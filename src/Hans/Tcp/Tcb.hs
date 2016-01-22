@@ -47,6 +47,11 @@ module Hans.Tcp.Tcb (
     finalizeTcb,
     getSndUna,
 
+    -- ** Active Config
+    TcbConfig(..),
+    usingTimestamps,
+    disableTimestamp,
+
     -- ** Windowing
     queueBytes,
     receiveBytes, tryReceiveBytes,
@@ -73,9 +78,10 @@ import           Data.IORef
                      (IORef,newIORef,atomicModifyIORef',readIORef
                      ,atomicWriteIORef)
 import qualified Data.Sequence as Seq
-import           Data.Time.Clock (NominalDiffTime)
-import           Data.Word (Word16)
+import           Data.Time.Clock (NominalDiffTime,getCurrentTime)
+import           Data.Word (Word16,Word32)
 import           MonadLib (BaseM(..))
+import           System.CPUTime (getCPUTime)
 
 
 -- Timers ----------------------------------------------------------------------
@@ -160,7 +166,8 @@ updateTimers tt = (tt',tt)
   where
   tt' = tt { ttRetransmit = if ttRetransmitValid tt then ttRetransmit tt - 1 else 0
            , tt2MSL       = max 0 (tt2MSL tt - 1)
-           , ttIdle       = ttIdle tt + 1 }
+           , ttIdle       = ttIdle tt + 1
+           }
 
 
 -- | Calibrate the RTO timer, given a round-trip measurement, as specified by
@@ -242,8 +249,10 @@ data ListenTcb = ListenTcb { lSrc    :: !Addr
                            , lPort   :: !TcpPort
 
                              -- accept
-                           , lAccept :: !(IORef AcceptQueue)
+                           , lAccept       :: !(IORef AcceptQueue)
                            , lAcceptSignal :: !Signal
+
+                           , lTSClock :: !(IORef Send.TSClock)
                            }
 
 -- | Create a new listening socket.
@@ -251,6 +260,11 @@ newListenTcb :: Addr -> TcpPort -> Int -> IO ListenTcb
 newListenTcb lSrc lPort aqFree =
   do lAccept       <- newIORef (AcceptQueue { aqTcbs = Seq.empty, .. })
      lAcceptSignal <- newSignal
+
+     now      <- getCurrentTime
+     tsval    <- getCPUTime
+     lTSClock <- newIORef (Send.initialTSClock (fromInteger tsval) now)
+
      return ListenTcb { .. }
 
 
@@ -258,8 +272,15 @@ newListenTcb lSrc lPort aqFree =
 createChild :: HasConfig cfg
             => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo Addr -> Addr -> TcpHeader -> IO Tcb
 createChild cxt iss parent ri remote hdr =
-  do child <- newTcb cxt (Just parent) iss ri (tcpDestPort hdr) remote
-                  (tcpSourcePort hdr) SynReceived
+  do let cfg = view config cxt
+
+     now <- getCurrentTime
+     tsc <- atomicModifyIORef' (lTSClock parent) $ \ tsc ->
+                let tsc' = Send.updateTSClock cfg now tsc
+                 in (tsc',tsc')
+
+     child <- newTcb cfg (Just parent) iss ri (tcpDestPort hdr) remote
+                  (tcpSourcePort hdr) SynReceived tsc
                   (queueTcb parent)
                   (\_ -> return ())
 
@@ -322,9 +343,31 @@ acceptTcb ListenTcb { .. } =
 
 type SeqNumVar = IORef TcpSeqNum
 
+data TcbConfig = TcbConfig { tcUseTimestamp :: !Bool
+                           }
+
+defaultTcbConfig :: TcbConfig
+defaultTcbConfig  =
+  TcbConfig { tcUseTimestamp = True
+            }
+
+-- | True when the timestamp option should be included.
+usingTimestamps :: Tcb -> IO Bool
+usingTimestamps Tcb { .. } =
+  do TcbConfig { .. } <- readIORef tcbConfig
+     return tcUseTimestamp
+
+-- | Disable the use of the timestamp option.
+disableTimestamp :: Tcb -> IO ()
+disableTimestamp Tcb { .. } =
+  atomicModifyIORef' tcbConfig $ \ TcbConfig { .. } ->
+    (TcbConfig { tcUseTimestamp = False, .. }, ())
+
 data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                  -- ^ Parent to notify if this tcb was generated from a socket
                  -- in the LISTEN state
+
+               , tcbConfig :: !(IORef TcbConfig)
 
                , tcbState       :: !(IORef State)
                , tcbEstablished :: Tcb -> IO ()
@@ -358,6 +401,10 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
 
                  -- Timers
                , tcbTimers :: !(IORef TcpTimers)
+
+                 -- Timer option state
+               , tcbTSRecent    :: !(IORef Word32)
+               , tcbLastAckSent :: !(IORef TcpSeqNum)
                }
 
 newTcb :: HasConfig state
@@ -366,19 +413,23 @@ newTcb :: HasConfig state
        -> TcpSeqNum -- ^ ISS
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
        -> State
+       -> Send.TSClock
        -> (Tcb -> IO ())
        -> (Tcb -> IO ())
        -> IO Tcb
-newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
-  tcbEstablished tcbClosed =
+newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort
+  state tsc tcbEstablished tcbClosed =
   do let Config { .. } = view config cxt
+
+     tcbConfig <- newIORef defaultTcbConfig
+
      tcbState  <- newIORef state
      tcbSndUp  <- newIORef 0
      tcbSndWl1 <- newIORef 0
      tcbSndWl2 <- newIORef 0
 
      tcbSendWindow <-
-         newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow))
+         newIORef (Send.emptyWindow iss (fromIntegral cfgTcpInitialWindow) tsc)
 
      tcbIss    <- newIORef iss
 
@@ -391,6 +442,10 @@ newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort state
      tcbIrs    <- newIORef 0
      tcbMss    <- newIORef cfgTcpInitialMSS
      tcbTimers <- newIORef emptyTcpTimers
+
+     tcbTSRecent     <- newIORef 0
+     tcbLastAckSent  <- newIORef 0
+
      return Tcb { .. }
 
 -- | Record that a delayed ack should be sent.

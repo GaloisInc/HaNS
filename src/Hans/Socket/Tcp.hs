@@ -12,6 +12,7 @@ import           Hans.Socket.Types
 import           Hans.Tcp.Tcb
 import           Hans.Tcp.Message
 import           Hans.Tcp.Output
+import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Types
 
 import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar)
@@ -19,6 +20,8 @@ import           Control.Exception (throwIO)
 import           Control.Monad (unless)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
+import           Data.Time.Clock (getCurrentTime)
+import           System.CPUTime (getCPUTime)
 
 
 -- TCP Sockets -----------------------------------------------------------------
@@ -41,8 +44,12 @@ activeOpen ns ri srcPort dst dstPort =
 
      done <- newEmptyMVar
 
+     now   <- getCurrentTime
+     tsval <- getCPUTime
+     let tsc = Send.initialTSClock (fromInteger tsval) now
+
      iss <- nextIss (view tcpState ns) (riSource ri') srcPort dst' dstPort
-     tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed
+     tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed tsc
                 (\_ -> tryPutMVar done True  >> return ())
                 (\_ -> tryPutMVar done False >> return ())
 

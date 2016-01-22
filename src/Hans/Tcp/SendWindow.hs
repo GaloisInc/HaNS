@@ -11,6 +11,12 @@ module Hans.Tcp.SendWindow (
     nullWindow,
     flushWindow,
 
+    -- ** Timestamp Clock
+    TSClock(),
+    initialTSClock,
+    updateTSClock,
+    tsVal,
+
     -- ** Packet Processing
     queueSegment,
     retransmitTimeout,
@@ -20,6 +26,7 @@ module Hans.Tcp.SendWindow (
     handleSack,
   ) where
 
+import Hans.Config
 import Hans.Lens
 import Hans.Tcp.Packet
 
@@ -29,6 +36,7 @@ import           Data.List (sortBy)
 import           Data.Maybe (isJust)
 import           Data.Ord (comparing)
 import           Data.Time.Clock (UTCTime,NominalDiffTime,diffUTCTime)
+import           Data.Word (Word32)
 
 
 -- Segments --------------------------------------------------------------------
@@ -94,6 +102,25 @@ sack f seg@Segment { .. } =
            | otherwise    = Segment { segSACK = b, .. }
 
 
+-- Timestamp Clock -------------------------------------------------------------
+
+data TSClock = TSClock { tscVal :: !Word32, tscLastUpdate :: !UTCTime }
+
+-- | Create a 'TSClock'.
+initialTSClock :: Word32 -> UTCTime -> TSClock
+initialTSClock tscVal tscLastUpdate = TSClock { .. }
+
+-- | Update the timestamp clock, and return the new value of TSval.
+updateTSClock :: Config -> UTCTime -> TSClock -> TSClock
+updateTSClock Config { .. } now TSClock { .. } =
+  let diff = truncate (diffUTCTime now tscLastUpdate * cfgTcpTSClockFrequency)
+   in TSClock { tscVal = tscVal + diff, tscLastUpdate = now }
+
+-- | The current value of the TS clock.
+tsVal :: Getting r TSClock Word32
+tsVal  = to tscVal
+
+
 -- Send Window -----------------------------------------------------------------
 
 type Segments = [Segment]
@@ -109,13 +136,16 @@ data Window = Window { wRetransmitQueue :: !Segments
 
                      , wSndNxt          :: !TcpSeqNum
                      , wSndWnd          :: !TcpSeqNum
+
+                     , wTSClock :: !TSClock
                      }
 
 
 emptyWindow :: TcpSeqNum -- ^ SND.NXT
             -> TcpSeqNum -- ^ SND.WND
+            -> TSClock
             -> Window
-emptyWindow wSndNxt wSndWnd =
+emptyWindow wSndNxt wSndWnd wTSClock =
   Window { wRetransmitQueue = []
          , wSndAvail        = fromTcpSeqNum wSndWnd
          , .. }
@@ -159,15 +189,16 @@ sndUna  = to $ \ Window { .. } ->
 
 -- | Returns the new send window, as well as boolean indicating whether or not
 -- the retransmit timer needs to be started.
-queueSegment :: (TcpSeqNum -> TcpHeader) -> L.ByteString -> UTCTime
+queueSegment :: Config -> UTCTime -> (Word32 -> TcpSeqNum -> TcpHeader) -> L.ByteString
              -> Window -> (Window,Maybe (Bool,TcpHeader,L.ByteString))
-queueSegment mkHdr body now win
+queueSegment cfg now mkHdr body win
   | size == 0          = (win, Just (False,hdr,L.empty))
   | wSndAvail win == 0 = (win,Nothing)
   | otherwise          = (win',Just (startRTO,hdr,trimmedBody))
   where
 
-  hdr         = mkHdr (wSndNxt win)
+  clock'      = updateTSClock cfg now (wTSClock win)
+  hdr         = mkHdr (view tsVal clock') (wSndNxt win)
 
   trimmedBody = L.take (fromIntegral (wSndAvail win)) body
   seg         = mkSegment hdr trimmedBody now
@@ -177,6 +208,7 @@ queueSegment mkHdr body now win
   win' = win { wRetransmitQueue = wRetransmitQueue win ++ [seg]
              , wSndAvail        = wSndAvail win - size
              , wSndNxt          = wSndNxt win + fromIntegral size
+             , wTSClock         = clock'
              }
 
   -- start the retransmit timer when the queue was empty

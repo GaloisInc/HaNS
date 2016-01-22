@@ -408,9 +408,29 @@ createChildTcb ns dev remote local hdr parent =
 
      -- queueing a SYN/ACK in the send window will advance SND.NXT
      -- automatically
+     io (processSynOptions child hdr)
      let synAck = set tcpSyn True
                 $ set tcpAck True emptyTcpHeader
      _ <- io (sendWithTcb ns child synAck L.empty)
+
+     return ()
+
+
+-- | Determine which options should be sent in the SYN,ACK response.
+processSynOptions :: Tcb -> TcpHeader -> IO ()
+processSynOptions Tcb { .. } hdr =
+  do case findTcpOption OptTagTimestamp hdr of
+
+       -- the timestamp is added by 
+       Just (OptTimestamp ecr 0) ->
+         do atomicModifyIORef' tcbConfig $ \ TcbConfig { .. } ->
+                (TcbConfig { tcUseTimestamp = True, .. }, ())
+            atomicWriteIORef tcbTSRecent ecr
+
+       _ -> return ()
+
+     -- XXX: in the future, enable SACK here
+     -- XXX: in the future, enable Window Scale here
 
      return ()
 

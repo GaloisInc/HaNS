@@ -15,6 +15,7 @@ module Hans.Tcp.Output (
     -- $notes
   ) where
 
+import           Hans.Config (config)
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device.Types (Device(..),ChecksumOffload(..),txOffload)
 import           Hans.Lens (view,set)
@@ -22,7 +23,7 @@ import           Hans.Network
 import           Hans.Serialize (runPutPacket)
 import           Hans.Tcp.Packet
                      (TcpHeader(..),putTcpHeader,emptyTcpHeader,tcpAck,tcpFin
-                     ,tcpPsh)
+                     ,tcpPsh,TcpOption(..),setTcpOption)
 import qualified Hans.Tcp.RecvWindow as Recv
 import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Tcp.Tcb
@@ -67,22 +68,37 @@ sendData ns tcb bytes =
 -- were sent is returned.
 sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO (Maybe Int64)
 sendWithTcb ns Tcb { .. } hdr body =
-  do recvWindow <- readIORef tcbRecvWindow
-     let mkHdr seqNum = hdr { tcpSeqNum     = seqNum
-                            , tcpAckNum     = view Recv.rcvNxt recvWindow
-                            , tcpDestPort   = tcbRemotePort
-                            , tcpSourcePort = tcbLocalPort
-                            , tcpWindow     = view Recv.rcvWnd recvWindow
-                            }
+  do TcbConfig { .. } <- readIORef tcbConfig
+
+     recvWindow <- readIORef tcbRecvWindow
+
+     mbTSecr <- if tcUseTimestamp
+                   then Just `fmap` readIORef tcbTSRecent
+                   else return Nothing
+
+     let mkHdr tsVal seqNum =
+           addTimestamp tsVal mbTSecr
+             hdr { tcpSeqNum     = seqNum
+                 , tcpAckNum     = if view tcpAck hdr
+                                      then view Recv.rcvNxt recvWindow
+                                      else 0
+                 , tcpDestPort   = tcbRemotePort
+                 , tcpSourcePort = tcbLocalPort
+                 , tcpWindow     = view Recv.rcvWnd recvWindow
+                 }
 
      -- only enter the retransmit queue if the segment contains data
      now   <- getCurrentTime
-     mbRes <- atomicModifyIORef' tcbSendWindow (Send.queueSegment mkHdr body now)
+     mbRes <- atomicModifyIORef' tcbSendWindow
+                  (Send.queueSegment (view config ns) now mkHdr body)
      case mbRes of
 
        Just (startRT,hdr',body') ->
-         do -- clear the delayed ack flag, when an ack is present
-            when (view tcpAck hdr') (atomicWriteIORef tcbNeedsDelayedAck False)
+         do -- clear the delayed ack flag and update Last.ACK.sent, when an ack
+            -- is present
+            when (view tcpAck hdr') $
+              do atomicWriteIORef tcbNeedsDelayedAck False
+                 atomicWriteIORef tcbLastAckSent (tcpAckNum hdr')
 
             -- reset the retransmit timer, if the retransmit queue is now
             -- non-empty
@@ -96,6 +112,13 @@ sendWithTcb ns Tcb { .. } hdr body =
 
        Nothing ->
             return Nothing
+
+
+-- | The presence of a tracked TSecr value controls whether or not we send the
+-- timestamp option.
+addTimestamp :: Word32 -> Maybe Word32 -> TcpHeader -> TcpHeader
+addTimestamp tsVal (Just tsEcr) hdr = setTcpOption (OptTimestamp tsVal tsEcr) hdr
+addTimestamp _     _            hdr = hdr
 
 
 -- Primitive Send --------------------------------------------------------------

@@ -12,6 +12,7 @@ module Hans.Tcp.RecvWindow (
     rcvRight,
     moveRcvRight,
 
+
     -- ** Sequence Numbers
     sequenceNumberValid,
   ) where
@@ -102,7 +103,6 @@ data Window = Window { wSegments :: ![Segment]
 
                      , wMax :: !TcpSeqNum
                        -- ^ Maximum size of the receive window
-
                      } deriving (Show)
 
 emptyWindow :: TcpSeqNum -> Int -> Window
@@ -133,8 +133,12 @@ setRcvNxt nxt win
   | otherwise            = (win, False)
 
 
--- | Check an incoming segment, and queue it in the receive window. The boolean
--- parameter of the pair is True when the segment received was valid.
+-- | Check an incoming segment, and queue it in the receive window. When the
+-- segment received was valid 'Just' is returned, including segments in the
+-- receive window were unblocked by it.
+--
+-- NOTE: when Just[] is returned, this should be a signal to issue a duplicate
+-- ACK, as we've receive something out of sequence (fast retransmit).
 recvSegment :: TcpHeader -> S.ByteString -> Window
             -> (Window, Maybe [(TcpHeader,S.ByteString)])
 recvSegment hdr body win

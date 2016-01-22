@@ -63,16 +63,17 @@ main  =
                }
 
      sock <- sListen ns defaultSocketConfig WildcardIP4 9001 10
-     putStrLn "Waiting for a client"
-     client <- showExceptions "sAccept" (sAccept (sock :: TcpListenSocket IP4))
-     putStrLn "Got a client"
-     handleClient client
 
-     threadDelay (10 * 1000000)
+     _    <- forkIO $ forever $
+       do putStrLn "Waiting for a client"
+          client <- sAccept (sock :: TcpListenSocket IP4)
+          putStrLn "Got a client"
+          _ <- forkIO (handleClient client)
+          return ()
+
+     threadDelay (30 * 1000000)
 
      dumpStats (devStats dev)
-
-     putStrLn "done?"
 
 
 showExceptions :: String -> IO a -> IO a
@@ -88,6 +89,6 @@ handleClient sock = loop `finally` sClose sock
     do str <- sRead sock 1024
        if L8.null str
           then putStrLn "Closing client"
-          else do sWrite sock str
-                  sWrite sock "foo\n"
+          else do _ <- sWrite sock str
+                  _ <- sWrite sock "foo\n"
                   loop
