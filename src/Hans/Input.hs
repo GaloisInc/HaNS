@@ -22,7 +22,7 @@ processPackets ns = runHans $
   do input <- io (readChan (nsInput ns))
      case input of
        FromDevice dev pkt   -> processEthernet ns dev pkt
-       FromIP4 dev hdr body -> handleIP4 ns dev hdr body
+       FromIP4 dev hdr body -> handleIP4 ns dev Nothing hdr body
 
 
 processEthernet :: NetworkStack -> Device -> S.ByteString -> Hans ()

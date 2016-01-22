@@ -8,12 +8,12 @@ module Hans.IP4.Input (
   ) where
 
 import Hans.Checksum (computeChecksum)
-import Hans.Device (Device(..),ChecksumOffload(..),txOffload,rxOffload)
+import Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
 import Hans.IP4.ArpTable (addEntry,lookupEntry)
 import Hans.IP4.Fragments (processFragment)
-import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet,renderIcmp4Packet)
-import Hans.IP4.Output (queueIP4)
+import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet)
+import Hans.IP4.Output (queueIcmp4,portUnreachable)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..))
 import Hans.Lens (view)
@@ -89,20 +89,34 @@ processIP4 ns dev payload =
      -- routing would happen
      checkDestination ns dev (ip4DestAddr hdr)
 
-     handleIP4 ns dev hdr (S.take bodyLen body)
+     handleIP4 ns dev (Just (hdrLen,payload)) hdr (S.take bodyLen body)
 
 
 -- | The processing stage after the packet has been decoded and validated. It's
 -- exposed here so that routing to an address that's managed by the network
 -- stack can skip the device layer.
-handleIP4 :: NetworkStack -> Device -> IP4Header -> S.ByteString -> Hans ()
-handleIP4 ns dev hdr body =
+handleIP4 :: NetworkStack -> Device -> Maybe (Int,S.ByteString)
+          -> IP4Header -> S.ByteString -> Hans ()
+handleIP4 ns dev mbOrig hdr body =
   do (IP4Header { .. },body') <-
          processFragment (ip4Fragments (view ip4State ns)) hdr body
 
      case ip4Protocol of
        PROT_ICMP4 -> processICMP ns dev ip4SourceAddr ip4DestAddr body'
-       PROT_UDP   -> processUdp  ns dev ip4SourceAddr ip4DestAddr body'
+
+       PROT_UDP   ->
+         do routed <- processUdp ns dev ip4SourceAddr ip4DestAddr body'
+            case (routed,mbOrig) of
+              -- when we failed to route the datagram, and have the original
+              -- message handy, send a portUnreachable message.
+              (False,Just(ihl,orig)) -> io
+                $ portUnreachable ns dev (SourceIP4 ip4DestAddr) ip4SourceAddr
+                $ S.take (ihl + 8) orig
+
+              -- otherwise, the packet was routed from an internal device, or a
+              -- destination actually existed.
+              _ -> return ()
+
        PROT_TCP   -> processTcp  ns dev ip4SourceAddr ip4DestAddr body'
        _          -> dropPacket (devStats dev)
 
@@ -152,9 +166,7 @@ processICMP ns dev src dst body =
        -- on. As it's probably going out the same device, this seems OK, but it
        -- would be nice to confirm that.
        Echo ident seqNum bytes ->
-         do let packet = renderIcmp4Packet (view txOffload dev)
-                             (EchoReply ident seqNum bytes)
-            io (queueIP4 ns (devStats dev) (SourceIP4 dst) src PROT_ICMP4 packet)
+         do io (queueIcmp4 ns dev (SourceIP4 dst) src (EchoReply ident seqNum bytes))
             escape
 
 

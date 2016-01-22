@@ -21,10 +21,12 @@ import qualified Data.ByteString as S
 
 
 {-# SPECIALIZE processUdp :: NetworkStack -> Device -> IP4 -> IP4
-                          -> S.ByteString -> Hans () #-}
+                          -> S.ByteString -> Hans Bool #-}
 
+-- | Process a message destined for the UDP layer. When the message cannot be
+-- routed, 'False' is returned.
 processUdp :: Network addr
-           => NetworkStack -> Device -> addr -> addr -> S.ByteString -> Hans ()
+           => NetworkStack -> Device -> addr -> addr -> S.ByteString -> Hans Bool
 processUdp ns dev src dst bytes =
   do let checksum = finalizeChecksum $ extendChecksum bytes
                                      $ pseudoHeader src dst PROT_UDP
@@ -38,7 +40,7 @@ processUdp ns dev src dst bytes =
      -- attempt to find a destination for this packet
      io (routeMsg ns dev (toAddr src) (toAddr dst) hdr (S.take payloadLen payload))
 
-routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO ()
+routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO Bool
 routeMsg ns dev src dst UdpHeader { .. } payload =
   do mb <- lookupRecv ns dst udpDestPort
      case mb of
@@ -46,6 +48,6 @@ routeMsg ns dev src dst UdpHeader { .. } payload =
        -- XXX: which stat should increment when writeChunk fails?
        Just buf ->
          do _ <- DG.writeChunk buf (dev,src,udpSourcePort,dst,udpDestPort) payload
-            return ()
+            return True
 
-       _ -> return ()
+       _ -> return False

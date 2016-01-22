@@ -6,6 +6,10 @@ module Hans.IP4.Output (
     prepareIP4,
     primSendIP4,
     responder,
+
+    -- * ICMP4 Messages
+    queueIcmp4,
+    portUnreachable,
   ) where
 
 import Hans.Checksum (computeChecksum)
@@ -19,10 +23,12 @@ import Hans.Ethernet
 import Hans.IP4.ArpTable
            (lookupEntry,resolveAddr,QueryResult(..),markUnreachable
            ,writeChanStrategy)
+import Hans.IP4.Icmp4
+           (Icmp4Packet(..),DestinationUnreachableCode(..),renderIcmp4Packet)
 import Hans.IP4.Packet
 import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Lens
-import Hans.Network.Types (NetworkProtocol)
+import Hans.Network.Types
 import Hans.Serialize (runPutPacket)
 import Hans.Threads (forkNamed)
 import Hans.Types
@@ -30,6 +36,7 @@ import Hans.Types
 import           Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (when,forever,unless)
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import           Data.Serialize.Put (putWord16be)
 
@@ -210,7 +217,7 @@ arpRequestThread ns dev src dst = loop 0
 renderIP4Packet :: ChecksumOffload -> IP4Header -> L.ByteString -> L.ByteString
 renderIP4Packet ChecksumOffload { .. } hdr pkt
   | coIP4     = bytes `L.append` pkt
-  | otherwise = packet
+  | otherwise = withChecksum
   where
 
   pktlen    = L.length pkt
@@ -222,4 +229,22 @@ renderIP4Packet ChecksumOffload { .. } hdr pkt
   afterCS   = L.drop 12 bytes
   csBytes   = runPutPacket 2 100 afterCS (putWord16be cs)
 
-  packet    = beforeCS `L.append` csBytes
+  withChecksum = beforeCS `L.append` csBytes
+
+
+-- ICMP Messages ---------------------------------------------------------------
+
+queueIcmp4 :: NetworkStack -> Device -> SendSource -> IP4 -> Icmp4Packet
+           -> IO ()
+queueIcmp4 ns dev src dst pkt =
+  let msg = renderIcmp4Packet (view txOffload dev) pkt
+   in queueIP4 ns (devStats dev) src dst PROT_ICMP4 msg
+
+-- | Emit a destination unreachable ICMP message. This will always be queued via
+-- the responder queue, as it is most likely coming from the fast path. The
+-- bytestring argument is assumed to be the original IP4 datagram, trimmed to
+-- IP4 header + 8 bytes of data.
+portUnreachable :: NetworkStack -> Device -> SendSource -> IP4 -> S.ByteString
+                -> IO ()
+portUnreachable ns dev src dst chunk =
+  queueIcmp4 ns dev src dst (DestinationUnreachable PortUnreachable chunk)
