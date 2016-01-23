@@ -45,7 +45,7 @@ data SendSource = SourceAny
 data ResponderRequest = Finish !Device !Mac [L.ByteString]
                         -- ^ Finish sending these IP4 packets
 
-                      | Send !SendSource !IP4 !NetworkProtocol L.ByteString
+                      | Send !SendSource !IP4 !Bool !NetworkProtocol L.ByteString
                        -- ^ Send this IP4 payload to this address
 
 

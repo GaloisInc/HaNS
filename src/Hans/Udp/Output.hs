@@ -36,7 +36,7 @@ primSendUdp ns ri dst udpSourcePort udpDestPort payload
        let bytes = renderUdpPacket (view txOffload ri)
                        (riSource ri) dst hdr payload
 
-       sendDatagram ns ri dst PROT_UDP bytes
+       sendDatagram ns ri dst False PROT_UDP bytes
 
        return True
 

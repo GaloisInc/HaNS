@@ -35,13 +35,15 @@ class NetworkAddr addr => Network addr where
                 -> addr -- ^ Source
                 -> addr -- ^ Destination
                 -> addr -- ^ Next-hop
+                -> Bool -- ^ Don't fragment
                 -> NetworkProtocol
                 -> L.ByteString
                 -> IO ()
 
 
 sendDatagram :: (HasNetworkStack ns, Network addr)
-             => ns -> RouteInfo addr -> addr -> NetworkProtocol -> L.ByteString
+             => ns -> RouteInfo addr -> addr
+             -> Bool -> NetworkProtocol -> L.ByteString
              -> IO ()
 sendDatagram ns RouteInfo { .. } = \ dst ->
   sendDatagram' ns riDev riSource dst riNext
@@ -52,11 +54,11 @@ sendDatagram ns RouteInfo { .. } = \ dst ->
 -- | Send a datagram and lookup routing information at the same time. Returns
 -- 'False' if no route to the destination was known.
 routeDatagram :: (HasNetworkStack ns, Network addr)
-              => ns -> addr -> NetworkProtocol -> L.ByteString -> IO Bool
-routeDatagram ns dst prot bytes =
+              => ns -> addr -> Bool -> NetworkProtocol -> L.ByteString -> IO Bool
+routeDatagram ns dst df prot bytes =
   do mbRoute <- lookupRoute ns dst
      case mbRoute of
-       Just route -> do sendDatagram ns route dst prot bytes
+       Just route -> do sendDatagram ns route dst df prot bytes
                         return True
 
        Nothing    -> return False
@@ -111,6 +113,6 @@ instance Network IP4.IP4 where
          Nothing                      -> return Nothing
   {-# INLINE lookupRoute #-}
 
-  sendDatagram' ns dev src dst next =
-    IP4.primSendIP4 (view networkStack ns) dev src dst next
+  sendDatagram' ns dev src dst df next =
+    IP4.primSendIP4 (view networkStack ns) dev src dst df next
   {-# INLINE sendDatagram' #-}

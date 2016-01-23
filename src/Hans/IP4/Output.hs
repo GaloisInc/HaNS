@@ -16,7 +16,7 @@ import Hans.Checksum (computeChecksum)
 import Hans.Config (config,Config(..))
 import Hans.Device
            (Device(..),DeviceConfig(..),DeviceStats(..),updateError,statTX
-           ,ChecksumOffload(..),txOffload)
+           ,ChecksumOffload(..),txOffload,deviceConfig)
 import Hans.Ethernet
            ( Mac,sendEthernet,pattern ETYPE_IPV4, pattern ETYPE_ARP
            , pattern BroadcastMac)
@@ -47,8 +47,8 @@ responder ns = forever $
   do req <- BC.readChan (ip4ResponderQueue (view ip4State ns))
      case req of
 
-       Send mbSrc dst prot payload ->
-         do _ <- sendIP4 ns mbSrc dst prot payload
+       Send mbSrc dst df prot payload ->
+         do _ <- sendIP4 ns mbSrc dst df prot payload
             return ()
 
        Finish dev mac frames ->
@@ -58,27 +58,28 @@ responder ns = forever $
 -- | Queue a message on the responder queue instead of attempting to send it
 -- directly.
 queueIP4 :: NetworkStack -> DeviceStats
-         -> SendSource -> IP4 -> NetworkProtocol -> L.ByteString
+         -> SendSource -> IP4 -> Bool -> NetworkProtocol -> L.ByteString
          -> IO ()
-queueIP4 ns stats mbSrc dst prot payload =
+queueIP4 ns stats mbSrc dst df prot payload =
   do written <- BC.tryWriteChan (ip4ResponderQueue (view ip4State ns))
-                    (Send mbSrc dst prot payload)
+                    (Send mbSrc dst df prot payload)
      unless written (updateError statTX stats)
 
 
 -- | Send an IP4 packet to the given destination. If it's not possible to find a
 -- route to the destination, return False.
-sendIP4 :: NetworkStack -> SendSource -> IP4 -> NetworkProtocol -> L.ByteString
+sendIP4 :: NetworkStack -> SendSource -> IP4
+        -> Bool -> NetworkProtocol -> L.ByteString
         -> IO Bool
 
 -- A special case for when the sender knows that this is the right device and
 -- source address. The routing table is still queried to find the next hop, and
 -- if the route found doesn't use the device provided, the packets aren't sent.
-sendIP4 ns (SourceDev dev src) dst prot payload =
+sendIP4 ns (SourceDev dev src) dst df prot payload =
   do mbRoute <- lookupRoute4 ns dst
      case mbRoute of
        Just (_,next,dev') | devName dev == devName dev' ->
-         do primSendIP4 ns dev src dst next prot payload
+         do primSendIP4 ns dev src dst next df prot payload
             return True
 
        _ ->
@@ -86,30 +87,31 @@ sendIP4 ns (SourceDev dev src) dst prot payload =
             return False
 
 -- sending from a specific device
-sendIP4 ns (SourceIP4 src) dst prot payload =
+sendIP4 ns (SourceIP4 src) dst df prot payload =
   do mbRoute <- isLocalAddr ns src
      case mbRoute of
        Just route ->
          do primSendIP4 ns (routeDevice route) (routeSource route)
-                dst (routeNextHop dst route) prot payload
+                dst (routeNextHop dst route) df prot payload
             return True
 
        Nothing ->
             return False
 
 -- find the right path out
-sendIP4 ns SourceAny dst prot payload =
+sendIP4 ns SourceAny dst df prot payload =
   do mbRoute <- lookupRoute4 ns dst
      case mbRoute of
-       Just (src,next,dev) -> do primSendIP4 ns dev src dst next prot payload
+       Just (src,next,dev) -> do primSendIP4 ns dev src dst next df prot payload
                                  return True
        Nothing             -> return False
 
 
-prepareHeader :: NetworkStack -> IP4 -> IP4 -> NetworkProtocol -> IO IP4Header
-prepareHeader ns src dst prot =
+prepareHeader :: NetworkStack -> IP4 -> IP4 -> Bool -> NetworkProtocol -> IO IP4Header
+prepareHeader ns src dst df prot =
   do ident <- nextIdent ns
-     return $! emptyIP4Header { ip4Ident      = ident
+     return $! set ip4DontFragment df
+               emptyIP4Header { ip4Ident      = ident
                               , ip4SourceAddr = src
                               , ip4DestAddr   = dst
                               , ip4Protocol   = prot
@@ -118,11 +120,11 @@ prepareHeader ns src dst prot =
 
 
 -- | Prepare IP4 fragments to be sent.
-prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> NetworkProtocol
+prepareIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> Bool -> NetworkProtocol
            -> L.ByteString
            -> IO [L.ByteString]
-prepareIP4 ns dev src dst prot payload =
-  do hdr <- prepareHeader ns src dst prot
+prepareIP4 ns dev src dst df prot payload =
+  do hdr <- prepareHeader ns src dst df prot
 
      let DeviceConfig { .. } = devConfig dev
 
@@ -133,20 +135,20 @@ prepareIP4 ns dev src dst prot payload =
 -- | Send an IP4 packet to the given destination. This assumes that routing has
 -- already taken place, and that the source and destination addresses are
 -- correct.
-primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> NetworkProtocol
+primSendIP4 :: NetworkStack -> Device -> IP4 -> IP4 -> IP4 -> Bool -> NetworkProtocol
              -> L.ByteString -> IO ()
-primSendIP4 ns dev src dst next prot payload
+primSendIP4 ns dev src dst next df prot payload
     -- when the source and next hop are the same, re-queue in the network stack
     -- after fragment reassembly
   | src == next =
-    do hdr <- prepareHeader ns src dst prot
+    do hdr <- prepareHeader ns src dst df prot
        _   <- BC.tryWriteChan (nsInput ns) $! FromIP4 dev hdr (L.toStrict payload)
        -- don't write any stats for packets that skip the device layer
        return ()
 
     -- the packet is leaving the network stack so encode it and send
   | otherwise =
-    do packets <- prepareIP4 ns dev src dst prot payload
+    do packets <- prepareIP4 ns dev src dst df prot payload
        arpOutgoing ns dev src next packets
 
 
@@ -238,7 +240,8 @@ queueIcmp4 :: NetworkStack -> Device -> SendSource -> IP4 -> Icmp4Packet
            -> IO ()
 queueIcmp4 ns dev src dst pkt =
   let msg = renderIcmp4Packet (view txOffload dev) pkt
-   in queueIP4 ns (devStats dev) src dst PROT_ICMP4 msg
+      df  = fromIntegral (L.length msg) < dcMtu (view deviceConfig dev) - 20
+   in queueIP4 ns (devStats dev) src dst df PROT_ICMP4 msg
 
 -- | Emit a destination unreachable ICMP message. This will always be queued via
 -- the responder queue, as it is most likely coming from the fast path. The

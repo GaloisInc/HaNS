@@ -136,9 +136,10 @@ routeTcp ns dev src dst hdr payload
   | otherwise =
     do mbRoute <- findNextHop ns (Just dev) (Just src) dst
        case mbRoute of
+
          Just ri ->
            do let bytes = renderTcpPacket (view txOffload dev) src dst hdr payload
-              sendDatagram ns ri dst PROT_TCP bytes
+              sendDatagram ns ri dst False PROT_TCP bytes
               return True
 
          Nothing ->
@@ -157,7 +158,7 @@ sendTcp ns ri dst hdr payload
 
   | otherwise =
     do let bytes = renderTcpPacket (view txOffload ri) (riSource ri) dst hdr payload
-       sendDatagram ns ri dst PROT_TCP bytes
+       sendDatagram ns ri dst False PROT_TCP bytes
 
        return True
 
