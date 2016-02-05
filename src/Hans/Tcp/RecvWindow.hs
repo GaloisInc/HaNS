@@ -285,7 +285,7 @@ sequenceNumberValid nxt wnd hdr@TcpHeader { .. } payload
   -- adjusted header for when the payload spans RCV.NXT
   hdr' = hdr { tcpSeqNum = nxt }
 
-  -- XXX: this doesn't account for syn/fin at the momen
+  -- XXX: this doesn't account for syn/fin at the moment
   -- trim the payload to fit in the window
   seg' = S.copy $ S.drop (fromTcpSeqNum (nxt    - tcpSeqNum))
                 $ S.take (fromTcpSeqNum (segEnd - wnd)) payload
