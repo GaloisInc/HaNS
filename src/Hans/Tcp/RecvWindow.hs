@@ -272,10 +272,9 @@ sequenceNumberValid nxt wnd hdr@TcpHeader { .. } payload
        then Nothing
 
        -- test 4
-       else if | seqNumInWindow && dataEndInWindow -> Just (mkSegment hdr  seg')
-               | seqNumInWindow                    -> Just (mkSegment hdr  seg')
-               | dataEndInWindow                   -> Just (mkSegment hdr' seg')
-               | otherwise                         -> Nothing
+       else if | seqNumInWindow  -> Just (mkSegment hdr  seg')
+               | dataEndInWindow -> Just (mkSegment hdr' seg')
+               | otherwise       -> Nothing
 
   where
 
