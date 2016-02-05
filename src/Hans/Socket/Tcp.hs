@@ -50,8 +50,8 @@ activeOpen ns ri srcPort dst dstPort =
 
      iss <- nextIss (view tcpState ns) (riSource ri') srcPort dst' dstPort
      tcb <- newTcb ns Nothing iss ri' srcPort dst' dstPort Closed tsc
-                (\_ -> tryPutMVar done True  >> return ())
-                (\_ -> tryPutMVar done False >> return ())
+                (\_ _ -> tryPutMVar done True  >> return ())
+                (\_ _ -> tryPutMVar done False >> return ())
 
      let update Nothing = (Just tcb, True)
          update Just{}  = (Nothing, False)

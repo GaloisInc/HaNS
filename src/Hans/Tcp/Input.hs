@@ -128,8 +128,9 @@ updateTimestamp Tcb { .. } hdr payload =
                    (io (atomicWriteIORef tcbTSRecent val))
 
          -- when the timestamp is missing, but we're using timestamps, drop the
-         -- segment
-         _ -> escape
+         -- segment, unless it was an RST
+         _ | view tcpRst hdr -> return ()
+           | otherwise       -> escape
 
 
 -- | At this point, the list of segments is contiguous, and starts at the old
@@ -151,12 +152,16 @@ handleActiveSegs ns tcb now = go
                          _ <- sendWithTcb ns tcb rst L.empty
                          return ()
 
-                    -- NOTE: we don't set the state of a passive socket to Closed,
-                    -- as that might provoke action by the listening socket.
+                    -- make sure to reclaim some of the syn backlog, and accept
+                    -- queue position if the client decides to abort the
+                    -- connection.
                     state <- getState tcb
-                    if state == SynReceived && isJust (tcbParent tcb)
-                       then incrSynBacklog ns
-                       else setState tcb Closed
+                    when (state == SynReceived && isJust (tcbParent tcb))
+                         (incrSynBacklog ns)
+
+                    -- when the tcb was passively opened, this will free its
+                    -- accept queue slot.
+                    setState tcb Closed
 
                     closeActive ns tcb
 

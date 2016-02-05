@@ -210,10 +210,10 @@ whenState tcb state m =
 -- | The Tcb type is the only one that supports changing state.
 setState :: Tcb -> State -> IO ()
 setState tcb state =
-  do atomicWriteIORef (tcbState tcb) state
+  do old <- atomicModifyIORef' (tcbState tcb) (\old -> (state,old))
      case state of
-       Established -> tcbEstablished tcb tcb
-       Closed      -> tcbClosed      tcb tcb
+       Established -> tcbEstablished tcb tcb old
+       Closed      -> tcbClosed      tcb tcb old
        CloseWait   -> Stream.closeBuffer (tcbRecvBuffer tcb)
        _           -> return ()
 
@@ -282,7 +282,8 @@ createChild cxt iss parent ri remote hdr =
      child <- newTcb cfg (Just parent) iss ri (tcpDestPort hdr) remote
                   (tcpSourcePort hdr) SynReceived tsc
                   (queueTcb parent)
-                  (\_ -> return ())
+                  (\tcb state -> when (state == SynReceived)
+                                      (releaseSlot parent))
 
      atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
      atomicWriteIORef (tcbIss child)  iss
@@ -318,8 +319,8 @@ releaseSlot ListenTcb { .. } =
 
 
 -- | Add a Tcb to the accept queue for this listening connection.
-queueTcb :: ListenTcb -> Tcb -> IO ()
-queueTcb ListenTcb { .. } tcb =
+queueTcb :: ListenTcb -> Tcb -> State -> IO ()
+queueTcb ListenTcb { .. } tcb _ =
   do atomicModifyIORef' lAccept $ \ aq ->
          (aq { aqTcbs = aqTcbs aq Seq.|> tcb }, ())
      signal lAcceptSignal
@@ -370,8 +371,8 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbConfig :: !(IORef TcbConfig)
 
                , tcbState       :: !(IORef State)
-               , tcbEstablished :: Tcb -> IO ()
-               , tcbClosed      :: Tcb -> IO ()
+               , tcbEstablished :: Tcb -> State -> IO ()
+               , tcbClosed      :: Tcb -> State -> IO ()
 
                  -- Sender variables
                , tcbSndUp  :: !SeqNumVar -- ^ SND.UP
@@ -414,8 +415,8 @@ newTcb :: HasConfig state
        -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
        -> State
        -> Send.TSClock
-       -> (Tcb -> IO ())
-       -> (Tcb -> IO ())
+       -> (Tcb -> State -> IO ())
+       -> (Tcb -> State -> IO ())
        -> IO Tcb
 newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort
   state tsc tcbEstablished tcbClosed =
