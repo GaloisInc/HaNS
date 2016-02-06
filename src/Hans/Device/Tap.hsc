@@ -13,7 +13,7 @@ import           Hans.Threads (forkNamed)
 import           Hans.Types (NetworkStack(..),InputPacket(..))
 
 import           Control.Concurrent
-                     (threadWaitRead,killThread,newMVar,withMVar)
+                     (threadWaitRead,killThread,newMVar,modifyMVar_)
 import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
