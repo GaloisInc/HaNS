@@ -60,6 +60,24 @@ unpackIP4 (IP4 w) = ( view (byte 3) w
                     )
 {-# INLINE unpackIP4 #-}
 
+showIP4 :: IP4 -> ShowS
+showIP4 ip4 =
+  let (a,b,c,d) = unpackIP4 ip4
+   in shows a . showChar '.' .
+      shows b . showChar '.' .
+      shows c . showChar '.' .
+      shows d
+{-# INLINE showIP4 #-}
+
+readIP4 :: ReadS IP4
+readIP4 str =
+  do (a,rest1) <- reads str
+     (b,rest2) <- reads rest1
+     (c,rest3) <- reads rest2
+     (d,rest4) <- reads rest3
+     return (packIP4 a b c d, rest4)
+{-# INLINE readIP4 #-}
+
 
 pattern BroadcastIP4 = IP4 0xffffffff
 
