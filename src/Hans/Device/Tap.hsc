@@ -22,7 +22,6 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Unsafe as S
-import           Data.IORef (newIORef,atomicModifyIORef',readIORef,writeIORef)
 import           Data.Word (Word8)
 import           Foreign.C.String (CString)
 import           Foreign.C.Types (CSize(..),CLong(..),CInt(..),CChar(..))
@@ -45,8 +44,7 @@ openDevice ns devName devConfig =
      -- The `starting` lock makes sure that only one set of threads will be
      -- started at once, while the `running` var holds the ids of the running
      -- threads.
-     lock      <- newMVar ()
-     threadIds <- newIORef Nothing
+     threadIds <- newMVar Nothing
 
      devStats <- newDeviceStats
 
@@ -54,23 +52,30 @@ openDevice ns devName devConfig =
 
      let dev = Device { .. }
 
-         devStart = withMVar lock $ \ () ->
-           do mbTids <- readIORef threadIds
+         devStart = modifyMVar_ threadIds $ \ mbTids ->
+           case mbTids of
 
-              when (mbTids == Nothing) $
-                do recvThread <- forkNamed "tapRecvLoop" (tapRecvLoop ns dev fd)
-                   sendThread <- forkNamed "tapSendLoop" (tapSendLoop devStats fd devSendQueue)
-                   writeIORef threadIds (Just (recvThread,sendThread))
+             Nothing ->
+               do recvThread <- forkNamed "tapRecvLoop"
+                      (tapRecvLoop ns dev fd)
 
-         devStop = withMVar lock $ \ () ->
-           do mb <- atomicModifyIORef' threadIds ( \mb -> (Nothing, mb) )
-              case mb of
-                Just (recvThread,sendThread) ->
-                  do killThread recvThread
-                     killThread sendThread
+                  sendThread <- forkNamed "tapSendLoop"
+                      (tapSendLoop devStats fd devSendQueue)
 
-                Nothing ->
-                     return ()
+                  return (Just (recvThread,sendThread))
+
+             Just {} ->
+                  return mbTids
+
+         devStop = modifyMVar_ threadIds $ \ mbTids ->
+           case mbTids of
+             Just (recvThread,sendThread) ->
+               do killThread recvThread
+                  killThread sendThread
+                  return Nothing
+
+             Nothing ->
+                  return Nothing
 
          devCleanup =
            do tapClose fd
