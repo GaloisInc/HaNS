@@ -43,16 +43,16 @@ tcpRoute  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRouteInfo)
       _               -> error "tcpRoute: invalid address combination"
 
 -- | The source address of this socket.
-tcpLocalHost :: NetworkAddr addr => Getting r (TcpSocket addr) addr
-tcpLocalHost  = tcpRoute . to riSource
+tcpLocalAddr :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpLocalAddr  = tcpRoute . to riSource
 
 -- | The local port for this socket.
 tcpLocalPort :: Getting r (TcpSocket addr) SockPort
 tcpLocalPort  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> tcbLocalPort )
 
 -- | The remote address of this socket.
-tcpRemoteHost :: NetworkAddr addr => Getting r (TcpSocket addr) addr
-tcpRemoteHost  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRemote)
+tcpRemoteAddr :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpRemoteAddr  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRemote)
   where
   cast addr =
     case fromAddr addr of

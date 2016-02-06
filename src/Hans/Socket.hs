@@ -21,6 +21,11 @@ module Hans.Socket (
     TcpSocket(),
     TcpListenSocket(),
 
+    tcpRemoteAddr,
+    tcpRemotePort,
+    tcpLocalAddr,
+    tcpLocalPort
+
   ) where
 
 import Hans.Socket.Udp
