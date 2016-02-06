@@ -120,6 +120,15 @@ setHostBits (IP4Mask (IP4 addr) bits) = IP4 (addr .|. hostmask bits)
 broadcastAddress :: IP4Mask -> IP4
 broadcastAddress  = setHostBits
 
+readIP4Mask :: ReadS IP4Mask
+readIP4Mask str =
+  do (addr,'/':rest1) <- readIP4 str
+     (bits,rest2)     <- read rest1
+     return (IP4Mask addr bits, rest2)
+
+showIP4Mask :: IP4Mask -> ShowS
+showIP4Mask (IP4Mask addr bits) = showIP4 addr . showChar '/' . shows bits
+
 
 -- IP4 Pseudo Header -----------------------------------------------------------
 
