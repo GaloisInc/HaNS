@@ -6,7 +6,7 @@ module Hans.Socket.Tcp where
 import           Hans.Addr
 import qualified Hans.Buffer.Stream as Stream
 import qualified Hans.HashTable as HT
-import           Hans.Lens (view,to)
+import           Hans.Lens (Getting,view,to)
 import           Hans.Network
 import           Hans.Socket.Types
 import           Hans.Tcp.Tcb
@@ -32,6 +32,37 @@ data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
 
 instance HasNetworkStack (TcpSocket addr) where
   networkStack = to tcpNS
+
+-- | Routing information for this socket.
+tcpRoute :: NetworkAddr addr => Getting r (TcpSocket addr) (RouteInfo addr)
+tcpRoute  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRouteInfo)
+  where
+  cast RouteInfo { .. } =
+    case (fromAddr riSource, fromAddr riNext) of
+      (Just a,Just b) -> RouteInfo { riSource = a, riNext = b, .. }
+      _               -> error "tcpRoute: invalid address combination"
+
+-- | The source address of this socket.
+tcpLocalHost :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpLocalHost  = tcpRoute . to riSource
+
+-- | The local port for this socket.
+tcpLocalPort :: Getting r (TcpSocket addr) SockPort
+tcpLocalPort  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> tcbLocalPort )
+
+-- | The remote address of this socket.
+tcpRemoteHost :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpRemoteHost  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRemote)
+  where
+  cast addr =
+    case fromAddr addr of
+      Just a  -> a
+      Nothing -> error "tcpRemoteHost: invalid remote address"
+
+-- | The remote port of this socket.
+tcpRemotePort :: Getting r (TcpSocket addr) SockPort
+tcpRemotePort  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> tcbRemotePort)
+
 
 -- | Add a new active connection to the TCP state. The connection will initially
 -- be in the 'SynSent' state, as a Syn will be sent when the 'Tcb' is created.
