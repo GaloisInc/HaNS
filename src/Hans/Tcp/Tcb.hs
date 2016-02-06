@@ -282,8 +282,8 @@ createChild cxt iss parent ri remote hdr =
      child <- newTcb cfg (Just parent) iss ri (tcpDestPort hdr) remote
                   (tcpSourcePort hdr) SynReceived tsc
                   (queueTcb parent)
-                  (\tcb state -> when (state == SynReceived)
-                                      (releaseSlot parent))
+                  (\_ state -> when (state == SynReceived)
+                                    (releaseSlot parent))
 
      atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
      atomicWriteIORef (tcbIss child)  iss
