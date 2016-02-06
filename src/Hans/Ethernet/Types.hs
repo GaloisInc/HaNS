@@ -7,7 +7,7 @@ module Hans.Ethernet.Types (
     EtherType,
 
     -- ** MAC addresses
-    Mac(..), getMac, putMac,
+    Mac(..), getMac, putMac, showMac, readMac,
     pattern BroadcastMac,
 
     -- ** EtherType Patterns
@@ -20,6 +20,7 @@ module Hans.Ethernet.Types (
 import           Data.Serialize
                      (Get,getWord8,getWord16be,Putter,putWord16be,putWord8)
 import           Data.Word (Word8,Word16)
+import           Numeric (readHex,showHex)
 
 
 -- Mac Addresses ---------------------------------------------------------------
@@ -50,6 +51,28 @@ putMac (Mac a b c d e f) =
      putWord8 d
      putWord8 e
      putWord8 f
+
+showMac :: Mac -> ShowS
+showMac (Mac a b c d e f) = pad a . showChar ':'
+                          . pad b . showChar ':'
+                          . pad c . showChar ':'
+                          . pad d . showChar ':'
+                          . pad e . showChar ':'
+                          . pad f
+  where
+  pad x | x < 0x10  = showChar '0' . showHex x
+        | otherwise =                showHex x
+
+
+readMac :: ReadS Mac
+readMac str =
+  do (a,':':rest1) <- readHex str
+     (b,':':rest2) <- readHex rest1
+     (c,':':rest3) <- readHex rest2
+     (d,':':rest4) <- readHex rest3
+     (e,':':rest5) <- readHex rest4
+     (f,rest6)     <- readHex rest5
+     return (Mac a b c d e f, rest6)
 
 -- | The broadcast MAC address.
 pattern BroadcastMac = Mac 0xff 0xff 0xff 0xff 0xff 0xff
