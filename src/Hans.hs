@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE CPP #-}
 
 module Hans (
     -- * Network Stack
@@ -48,6 +49,10 @@ import qualified Hans.Tcp.Timers as Tcp
 import Control.Concurrent.BoundedChan (newBoundedChan)
 import Data.IORef (newIORef,atomicModifyIORef')
 
+#ifdef HANS_TARGET_XEN
+import Hypervisor.XenStore (XenStore)
+#endif
+
 
 -- | Create a network stack with no devices registered.
 newNetworkStack :: Config -> IO NetworkStack
@@ -82,11 +87,20 @@ registerLoopback ns =
 
 -- | Initialize and register a device with the network stack.
 -- NOTE: this does not start the device.
+
+#ifdef HANS_TARGET_XEN
+addDevice :: XenStore -> NetworkStack -> DeviceName -> DeviceConfig -> IO Device
+addDevice xs ns devName devConfig =
+  do dev <- openDevice xs ns devName devConfig
+     atomicModifyIORef' (nsDevices ns) (\devs -> (dev : devs, ()))
+     return dev
+#else
 addDevice :: NetworkStack -> DeviceName -> DeviceConfig -> IO Device
 addDevice ns devName devConfig =
   do dev <- openDevice ns devName devConfig
      atomicModifyIORef' (nsDevices ns) (\devs -> (dev : devs, ()))
      return dev
+#endif
 
 -- | Add a route to the IP4 layer.
 addIP4Route :: NetworkStack -> Bool -> IP4.Route -> IO ()

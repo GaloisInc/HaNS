@@ -25,7 +25,8 @@ library
         if os(HALVM)
                 cpp-options:            -DHANS_TARGET_XEN
                 build-depends:          XenDevice >= 2.0.0 && < 3,
-                                        HALVMCore >= 2.0.0 && < 3
+                                        HALVMCore >= 2.0.0 && < 3,
+                                        cryptonite < 0.9
                 other-modules:          Hans.Device.Xen
 
         if os(darwin) || os(linux)
