@@ -29,6 +29,9 @@ import           Data.Serialize
 import           Data.Typeable (Typeable)
 import           Data.Word (Word8,Word16,Word32)
 import           GHC.Generics (Generic)
+import           Numeric (readDec)
+
+import Debug.Trace
 
 
 -- IP4 Addresses ---------------------------------------------------------------
@@ -77,10 +80,10 @@ showIP4 ip4 =
 
 readIP4 :: ReadS IP4
 readIP4 str =
-  do (a,rest1) <- reads str
-     (b,rest2) <- reads rest1
-     (c,rest3) <- reads rest2
-     (d,rest4) <- reads rest3
+  do (a,'.':rest1) <- readDec str
+     (b,'.':rest2) <- readDec rest1
+     (c,'.':rest3) <- readDec rest2
+     (d,rest4)     <- readDec rest3
      return (packIP4 a b c d, rest4)
 {-# INLINE readIP4 #-}
 
@@ -129,7 +132,7 @@ broadcastAddress  = setHostBits
 readIP4Mask :: ReadS IP4Mask
 readIP4Mask str =
   do (addr,'/':rest1) <- readIP4 str
-     (bits,rest2)     <- read rest1
+     (bits,rest2)     <- readDec rest1
      return (IP4Mask addr bits, rest2)
 
 showIP4Mask :: IP4Mask -> ShowS
