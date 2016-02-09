@@ -2,7 +2,7 @@
 
 module Tests.Ethernet where
 
-import Tests.Utils (encodeDecodeIdentity)
+import Tests.Utils (encodeDecodeIdentity,showReadIdentity)
 
 import Hans.Ethernet
 
@@ -38,4 +38,7 @@ ethernetTests  = testGroup "Ethernet"
 
   , testProperty "Header encode/decode" $
     encodeDecodeIdentity putEthernetHeader getEthernetHeader arbitrayEthernetHeader
+
+  , testProperty "Mac Address read/show" $
+    showReadIdentity showMac readMac arbitraryMac
   ]

@@ -11,3 +11,10 @@ encodeDecodeIdentity put get gen =
     case runGet get (runPut (put a)) of
       Right a'  -> a === a'
       Left str  -> property False
+
+showReadIdentity :: (Eq a, Show a) => (a -> ShowS) -> ReadS a -> Gen a -> Property
+showReadIdentity sw rd gen =
+  forAll gen $ \ a ->
+    case rd (sw a "") of
+      [(a',_)] -> a === a'
+      _        -> property False

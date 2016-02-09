@@ -4,7 +4,7 @@ module Tests.IP4.Packet where
 
 import Tests.Ethernet (arbitraryMac)
 import Tests.Network (arbitraryProtocol)
-import Tests.Utils (encodeDecodeIdentity)
+import Tests.Utils (encodeDecodeIdentity,showReadIdentity)
 
 import Hans.IP4.Packet
 import Hans.Lens
@@ -26,6 +26,13 @@ arbitraryIP4  =
      c <- arbitraryBoundedRandom
      d <- arbitraryBoundedRandom
      return $! packIP4 a b c d
+
+
+arbitraryIP4Mask :: Gen IP4Mask
+arbitraryIP4Mask  =
+  do addr <- arbitraryIP4
+     bits <- choose (0,32)
+     return (IP4Mask addr bits)
 
 
 arbitraryIdent :: Gen IP4Ident
@@ -117,4 +124,10 @@ packetTests  = testGroup "Packet"
 
   , testProperty "Arp Message encode/decode" $
     encodeDecodeIdentity putArpPacket getArpPacket arbitraryArpPacket
+
+  , testProperty "IP4 Addr read/show" $
+    showReadIdentity showIP4 readIP4 arbitraryIP4
+
+  , testProperty "IP4 Mask read/show" $
+    showReadIdentity showIP4Mask readIP4Mask arbitraryIP4Mask
   ]
