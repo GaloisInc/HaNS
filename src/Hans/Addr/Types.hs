@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module Hans.Addr.Types where
 
-import Hans.IP4.Packet (IP4,putIP4)
+import Hans.IP4.Packet (IP4,putIP4,showIP4)
 
 import Data.Hashable (Hashable)
 import Data.Serialize (Put)
@@ -16,6 +16,9 @@ instance Hashable Addr
 
 putAddr :: Addr -> Put
 putAddr (Addr4 ip) = putIP4 ip
+
+showAddr :: Addr -> ShowS
+showAddr (Addr4 ip4) = showIP4 ip4
 
 
 sameFamily :: Addr -> Addr -> Bool

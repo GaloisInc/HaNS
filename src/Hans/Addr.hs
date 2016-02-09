@@ -6,10 +6,11 @@
 module Hans.Addr (
     Addr(), sameFamily,
     NetworkAddr(..),
-    putAddr
+    putAddr,
+    showAddr,
   ) where
 
-import           Hans.Addr.Types (Addr(..),sameFamily,putAddr)
+import           Hans.Addr.Types
 import qualified Hans.IP4.Packet as IP4
 
 import Data.Hashable (Hashable)
