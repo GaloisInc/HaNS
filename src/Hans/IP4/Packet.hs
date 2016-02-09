@@ -23,7 +23,7 @@ import           Data.Hashable (Hashable)
 import           Data.Int (Int64)
 import           Data.Serialize
                     (Get,getWord8,getWord16be,getWord32be,getShortByteString
-                    ,label,isolate
+                    ,label,isolate,Serialize(..)
                     ,Putter,Put,putWord8,putWord16be,putWord32be
                     ,putLazyByteString,putShortByteString)
 import           Data.Typeable (Typeable)
@@ -35,6 +35,12 @@ import           GHC.Generics (Generic)
 
 newtype IP4 = IP4 Word32
               deriving (Eq,Ord,Show,Hashable,Checksum,Typeable,Generic)
+
+instance Serialize IP4 where
+  get = getIP4
+  put = putIP4
+  {-# INLINE get #-}
+  {-# INLINE put #-}
 
 getIP4 :: Get IP4
 getIP4  =

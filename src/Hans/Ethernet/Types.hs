@@ -18,7 +18,8 @@ module Hans.Ethernet.Types (
   ) where
 
 import           Data.Serialize
-                     (Get,getWord8,getWord16be,Putter,putWord16be,putWord8)
+                     (Get,getWord8,getWord16be,Putter,putWord16be,putWord8
+                     ,Serialize(..))
 import           Data.Word (Word8,Word16)
 import           Numeric (readHex,showHex)
 
@@ -32,6 +33,13 @@ data Mac = Mac {-# UNPACK #-} !Word8
                {-# UNPACK #-} !Word8
                {-# UNPACK #-} !Word8
                deriving (Eq,Ord,Show)
+
+instance Serialize Mac where
+  get = getMac
+  put = putMac
+  {-# INLINE get #-}
+  {-# INLINE put #-}
+
 
 getMac :: Get Mac
 getMac  =
