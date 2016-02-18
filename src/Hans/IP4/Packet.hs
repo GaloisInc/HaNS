@@ -31,8 +31,6 @@ import           Data.Word (Word8,Word16,Word32)
 import           GHC.Generics (Generic)
 import           Numeric (readDec)
 
-import Debug.Trace
-
 
 -- IP4 Addresses ---------------------------------------------------------------
 
