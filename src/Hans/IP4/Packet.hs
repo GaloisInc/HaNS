@@ -35,7 +35,7 @@ import           Numeric (readDec)
 -- IP4 Addresses ---------------------------------------------------------------
 
 newtype IP4 = IP4 Word32
-              deriving (Eq,Ord,Show,Hashable,Checksum,Typeable,Generic)
+              deriving (Eq,Ord,Show,Read,Hashable,Checksum,Typeable,Generic)
 
 instance Serialize IP4 where
   get = getIP4
@@ -97,7 +97,7 @@ pattern WildcardIP4 = IP4 0x0
 
 data IP4Mask = IP4Mask {-# UNPACK #-} !IP4
                        {-# UNPACK #-} !Int -- ^ Between 0 and 32
-               deriving (Show)
+               deriving (Show,Read)
 
 instance Eq IP4Mask where
   m1 == m2 = maskBits m1 == maskBits m2

@@ -32,7 +32,7 @@ data Mac = Mac {-# UNPACK #-} !Word8
                {-# UNPACK #-} !Word8
                {-# UNPACK #-} !Word8
                {-# UNPACK #-} !Word8
-               deriving (Eq,Ord,Show)
+               deriving (Eq,Ord,Show,Read)
 
 instance Serialize Mac where
   get = getMac
