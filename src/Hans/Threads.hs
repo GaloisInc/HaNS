@@ -1,14 +1,17 @@
 module Hans.Threads where
 
-import Control.Concurrent (forkIO,ThreadId)
-import Control.Exception (catch,SomeException,fromException,AsyncException(..))
+import Control.Concurrent (forkFinally,ThreadId)
+import Control.Exception (fromException,AsyncException(..))
 
 
 forkNamed :: String -> IO () -> IO ThreadId
-forkNamed str body = forkIO (body `catch` showExn)
+forkNamed str body = forkFinally body showExn
   where
-  showExn :: SomeException -> IO ()
-  showExn e =
+
+  showExn Right{} =
+    return ()
+
+  showExn (Left e) =
     case fromException e of
       Just ThreadKilled -> return ()
       _                 -> putStrLn (str ++ ": Exception escaped: " ++ show e)
