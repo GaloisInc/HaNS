@@ -460,7 +460,9 @@ processSynOptions Tcb { .. } hdr =
                 (TcbConfig { tcUseTimestamp = True, .. }, ())
             atomicWriteIORef tcbTSRecent val
 
-       _ -> return ()
+       -- no timestamp option, disable timestamps
+       _ -> atomicModifyIORef' tcbConfig $ \ TcbConfig { .. } ->
+                (TcbConfig { tcUseTimestamp = False, .. }, ())
 
      -- XXX: in the future, enable SACK here
      -- XXX: in the future, enable Window Scale here
