@@ -44,7 +44,7 @@ openDevice xs ns devName devConfig =
 
              Nothing ->
                do sendThread <- forkNamed "xenSendLoop"
-                      (xenSendLoop nic devSendQueue)
+                      (xenSendLoop devStats nic devSendQueue)
 
                   setReceiveHandler nic (xenRecv ns dev)
 
@@ -71,13 +71,13 @@ openDevice xs ns devName devConfig =
 
 
 -- NOTE: No way to update stats here, as we can't tell if sendPacket failed.
-xenSendLoop :: NIC -> BoundedChan L.ByteString -> IO ()
-xenSendLoop nic chan = forever $
+xenSendLoop :: DeviceStats -> NIC -> BoundedChan L.ByteString -> IO ()
+xenSendLoop stats nic chan = forever $
   do bs <- readChan chan
      sendPacket nic bs
 
      -- NOTE: sendPacket always succeeds
-     updateBytes   statTX stats (fromIntegral bytesWritten)
+     updateBytes   statTX stats (fromIntegral (L.length bs))
      updatePackets statTX stats
 
 xenRecv :: NetworkStack -> Device -> L.ByteString -> IO ()
