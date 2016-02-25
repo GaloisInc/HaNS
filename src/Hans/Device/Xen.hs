@@ -76,6 +76,10 @@ xenSendLoop nic chan = forever $
   do bs <- readChan chan
      sendPacket nic bs
 
+     -- NOTE: sendPacket always succeeds
+     updateBytes   statTX stats (fromIntegral bytesWritten)
+     updatePackets statTX stats
+
 xenRecv :: NetworkStack -> Device -> L.ByteString -> IO ()
 xenRecv ns dev @ Device { .. } = \ bytes ->
   do let bytes' = L.toStrict bytes
