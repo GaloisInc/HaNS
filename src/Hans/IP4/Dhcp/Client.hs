@@ -24,7 +24,7 @@ import Hans.Time (toUSeconds)
 import Hans.Types (NetworkStack,networkStack,addRoute,addNameServer4)
 
 import           Control.Concurrent (threadDelay,killThread)
-import           Control.Monad (when,guard)
+import           Control.Monad (guard)
 import qualified Data.ByteString.Lazy as L
 import           Data.Maybe (fromMaybe,mapMaybe)
 import           Data.Serialize.Get (runGetLazy)
@@ -186,25 +186,25 @@ handleAck :: NetworkStack -> DhcpConfig -> Device -> Offer -> Ack -> IO DhcpLeas
 handleAck ns cfg dev offer Ack { .. } =
   do let addr     = ackYourAddr
          mask     = fromMaybe 24 (lookupSubnet ackOptions)
-         (ty,def) = case lookupGateway ackOptions of
-                      Just gw -> (Indirect gw,dcDefaultRoute cfg)
-                      Nothing -> (Direct,False)
 
      let nameServers = concat (mapMaybe getNameServers ackOptions)
      mapM_ (addNameServer4 ns) nameServers
 
      addRoute ns False Route
        { routeNetwork = IP4Mask addr mask
-       , routeType    = ty
+       , routeType    = Direct
        , routeDevice  = dev
        }
 
-     when def $
-       addRoute ns True Route
-         { routeNetwork = IP4Mask addr 0
-         , routeType    = ty
-         , routeDevice  = dev
-         }
+     case lookupGateway ackOptions of
+       Just gw | dcDefaultRoute cfg ->
+         addRoute ns True Route
+             { routeNetwork = IP4Mask addr 0
+             , routeType    = Indirect gw
+             , routeDevice  = dev
+             }
+
+       _ -> return ()
 
      dhcpRenew <-
        if dcAutoRenew cfg
