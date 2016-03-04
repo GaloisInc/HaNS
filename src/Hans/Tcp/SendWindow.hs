@@ -187,8 +187,12 @@ setSndNxt nxt win
 
 
 -- | The value of SND.WND.
-sndWnd :: Getting r Window TcpSeqNum
-sndWnd  = to wSndWnd
+sndWnd :: Lens' Window TcpSeqNum
+sndWnd f Window { .. } =
+  fmap (\ wnd -> Window { wSndWnd   = wnd
+                        , wSndAvail = wSndAvail + fromTcpSeqNum (wnd - wSndWnd)
+                        , .. })
+       (f wSndWnd)
 
 
 -- | The value of SND.UNA -- the left-edge of the send window.
