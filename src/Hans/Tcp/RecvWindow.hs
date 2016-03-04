@@ -114,8 +114,10 @@ emptyWindow wRcvNxt maxWin =
   wMax = fromIntegral maxWin
 
 -- | The value of RCV.WND.
-rcvWnd :: Getting r Window Word16
-rcvWnd  = to (\Window { .. } -> fromTcpSeqNum (wRcvRight - wRcvNxt))
+rcvWnd :: Lens' Window Word16
+rcvWnd f Window { .. } =
+  fmap (\ wnd -> Window { wRcvRight = wRcvNxt + fromIntegral wnd, .. })
+       (f (fromTcpSeqNum (wRcvRight - wRcvNxt)))
 
 -- | The left edge of the receive window.
 rcvNxt :: Getting r Window TcpSeqNum
