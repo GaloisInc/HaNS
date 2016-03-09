@@ -152,13 +152,6 @@ handleActiveSegs ns tcb now = go
                          _ <- sendWithTcb ns tcb rst L.empty
                          return ()
 
-                    -- make sure to reclaim some of the syn backlog, and accept
-                    -- queue position if the client decides to abort the
-                    -- connection.
-                    state <- getState tcb
-                    when (state == SynReceived && isJust (tcbParent tcb))
-                         (incrSynBacklog ns)
-
                     -- when the tcb was passively opened, this will free its
                     -- accept queue slot.
                     setState tcb Closed
@@ -354,11 +347,7 @@ handleSynSent ns _dev hdr _payload tcb =
                else getSndUna tcb
 
           when (sndUna > iss) $
-            do -- increment the syn backlog if this socket originated with a
-               -- listening connection
-               when (isJust (tcbParent tcb)) (io (incrSynBacklog ns))
-
-               -- XXX: include any queued data/controls
+            do -- XXX: include any queued data/controls
                io (sendAck ns tcb)
                io (setState tcb Established)
 
@@ -431,6 +420,8 @@ createChildTcb ns dev remote local hdr parent =
      (added,child) <- io $
        do iss   <- nextIss ns local (tcpDestPort hdr) remote (tcpSourcePort hdr)
           child <- createChild ns iss parent ri remote hdr
+                   (\_ _ -> incrSynBacklog ns)
+                   (\_ s -> when (s == SynReceived) (incrSynBacklog ns))
           added <- registerActive ns child
           return (added,child)
 

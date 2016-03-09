@@ -270,8 +270,11 @@ newListenTcb lSrc lPort aqFree =
 
 -- | Create a child from a Syn request.
 createChild :: HasConfig cfg
-            => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo Addr -> Addr -> TcpHeader -> IO Tcb
-createChild cxt iss parent ri remote hdr =
+            => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo Addr -> Addr -> TcpHeader
+            -> (Tcb -> State -> IO ()) -- ^ On Established
+            -> (Tcb -> State -> IO ()) -- ^ On Closed
+            -> IO Tcb
+createChild cxt iss parent ri remote hdr onEstablished onClosed =
   do let cfg = view config cxt
 
      now <- getCurrentTime
@@ -281,9 +284,11 @@ createChild cxt iss parent ri remote hdr =
 
      child <- newTcb cfg (Just parent) iss ri (tcpDestPort hdr) remote
                   (tcpSourcePort hdr) SynReceived tsc
-                  (queueTcb parent)
-                  (\_ state -> when (state == SynReceived)
-                                    (releaseSlot parent))
+                  (\c state -> do queueTcb parent c state
+                                  onEstablished c state)
+                  (\c state -> do when (state == SynReceived) (releaseSlot parent)
+                                  onClosed c state)
+
 
      atomicWriteIORef (tcbIrs child) (tcpSeqNum hdr)
      atomicWriteIORef (tcbIss child)  iss
