@@ -179,7 +179,7 @@ instance DataSocket TcpSocket where
        srcPort <- case mbSrcPort of
                     Just port -> return port
                     Nothing   ->
-                      do mb <- nextTcpPort tcpNS (toAddr src) (toAddr dst) dstPort
+                      do mb <- nextTcpPort tcpNS (toAddr (riSource ri)) (toAddr dst) dstPort
                          case mb of
                            Just port -> return port
                            Nothing   -> throwIO NoPortAvailable
