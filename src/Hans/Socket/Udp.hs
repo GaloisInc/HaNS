@@ -87,7 +87,7 @@ instance DataSocket UdpSocket where
 
        srcPort <- case mbPort of
                     Just p  -> return p
-                    Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
+                    Nothing -> do mb <- nextUdpPort udpNS (toAddr (riSource ri))
                                   case mb of
                                     Just port -> return port
                                     Nothing   -> throwIO NoPortAvailable
