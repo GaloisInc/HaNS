@@ -218,7 +218,7 @@ registerTimeWait state tcb =
           let heap' = if H.size heap >= cfgTcpTimeWaitSocketLimit
                          then H.deleteMin heap
                          else heap
-           in fst (expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap)
+           in fst (expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap')
 
 -- | Reset the timer associated with a TimeWaitTcb.
 resetTimeWait :: (HasConfig state, HasTcpState state)
