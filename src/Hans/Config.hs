@@ -67,6 +67,10 @@ data Config = Config { cfgInputQueueSize :: !Int
                        -- ^ Frequency (in Hz) of timestamp clock updates.
                        -- Should be between 1Hz and 1000Hz, according to
                        -- RFC-1323.
+
+                     , cfgTcpTimeWaitSocketLimit :: !Int
+                       -- ^ The max number of threads allowed in the time
+                       -- wait heap.
                      }
 
 defaultConfig :: Config
@@ -88,6 +92,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpInitialWindow   = 14600
                         , cfgTcpMSL             = 60 -- one minute
                         , cfgTcpTSClockFrequency = 1000 -- 1000hz, update every 1ms
+                        , cfgTcpTimeWaitSocketLimit = 70
                         }
 
 class HasConfig cfg where

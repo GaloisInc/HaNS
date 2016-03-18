@@ -53,6 +53,7 @@ import           Data.ByteArray (withByteArray)
 import qualified Data.ByteString as S
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
+import qualified Data.Heap as H
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
 import           Data.Serialize (runPut,putByteString)
 import           Data.Time.Clock (UTCTime,getCurrentTime,addUTCTime,diffUTCTime)
@@ -214,7 +215,10 @@ registerTimeWait :: (HasConfig state, HasTcpState state)
 registerTimeWait state tcb =
   let Config { .. } = view config state
    in updateTimeWait state $ \ now heap ->
-          fst (expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap)
+          let heap' = if H.size heap >= cfgTcpTimeWaitSocketLimit
+                         then H.deleteMin heap
+                         else heap
+           in fst (expireAt (addUTCTime cfgTcpTimeoutTimeWait now) tcb heap')
 
 -- | Reset the timer associated with a TimeWaitTcb.
 resetTimeWait :: (HasConfig state, HasTcpState state)
