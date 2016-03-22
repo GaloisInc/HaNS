@@ -141,7 +141,7 @@ recvfrom UdpSocket { .. } = loop
        case fromAddr addr of
          Just src -> return (dev,src,srcPort,L.fromStrict chunk)
          Nothing  -> loop
-{-# LANGUAGE recvfrom #-}
+{-# INLINE recvfrom #-}
 
 
 -- | Send to a specific end host.
