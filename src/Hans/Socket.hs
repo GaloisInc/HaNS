@@ -24,7 +24,12 @@ module Hans.Socket (
     tcpRemoteAddr,
     tcpRemotePort,
     tcpLocalAddr,
-    tcpLocalPort
+    tcpLocalPort,
+
+    -- ** Exceptions
+    ConnectionException,
+    ListenException,
+    RoutingException
 
   ) where
 
