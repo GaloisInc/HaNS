@@ -4,7 +4,7 @@ module Hans.HashTable (
     HashTable(),
     newHashTable,
     lookup,
-    delete,
+    delete, deletes,
     mapHashTable, mapHashTableM_,
     filterHashTable,
     alter,
@@ -15,11 +15,13 @@ module Hans.HashTable (
 
 import           Prelude hiding (lookup)
 
-import           Control.Monad (replicateM)
+import           Control.Monad (replicateM,forM_)
 import           Data.Array (Array,listArray,(!))
+import           Data.Function (on)
 import           Data.Hashable (Hashable,hash)
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
 import qualified Data.List as List
+import           Data.Ord (comparing)
 
 
 data HashTable k a =
@@ -101,6 +103,32 @@ delete k ht = modifyBucket ht k (\ bucket -> (removeEntry bucket, ()))
 
   removeEntry []  = []
 {-# INLINE delete #-}
+
+
+-- | Delete a collection of keys from the table. This is good for multiple
+-- deletes, as deletes from the same bucket can be grouped together.
+deletes :: (Eq k, Hashable k) => [k] -> HashTable k a -> IO ()
+deletes ks ht =
+  forM_ groups $ \ grp ->
+    case grp of
+      (_,ix):_ -> atomicModifyIORef' (htBuckets ht ! ix)
+                  (\ bucket -> (bucket `without` grp, ()))
+      _        -> return ()
+  where
+
+  -- keys grouped by bucket
+  groups = List.groupBy ((==) `on` snd)
+         $ List.sortBy  (comparing snd)
+         $ [ (k, hash k `mod` htSize ht) | k <- ks ]
+
+  -- remove entries from the bucket
+  without = List.foldl' (\b (k,_) -> remove k b)
+
+  remove k = go
+    where
+    go []                          = []
+    go (e@(k',_):rest) | k == k'   = rest
+                       | otherwise = e:go rest
 
 
 -- | Create, update, or delete an entry in the hash table, returning some
