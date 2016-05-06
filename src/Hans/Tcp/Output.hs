@@ -12,9 +12,14 @@ module Hans.Tcp.Output (
     sendFin,
     sendData,
 
+    -- ** From the fast-path
+    queueTcp,
+    responder,
+
     -- $notes
   ) where
 
+import           Hans.Addr.Types (Addr)
 import           Hans.Config (config)
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device.Types (Device(..),ChecksumOffload(..),txOffload)
@@ -29,7 +34,8 @@ import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Tcp.Tcb
 import           Hans.Types
 
-import           Control.Monad (when)
+import qualified Control.Concurrent.BoundedChan as BC
+import           Control.Monad (when,forever)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef,atomicModifyIORef',atomicWriteIORef)
 import           Data.Int (Int64)
@@ -119,6 +125,30 @@ sendWithTcb ns Tcb { .. } hdr body =
 addTimestamp :: Word32 -> Maybe Word32 -> TcpHeader -> TcpHeader
 addTimestamp tsVal (Just tsEcr) hdr = setTcpOption (OptTimestamp tsVal tsEcr) hdr
 addTimestamp _     _            hdr = hdr
+
+
+-- Fast-path Sending -----------------------------------------------------------
+
+-- | Responder thread for messages generated in the fast-path.
+responder :: NetworkStack -> IO ()
+responder ns = forever $
+  do msg <- BC.readChan chan
+     case msg of
+       SendSegment ri dst hdr body ->
+         do _ <- sendTcp ns ri dst hdr body
+            return ()
+
+  where
+  chan = view tcpQueue ns
+
+
+-- | Queue an outgoing TCP segment from the fast-path.
+--
+-- See note "No Retransmit Queue" ("Hans.Tcp.Output#no-retransmit-queue").
+queueTcp :: NetworkStack
+         -> RouteInfo Addr -> Addr -> TcpHeader -> L.ByteString -> IO Bool
+queueTcp ns ri dst hdr body =
+  BC.tryWriteChan (view tcpQueue ns) $! SendSegment ri dst hdr body
 
 
 -- Primitive Send --------------------------------------------------------------

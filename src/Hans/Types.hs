@@ -12,6 +12,7 @@ import Hans.IP4.Packet
 import Hans.IP4.State as Exports
 import Hans.IP4.RoutingTable as Exports (RoutingTable)
 import Hans.Lens
+import Hans.Nat.State as Exports
 import Hans.Tcp.State as Exports
 import Hans.Udp.State as Exports
 
@@ -29,6 +30,9 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                    -- ^ The configuration for this instance of
                                    -- the network stack.
 
+                                 , nsNat :: !NatState
+                                   -- ^ Nat table/config
+
                                  , nsInput :: !(BoundedChan InputPacket)
                                    -- ^ The input packet queue
 
@@ -39,13 +43,22 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
                                    -- ^ State for IP4 processing
 
                                  , nsIP4Responder :: !ThreadId
-                                   -- ^ Internal IP4 responder
+                                   -- ^ Internal IP4 responder for messages
+                                   -- produced in teh fast path.
 
                                  , nsUdpState :: !UdpState
                                    -- ^ State for UDP processing
 
+                                 , nsUdpResponder :: !ThreadId
+                                   -- ^ Responder thread for UDP messages
+                                   -- produced in the fast path.
+
                                  , nsTcpState :: !TcpState
                                    -- ^ State for TCP processing
+
+                                 , nsTcpResponder :: !ThreadId
+                                   -- ^ Responder thread for TCP messages
+                                   -- produced in the fast path.
 
                                  , nsTcpTimers :: !ThreadId
                                    -- ^ The TCP timer thread
@@ -68,6 +81,11 @@ instance HasUdpState NetworkStack where
 instance HasTcpState NetworkStack where
   tcpState = to nsTcpState
   {-# INLINE tcpState #-}
+
+instance HasNatState NetworkStack where
+  natState = to nsNat
+  {-# INLINE natState #-}
+
 
 
 class HasNetworkStack ns where

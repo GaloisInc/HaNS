@@ -5,6 +5,7 @@ module Main where
 import Hans
 import Hans.Dns
 import Hans.Device
+import Hans.Nat
 import Hans.Socket
 import Hans.IP4.Packet (pattern WildcardIP4)
 import Hans.IP4.Dhcp.Client (DhcpLease(..),defaultDhcpConfig,dhcpClient)
@@ -71,7 +72,7 @@ main  =
           _ <- forkIO (handleClient client)
           return ()
 
-     threadDelay (30 * 1000000)
+     threadDelay (300 * 1000000)
 
      dumpStats (devStats dev)
 

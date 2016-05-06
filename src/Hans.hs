@@ -42,9 +42,9 @@ import           Hans.Input
 import           Hans.Network
 import           Hans.Threads (forkNamed)
 import           Hans.Types
-import qualified Hans.Udp.State as Udp
-import qualified Hans.Tcp.State as Tcp
+import qualified Hans.Tcp.Output as Tcp (responder)
 import qualified Hans.Tcp.Timers as Tcp
+import qualified Hans.Udp.Output as Udp (responder)
 
 import Control.Concurrent.BoundedChan (newBoundedChan)
 import Data.IORef (newIORef,atomicModifyIORef')
@@ -58,14 +58,17 @@ import Hypervisor.XenStore (XenStore)
 newNetworkStack :: Config -> IO NetworkStack
 newNetworkStack nsConfig =
   do nsInput        <- newBoundedChan (cfgInputQueueSize nsConfig)
+     nsNat          <- newNatState
      nsDevices      <- newIORef []
-     nsIP4State     <- IP4.newIP4State nsConfig
-     nsUdpState     <- Udp.newUdpState nsConfig
-     nsTcpState     <- Tcp.newTcpState nsConfig
+     nsIP4State     <- newIP4State nsConfig
+     nsUdpState     <- newUdpState nsConfig
+     nsTcpState     <- newTcpState nsConfig
      nsNameServers4 <- newIORef []
 
      rec nsIP4Responder <- forkNamed "IP4.responder" (IP4.responder ns)
          nsTcpTimers    <- forkNamed "Tcp.tcpTimers" (Tcp.tcpTimers ns)
+         nsTcpResponder <- forkNamed "Tcp.responder" (Tcp.responder ns)
+         nsUdpResponder <- forkNamed "Udp.responder" (Udp.responder ns)
          let ns = NetworkStack { .. }
 
      registerLoopback ns

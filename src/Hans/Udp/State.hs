@@ -9,6 +9,10 @@ module Hans.Udp.State (
     lookupRecv,
     registerRecv,
     nextUdpPort,
+
+    -- ** Fast-path Resonder
+    UdpResponderRequest(..),
+    udpQueue,
   ) where
 
 import           Hans.Addr (NetworkAddr(..),Addr)
@@ -17,9 +21,12 @@ import           Hans.Config
 import           Hans.Device.Types (Device)
 import qualified Hans.HashTable as HT
 import           Hans.Lens
-import           Hans.Udp.Packet (UdpPort)
+import           Hans.Network.Types (RouteInfo)
+import           Hans.Udp.Packet (UdpPort,UdpHeader)
 
 import           Control.Concurrent (MVar,newMVar,modifyMVar)
+import qualified Control.Concurrent.BoundedChan as BC
+import qualified Data.ByteString.Lazy as L
 import           Data.Hashable (Hashable)
 import           GHC.Generics (Generic)
 
@@ -34,13 +41,17 @@ type UdpBuffer = DG.Buffer (Device,Addr,UdpPort,Addr,UdpPort)
 
 data UdpState = UdpState { udpRecv  :: !(HT.HashTable Key UdpBuffer)
                          , udpPorts :: !(MVar UdpPort)
+                         , udpQueue_:: !(BC.BoundedChan UdpResponderRequest)
                          }
+
+data UdpResponderRequest = SendDatagram !(RouteInfo Addr) !Addr !UdpHeader !L.ByteString
 
 
 newUdpState :: Config -> IO UdpState
 newUdpState Config { .. } =
   do udpRecv  <- HT.newHashTable cfgUdpSocketTableSize
      udpPorts <- newMVar 32767
+     udpQueue_<- BC.newBoundedChan 128
      return $! UdpState { .. }
 
 
@@ -50,6 +61,9 @@ class HasUdpState udp where
 instance HasUdpState UdpState where
   udpState = id
   {-# INLINE udpState #-}
+
+udpQueue :: HasUdpState state => Getting r state (BC.BoundedChan UdpResponderRequest)
+udpQueue  = udpState . to udpQueue_
 
 lookupRecv :: HasUdpState state
            => state -> Addr -> UdpPort -> IO (Maybe UdpBuffer)

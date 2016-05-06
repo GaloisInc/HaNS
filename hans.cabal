@@ -89,6 +89,7 @@ library
                                 Hans.Input
                                 Hans.Lens
                                 Hans.Monad
+                                Hans.Nat
                                 Hans.Network
                                 Hans.Network.Types
                                 Hans.Serialize
@@ -112,6 +113,8 @@ library
         other-modules:          Hans.Buffer.Datagram
                                 Hans.Buffer.Signal
                                 Hans.Buffer.Stream
+                                Hans.Nat.Forward
+                                Hans.Nat.State
                                 Hans.Socket.Tcp
                                 Hans.Socket.Types
                                 Hans.Socket.Udp

@@ -8,6 +8,10 @@ module Hans.Tcp.State (
     HasTcpState(..), TcpState(),
     newTcpState,
 
+    -- ** Responder Interaction
+    tcpQueue,
+    TcpResponderRequest(..),
+
     -- ** Listen Sockets
     incrSynBacklog,
     decrSynBacklog,
@@ -47,10 +51,12 @@ import           Hans.Threads (forkNamed)
 import           Hans.Time
 
 import           Control.Concurrent (threadDelay,MVar,newMVar,modifyMVar)
+import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (guard)
 import           Crypto.Hash (hash,Digest,MD5)
 import           Data.ByteArray (withByteArray)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
 import qualified Data.Heap as H
@@ -101,7 +107,16 @@ data TcpState =
 
            , tcpPorts       :: {-# UNPACK #-} !(MVar TcpPort)
            , tcpISSTimer    :: {-# UNPACK #-} !(IORef Tcp4USTimer)
+
+           , tcpQueue_      :: {-# UNPACK #-} !(BC.BoundedChan TcpResponderRequest)
            }
+
+-- | Requests that can be made to the responder thread.
+data TcpResponderRequest = SendSegment !(RouteInfo Addr) !Addr !TcpHeader !L.ByteString
+
+tcpQueue :: HasTcpState state => Getting r state (BC.BoundedChan TcpResponderRequest)
+tcpQueue  = tcpState . to tcpQueue_
+{-# INLINE tcpQueue #-}
 
 tcpListen :: HasTcpState state => Getting r state (HT.HashTable ListenKey ListenTcb)
 tcpListen  = tcpState . to tcpListen_
@@ -152,6 +167,7 @@ newTcpState Config { .. } =
      tcpSynBacklog_ <- newIORef cfgTcpMaxSynBacklog
      tcpPorts       <- newMVar 32767
      tcpISSTimer    <- newIORef =<< newTcp4USTimer
+     tcpQueue_      <- BC.newBoundedChan 128
      return TcpState { .. }
 
 

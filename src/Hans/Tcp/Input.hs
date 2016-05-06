@@ -11,9 +11,10 @@ import Hans.Config (config)
 import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Lens (view,set)
 import Hans.Monad (Hans,escape,decode',dropPacket,io)
+import Hans.Nat.Forward (tryForwardTcp)
 import Hans.Network
 import Hans.Tcp.Message
-import Hans.Tcp.Output (routeTcp,sendTcp,sendAck,sendWithTcb)
+import Hans.Tcp.Output (routeTcp,sendTcp,sendAck,sendWithTcb,queueTcp)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
            (sequenceNumberValid,recvSegment)
@@ -77,8 +78,23 @@ tryTimeWait ns dev remote local hdr payload =
   do mbTimeWait <- io (lookupTimeWait ns remote (tcpSourcePort hdr) local (tcpDestPort hdr))
      case mbTimeWait of
        Just tcb -> handleTimeWait ns hdr payload tcb
-       Nothing  -> handleClosed ns dev remote local hdr payload
+       Nothing  -> tryForward ns dev remote local hdr payload
 {-# INLINE tryTimeWait #-}
+
+
+-- | Process incoming segments to a forwarded port.
+tryForward :: InputCase
+tryForward ns dev remote local hdr payload =
+  do mbHdr <- io (tryForwardTcp ns local remote hdr)
+     case mbHdr of
+
+       Just (ri,dst,hdr') -> io $
+         do _ <- queueTcp ns ri dst hdr' (L.fromStrict payload)
+            return ()
+
+       Nothing            -> handleClosed ns dev remote local hdr payload
+{-# INLINE tryForward #-}
+
 
 
 -- Active Connections ----------------------------------------------------------
