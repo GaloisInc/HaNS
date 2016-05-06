@@ -14,7 +14,7 @@ import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Nat.Forward (tryForwardTcp)
 import Hans.Network
 import Hans.Tcp.Message
-import Hans.Tcp.Output (routeTcp,sendTcp,sendAck,sendWithTcb,queueTcp)
+import Hans.Tcp.Output (routeTcp,queueTcp,queueAck,queueWithTcb,queueTcp)
 import Hans.Tcp.Packet
 import Hans.Tcp.RecvWindow
            (sequenceNumberValid,recvSegment)
@@ -115,7 +115,7 @@ handleActive ns dev hdr payload tcb =
 
        Nothing ->
          do unless (view tcpRst hdr) $ io $
-              do _ <- sendWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
+              do _ <- queueWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
                  return ()
 
        Just segs ->
@@ -165,7 +165,7 @@ handleActiveSegs ns tcb now = go
        when (view tcpRst hdr || view tcpSyn hdr) $
          do io $ do when (view tcpSyn hdr) $
                       do let rst = set tcpRst True emptyTcpHeader
-                         _ <- sendWithTcb ns tcb rst L.empty
+                         _ <- queueWithTcb ns tcb rst L.empty
                          return ()
 
                     -- when the tcb was passively opened, this will free its
@@ -197,7 +197,7 @@ handleActiveSegs ns tcb now = go
              Just True  -> io (setState tcb Established)
              Just False -> return ()
              Nothing    -> do let rst = set tcpRst True emptyTcpHeader
-                              _ <- io (sendWithTcb ns tcb rst L.empty)
+                              _ <- io (queueWithTcb ns tcb rst L.empty)
                               continue
 
          FinWait1 ->
@@ -251,7 +251,7 @@ handleActiveSegs ns tcb now = go
        -- check FIN
        when (view tcpFin hdr) $
          do -- send an ACK to the FIN
-            _ <- io (sendAck ns tcb)
+            _ <- io (queueAck ns tcb)
 
             state' <- io (getState tcb)
             case state' of
@@ -323,7 +323,7 @@ handleSynSent ns _dev hdr _payload tcb =
             do when (view tcpRst hdr) escape
 
                rst <- io (mkRst hdr)
-               _   <- io (sendTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) rst L.empty)
+               _   <- io (queueTcp ns (tcbRouteInfo tcb) (tcbRemote tcb) rst L.empty)
                escape
 
      -- page 66/67
@@ -364,7 +364,7 @@ handleSynSent ns _dev hdr _payload tcb =
 
           when (sndUna > iss) $
             do -- XXX: include any queued data/controls
-               io (sendAck ns tcb)
+               _ <- io (queueAck ns tcb)
                io (setState tcb Established)
 
                -- XXX: not processing additional data/controls from the ack
@@ -373,7 +373,7 @@ handleSynSent ns _dev hdr _payload tcb =
           io (setState tcb SynReceived)
           let synAck = set tcpSyn True
                      $ set tcpAck True emptyTcpHeader
-          _ <- io (sendWithTcb ns tcb synAck L.empty)
+          _ <- io (queueWithTcb ns tcb synAck L.empty)
 
           -- XXX: not queueing any additional data
           escape
@@ -451,7 +451,7 @@ createChildTcb ns dev remote local hdr parent =
      io (processSynOptions child hdr)
      let synAck = set tcpSyn True
                 $ set tcpAck True emptyTcpHeader
-     _ <- io (sendWithTcb ns child synAck L.empty)
+     _ <- io (queueWithTcb ns child synAck L.empty)
 
      return ()
 
@@ -494,7 +494,7 @@ handleTimeWait ns hdr payload tcb =
      unless (isJust (sequenceNumberValid rcvNxt rcvRight hdr payload)) $
        do unless (view tcpRst hdr) $ io $
             do ack <- mkAck (twSndNxt tcb) rcvNxt (tcpDestPort hdr) (tcpSourcePort hdr)
-               _   <- sendTcp ns (twRouteInfo tcb) (twRemote tcb) ack L.empty
+               _   <- queueTcp ns (twRouteInfo tcb) (twRemote tcb) ack L.empty
                return ()
           escape
 
@@ -506,7 +506,7 @@ handleTimeWait ns hdr payload tcb =
      -- page 71
      when (view tcpSyn hdr) $
        do rst <- io (mkRst hdr)
-          _   <- io (sendTcp ns (twRouteInfo tcb) (twRemote tcb) rst L.empty)
+          _   <- io (queueTcp ns (twRouteInfo tcb) (twRemote tcb) rst L.empty)
           io (deleteTimeWait ns tcb)
           escape
 
@@ -528,7 +528,7 @@ handleTimeWait ns hdr payload tcb =
                    in (i', i')
 
           ack <- io (mkAck (twSndNxt tcb) rcvNxt' (tcpDestPort hdr) (tcpSourcePort hdr))
-          _   <- io (sendTcp ns (twRouteInfo tcb) (twRemote tcb) ack L.empty)
+          _   <- io (queueTcp ns (twRouteInfo tcb) (twRemote tcb) ack L.empty)
 
           io (resetTimeWait ns tcb)
           escape

@@ -14,6 +14,8 @@ module Hans.Tcp.Output (
 
     -- ** From the fast-path
     queueTcp,
+    queueWithTcb,
+    queueAck,
     responder,
 
     -- $notes
@@ -138,6 +140,10 @@ responder ns = forever $
          do _ <- sendTcp ns ri dst hdr body
             return ()
 
+       SendWithTcb tcb hdr body ->
+         do _ <- sendWithTcb ns tcb hdr body
+            return ()
+
   where
   chan = view tcpQueue ns
 
@@ -149,6 +155,17 @@ queueTcp :: NetworkStack
          -> RouteInfo Addr -> Addr -> TcpHeader -> L.ByteString -> IO Bool
 queueTcp ns ri dst hdr body =
   BC.tryWriteChan (view tcpQueue ns) $! SendSegment ri dst hdr body
+
+
+-- | Queue an outgoing TCP segment from the fast-path.
+queueWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO Bool
+queueWithTcb ns tcb hdr body =
+  BC.tryWriteChan (view tcpQueue ns) $! SendWithTcb tcb hdr body
+
+
+-- | Queue an ACK from the fast-path.
+queueAck :: NetworkStack -> Tcb -> IO Bool
+queueAck ns tcb = queueWithTcb ns tcb (set tcpAck True emptyTcpHeader) L.empty
 
 
 -- Primitive Send --------------------------------------------------------------

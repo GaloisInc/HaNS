@@ -113,6 +113,7 @@ data TcpState =
 
 -- | Requests that can be made to the responder thread.
 data TcpResponderRequest = SendSegment !(RouteInfo Addr) !Addr !TcpHeader !L.ByteString
+                         | SendWithTcb !Tcb !TcpHeader !L.ByteString
 
 tcpQueue :: HasTcpState state => Getting r state (BC.BoundedChan TcpResponderRequest)
 tcpQueue  = tcpState . to tcpQueue_
