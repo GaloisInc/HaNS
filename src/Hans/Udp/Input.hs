@@ -12,12 +12,15 @@ import           Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
 import           Hans.IP4.Packet (IP4)
 import           Hans.Lens (view)
 import           Hans.Monad (Hans,decode',dropPacket,io)
+import           Hans.Nat.Forward (tryForwardUdp)
 import           Hans.Network
+import           Hans.Udp.Output (queueUdp)
 import           Hans.Udp.Packet
 import           Hans.Types
 
 import           Control.Monad (unless)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Lazy as L
 
 
 {-# SPECIALIZE processUdp :: NetworkStack -> Device -> IP4 -> IP4
@@ -41,13 +44,18 @@ processUdp ns dev src dst bytes =
      io (routeMsg ns dev (toAddr src) (toAddr dst) hdr (S.take payloadLen payload))
 
 routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO Bool
-routeMsg ns dev src dst UdpHeader { .. } payload =
-  do mb <- lookupRecv ns dst udpDestPort
+routeMsg ns dev src dst hdr payload =
+  do mb <- lookupRecv ns dst (udpDestPort hdr)
      case mb of
 
        -- XXX: which stat should increment when writeChunk fails?
        Just buf ->
-         do _ <- DG.writeChunk buf (dev,src,udpSourcePort,dst,udpDestPort) payload
+         do _ <- DG.writeChunk buf (dev,src,udpSourcePort hdr,dst,udpDestPort hdr) payload
             return True
 
-       _ -> return False
+       -- Check to see if there's a forwarding rule to use
+       Nothing ->
+         do mbFwd <- tryForwardUdp ns src dst hdr
+            case mbFwd of
+              Just (ri,dst',hdr') -> queueUdp ns ri dst' hdr' (L.fromStrict payload)
+              Nothing             -> return False
