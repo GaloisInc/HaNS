@@ -5,13 +5,9 @@ module Hans.Nat.Forward ( tryForwardUdp, tryForwardTcp ) where
 import Hans.Addr.Types (Addr)
 import Hans.Lens (view)
 import Hans.Network (lookupRoute,RouteInfo(..))
-import Hans.Tcp.Packet (TcpHeader(..),tcpSyn,tcpFin)
+import Hans.Tcp.Packet (TcpHeader(..),tcpSyn)
 import Hans.Types
 import Hans.Udp.Packet (UdpHeader(..))
-
-import Control.Monad (when)
-import Data.Time.Clock (getCurrentTime)
-import Data.IORef (newIORef,readIORef,atomicWriteIORef)
 
 
 -- TCP -------------------------------------------------------------------------
@@ -29,12 +25,7 @@ tryForwardTcp ns local remote hdr =
      case mbEntry of
 
        -- forwarding is already established, rewrite the packet
-       Just entry ->
-         do when (view tcpFin hdr) $
-              do now <- readIORef (tsLastMessage entry)
-                 atomicWriteIORef (tsFinAt entry) (Just now)
-
-            return $! rewrite key entry
+       Just entry -> return $! rewrite key entry
 
        -- No forwarding entry exists. If it's a syn packet and there's a rule, start a
        -- new session.
@@ -46,7 +37,7 @@ tryForwardTcp ns local remote hdr =
 
                 -- add an entry to the table, and rewrite the packet
                 Just rule ->
-                  do mbSess <- newTcpSession ns key rule
+                  do mbSess <- newSession ns key rule
                      case mbSess of
                        Just entry -> do addTcpSession ns entry
                                         return $! rewrite key entry
@@ -65,29 +56,6 @@ tryForwardTcp ns local remote hdr =
                     , tcpDestPort   = flowRemotePort other }
 
      in hdr' `seq` Just (flowLocal other, flowRemote other, hdr')
-
-
--- | Generate a new TcpSession, given a flow that terminates on a port that is
--- being forwarded.
-newTcpSession :: NetworkStack -> Flow Addr -> PortForward -> IO (Maybe TcpSession)
-newTcpSession ns flow rule =
-  do tsFinAt       <- newIORef Nothing
-     tsLastMessage <- newIORef =<< getCurrentTime
-
-     l <- lookupRoute ns (flowRemote flow)
-     r <- lookupRoute ns (pfDestAddr rule)
-     p <- nextTcpPort ns (flowLocal flow) (pfDestAddr rule) (pfDestPort rule)
-     case (l,r,p) of
-       (Just riLeft, Just riRight, Just rightPort) ->
-         return $ Just
-                $ TcpSession { tsLeft  = flow { flowLocal = riLeft }
-                             , tsRight = Flow { flowLocal      = riRight
-                                              , flowLocalPort  = rightPort
-                                              , flowRemote     = pfDestAddr rule
-                                              , flowRemotePort = pfDestPort rule }
-                             , .. }
-
-       _ -> return Nothing
 
 
 -- UDP -------------------------------------------------------------------------
@@ -116,7 +84,7 @@ tryForwardUdp ns local remote hdr =
 
               -- add an entry to the table, and rewrite the packet
               Just rule ->
-                do mbSess <- newUdpSession ns key rule
+                do mbSess <- newSession ns key rule
                    case mbSess of
                      Just entry -> do addUdpSession ns entry
                                       return $! rewrite key entry
@@ -132,22 +100,19 @@ tryForwardUdp ns local remote hdr =
      in hdr' `seq` Just (flowLocal other, flowRemote other, hdr')
 
 
-newUdpSession :: NetworkStack -> Flow Addr -> PortForward -> IO (Maybe UdpSession)
-newUdpSession ns flow rule =
-  do usLastMessage <- newIORef =<< getCurrentTime
-
-     l <- lookupRoute ns (flowRemote flow)
+newSession :: NetworkStack -> Flow Addr -> PortForward -> IO (Maybe Session)
+newSession ns flow rule =
+  do l <- lookupRoute ns (flowRemote flow)
      r <- lookupRoute ns (pfDestAddr rule)
      p <- nextTcpPort ns (flowLocal flow) (pfDestAddr rule) (pfDestPort rule)
 
      case (l,r,p) of
        (Just riLeft, Just riRight, Just rightPort) ->
          return $ Just
-                $ UdpSession { usLeft  = flow { flowLocal = riLeft }
-                             , usRight = Flow { flowLocal      = riRight
-                                              , flowLocalPort  = rightPort
-                                              , flowRemote     = pfDestAddr rule
-                                              , flowRemotePort = pfDestPort rule }
-                             , .. }
+                $ Session { sessLeft  = flow { flowLocal = riLeft }
+                          , sessRight = Flow { flowLocal      = riRight
+                                             , flowLocalPort  = rightPort
+                                             , flowRemote     = pfDestAddr rule
+                                             , flowRemotePort = pfDestPort rule } }
 
        _ -> return Nothing

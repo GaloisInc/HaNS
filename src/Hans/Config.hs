@@ -71,6 +71,10 @@ data Config = Config { cfgInputQueueSize :: !Int
                      , cfgTcpTimeWaitSocketLimit :: !Int
                        -- ^ The max number of threads allowed in the time
                        -- wait heap.
+
+                     , cfgNatMaxEntries :: !Int
+                       -- ^ The maximum number of entries allowed in the TCP or
+                       -- UDP NAT tables
                      }
 
 defaultConfig :: Config
@@ -93,6 +97,7 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpMSL             = 60 -- one minute
                         , cfgTcpTSClockFrequency = 1000 -- 1000hz, update every 1ms
                         , cfgTcpTimeWaitSocketLimit = 70
+                        , cfgNatMaxEntries      = 200
                         }
 
 class HasConfig cfg where

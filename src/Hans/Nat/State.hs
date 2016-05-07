@@ -6,10 +6,9 @@ module Hans.Nat.State (
     NatState(), HasNatState(..),
     newNatState,
     Flow(..),
-    TcpSession(..),
-    UdpSession(..),
+    Session(..),
 
-    HasSession(..), otherSide,
+    otherSide,
 
     PortForward(..),
 
@@ -23,20 +22,18 @@ module Hans.Nat.State (
   ) where
 
 import           Hans.Addr (Addr,isWildcardAddr)
-import qualified Hans.HashTable as HT
+import           Hans.Config (Config(..))
 import           Hans.Lens (Getting,view)
 import           Hans.Network.Types (RouteInfo(..))
 import           Hans.Tcp.Packet (TcpPort)
 import           Hans.Threads (forkNamed)
 import           Hans.Udp.Packet (UdpPort)
 
-import           Control.Concurrent
-                     (ThreadId,threadDelay,MVar,newMVar,modifyMVar_)
-import           Control.Monad (forever,when)
+import           Control.Concurrent (ThreadId,threadDelay)
+import           Control.Monad (forever)
+import           Data.HashPSQ as Q
 import           Data.Hashable (Hashable)
-import           Data.IORef
-                     (IORef,newIORef,atomicWriteIORef,readIORef
-                     ,atomicModifyIORef')
+import           Data.IORef (IORef,newIORef,readIORef,atomicModifyIORef')
 import           Data.List (find)
 import           Data.Time.Clock
                      (UTCTime,getCurrentTime,NominalDiffTime,addUTCTime)
@@ -52,64 +49,19 @@ data Flow local = Flow { flowLocal      :: !local
                        , flowLocalPort  :: !Word16
                        , flowRemote     :: !Addr
                        , flowRemotePort :: !Word16
-                       } deriving (Functor,Eq,Generic)
+                       } deriving (Functor,Eq,Ord,Generic)
 
 instance Hashable remote => Hashable (Flow remote)
 
-data TcpSession = TcpSession { tsFinAt       :: !(IORef (Maybe UTCTime))
-                             , tsLastMessage :: !(IORef UTCTime)
-                             , tsLeft        :: !(Flow (RouteInfo Addr))
-                             , tsRight       :: !(Flow (RouteInfo Addr))
-                             }
-
-data UdpSession = UdpSession { usLastMessage :: !(IORef UTCTime)
-                             , usLeft        :: !(Flow (RouteInfo Addr))
-                             , usRight       :: !(Flow (RouteInfo Addr))
-                             }
-
-class HasSession sess where
-  sessionFlows :: sess -> (Flow (RouteInfo Addr), Flow (RouteInfo Addr))
-  touchSession :: sess -> IO ()
-  sessionAge   :: sess -> IO UTCTime
-
-instance HasSession TcpSession where
-  sessionFlows TcpSession { .. } = (tsLeft, tsRight)
-
-  touchSession TcpSession { .. } =
-    do now <- getCurrentTime
-       atomicWriteIORef tsLastMessage now
-
-  sessionAge TcpSession { .. } = 
-    do mbFin <- readIORef tsFinAt
-       case mbFin of
-         Just t  -> return t
-         Nothing -> readIORef tsLastMessage 
-
-
-instance HasSession UdpSession where
-  sessionFlows UdpSession { .. } = (usLeft, usRight)
-
-  touchSession UdpSession { .. } =
-    do now <- getCurrentTime
-       atomicWriteIORef usLastMessage now
-
-  sessionAge UdpSession { .. } =
-    readIORef usLastMessage
-
--- | Gives back the other end of the session.
-otherSide :: HasSession sess => Flow Addr -> sess -> Flow (RouteInfo Addr)
-otherSide flow sess =
-  let (a,b) = sessionFlows sess
-   in if flowRemote flow == flowRemote a then b else a
 
 data NatState =
-  NatState { natTcpTable_ :: !(NatTable TcpSession)
+  NatState { natTcpTable_ :: !NatTable
              -- ^ Active TCP flows
 
            , natTcpRules_ :: !(IORef [PortForward])
              -- ^ Ports that have been forwarded in the TCP layer
 
-           , natUdpTable_ :: !(NatTable UdpSession)
+           , natUdpTable_ :: !NatTable
              -- ^ Active UDP flows
 
            , natUdpRules_ :: !(IORef [PortForward])
@@ -140,11 +92,11 @@ data PortForward = PortForward { pfSourceAddr :: !Addr
                                }
 
 
-newNatState :: IO NatState
-newNatState  =
-  do natTcpTable_ <- newNatTable
+newNatState :: Config -> IO NatState
+newNatState cfg =
+  do natTcpTable_ <- newNatTable cfg
      natTcpRules_ <- newIORef []
-     natUdpTable_ <- newNatTable
+     natUdpTable_ <- newNatTable cfg
      natUdpRules_ <- newIORef []
      natReaper_   <- forkNamed "Nat.reaper" (reaper natTcpTable_ natUdpTable_)
      return NatState { .. }
@@ -152,60 +104,87 @@ newNatState  =
 
 -- Nat Tables ------------------------------------------------------------------
 
-data NatTable a = NatTable { natTable :: !(HT.HashTable (Flow Addr) a)
-                           , natSize  :: !(MVar Int)
-                           }
+data Session = Session { sessLeft, sessRight :: !(Flow (RouteInfo Addr)) }
 
-newNatTable :: HasSession a => IO (NatTable a)
-newNatTable  =
-  do natTable <- HT.newHashTable 11
-     natSize  <- newMVar 0
+-- | Gives back the other end of the session.
+otherSide :: Flow Addr -> Session -> Flow (RouteInfo Addr)
+otherSide flow Session { .. } =
+  if flowRemote flow == flowRemote sessLeft then sessRight else sessLeft
+
+sessionFlows :: Session -> (Flow Addr, Flow Addr)
+sessionFlows Session { .. } = (fmap riSource sessLeft, fmap riSource sessRight)
+
+
+type Sessions = Q.HashPSQ (Flow Addr) UTCTime Session
+
+addSession :: UTCTime -> Session -> Sessions -> Sessions
+addSession age a q =
+  let (l,r) = sessionFlows a
+   in Q.insert l age a (Q.insert r age a q)
+
+removeOldest :: Sessions -> Sessions
+removeOldest q =
+  case Q.minView q of
+    Just (k,_,a,q') -> Q.delete (fmap riSource (otherSide k a)) q'
+    Nothing         -> q
+
+removeSession :: Flow Addr -> Sessions -> Maybe (Session,Sessions)
+removeSession flow q =
+  case Q.deleteView flow q of
+    Just (_,a,q') -> Just (a,Q.delete (fmap riSource (otherSide flow a)) q')
+    Nothing       -> Nothing
+
+
+data NatTable = NatTable { natConfig :: Config
+                         , natTable  :: !(IORef Sessions)
+                         }
+
+newNatTable :: Config -> IO NatTable
+newNatTable natConfig =
+  do natTable <- newIORef Q.empty
      return NatTable { .. }
 
--- | Insert an entry into the NAT table. Increments the size by one.
-insertNatTable :: HasSession a => a -> NatTable a -> IO ()
-insertNatTable sess NatTable { .. } = modifyMVar_ natSize $ \ size ->
-  do let (a,b) = sessionFlows sess
-     let add _ = (Just sess, ())
-
-     HT.alter add (fmap riSource a) natTable
-     HT.alter add (fmap riSource b) natTable
-
-     return $! size + 1
+-- | Insert an entry into the NAT table.
+insertNatTable :: Session -> NatTable -> IO ()
+insertNatTable sess NatTable { .. } =
+  do now <- getCurrentTime
+     atomicModifyIORef' natTable $ \ q ->
+       let q' = addSession now sess q
+        in if Q.size q' > cfgNatMaxEntries natConfig
+              then (removeOldest q', ())
+              else (q', ())
 
 -- | Remove entries from the NAT table, decrementing the size by the number of
 -- entries that were removed.
-expireEntries :: HasSession a => UTCTime -> NatTable a -> IO ()
+expireEntries :: UTCTime -> NatTable -> IO ()
 expireEntries now NatTable { .. } =
-  do keys <- newIORef []
-     let push k = atomicModifyIORef' keys (\ks -> (k:ks,()))
+  atomicModifyIORef' natTable go
+  where
+  now' = addUTCTime (negate fourMinutes) now
 
-     let shouldExpire k a =
-           do lastUpdate <- sessionAge a
-              when (addUTCTime fourMinutes lastUpdate <= now) (push k)
+  -- remove entries that are older than four minutes
+  go q =
+    case Q.minView q of
+      Just (k,p,a,q')
+        | p < now'  -> go (Q.delete (fmap riSource (otherSide k a)) q')
+        | otherwise -> (q, ())
 
-     modifyMVar_ natSize $ \ size ->
-       do HT.mapHashTableM_ shouldExpire natTable
-
-          expired <- readIORef keys
-          HT.deletes expired natTable
-
-          return $! size - length expired
+      Nothing -> (Q.empty, ())
 
 -- | Lookup and touch an entry in the NAT table.
-lookupNatTable :: HasSession a => Flow Addr -> NatTable a -> IO (Maybe a)
+lookupNatTable :: Flow Addr -> NatTable -> IO (Maybe Session)
 lookupNatTable key NatTable { .. } =
-  do mb <- HT.lookup key natTable
-     case mb of
-       Just entry -> do touchSession entry
-                        return mb
-       Nothing    -> return Nothing
+  do now <- getCurrentTime
+     atomicModifyIORef' natTable $ \ q ->
+       case removeSession key q of
+         Just (a,q') -> (addSession now a q', Just a)
+         Nothing     -> (q, Nothing)
 
 
 -- Table Reaping ---------------------------------------------------------------
 
 -- | Every two minutes, reap old entries from the TCP and UDP NAT tables.
-reaper :: NatTable TcpSession -> NatTable UdpSession -> IO ()
+reaper :: NatTable -> NatTable -> IO ()
 reaper tcp udp = forever $
   do threadDelay (2 * 60 * 1000000) -- delay for two minutes
 
@@ -250,7 +229,7 @@ removeUdpPortForward state addr port =
 
 -- | Lookup information about an active forwarding session.
 tcpForwardingActive :: HasNatState state
-                    => state -> Flow Addr -> IO (Maybe TcpSession)
+                    => state -> Flow Addr -> IO (Maybe Session)
 tcpForwardingActive state key =
   do let NatState { .. } = view natState state
      lookupNatTable key natTcpTable_
@@ -258,21 +237,21 @@ tcpForwardingActive state key =
 
 -- | Lookup information about an active forwarding session.
 udpForwardingActive :: HasNatState state
-                    => state -> Flow Addr -> IO (Maybe UdpSession)
+                    => state -> Flow Addr -> IO (Maybe Session)
 udpForwardingActive state key =
   do let NatState { .. } = view natState state
      lookupNatTable key natUdpTable_
 
 
 -- | Insert a TCP forwarding entry into the NAT state.
-addTcpSession :: HasNatState state => state -> TcpSession -> IO ()
+addTcpSession :: HasNatState state => state -> Session -> IO ()
 addTcpSession state sess =
   do let NatState { .. } = view natState state
      insertNatTable sess natTcpTable_
 
 
 -- | Insert a UDP forwarding entry into the NAT state.
-addUdpSession :: HasNatState state => state -> UdpSession -> IO ()
+addUdpSession :: HasNatState state => state -> Session -> IO ()
 addUdpSession state sess =
   do let NatState { .. } = view natState state
      insertNatTable sess natUdpTable_

@@ -45,6 +45,7 @@ library
         build-depends:          base       >= 4.0.0.0 && < 5,
                                 cereal     >= 0.5.0.0,
                                 heaps,
+                                psqueues,
                                 bytestring,
                                 containers,
                                 array,

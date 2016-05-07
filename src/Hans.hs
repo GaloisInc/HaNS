@@ -58,7 +58,7 @@ import Hypervisor.XenStore (XenStore)
 newNetworkStack :: Config -> IO NetworkStack
 newNetworkStack nsConfig =
   do nsInput        <- newBoundedChan (cfgInputQueueSize nsConfig)
-     nsNat          <- newNatState
+     nsNat          <- newNatState nsConfig
      nsDevices      <- newIORef []
      nsIP4State     <- newIP4State nsConfig
      nsUdpState     <- newUdpState nsConfig
