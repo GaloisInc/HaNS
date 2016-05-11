@@ -49,7 +49,7 @@ data Flow local = Flow { flowLocal      :: !local
                        , flowLocalPort  :: !Word16
                        , flowRemote     :: !Addr
                        , flowRemotePort :: !Word16
-                       } deriving (Functor,Eq,Ord,Generic)
+                       } deriving (Functor,Eq,Ord,Generic,Show)
 
 instance Hashable remote => Hashable (Flow remote)
 
@@ -109,7 +109,9 @@ data Session = Session { sessLeft, sessRight :: !(Flow (RouteInfo Addr)) }
 -- | Gives back the other end of the session.
 otherSide :: Flow Addr -> Session -> Flow (RouteInfo Addr)
 otherSide flow Session { .. } =
-  if flowRemote flow == flowRemote sessLeft then sessRight else sessLeft
+  if flowRemote flow == flowRemote sessLeft
+     && flowRemotePort flow == flowRemotePort sessLeft
+     then sessRight else sessLeft
 
 sessionFlows :: Session -> (Flow Addr, Flow Addr)
 sessionFlows Session { .. } = (fmap riSource sessLeft, fmap riSource sessRight)

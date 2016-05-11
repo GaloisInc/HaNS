@@ -75,8 +75,10 @@ lookupRecv state addr dstPort =
        Just _  -> return mb
 
        -- try the generic receiver for that port
-       Nothing -> HT.lookup (Key (wildcardAddr addr) dstPort)
-                            (udpRecv (view udpState state))
+       Nothing -> do
+         mb' <- HT.lookup (Key (wildcardAddr addr) dstPort)
+                          (udpRecv (view udpState state))
+         return mb'
 
 
 -- | Register a listener for messages to this address and port, returning 'Just'
@@ -101,20 +103,31 @@ registerRecv state addr srcPort buf =
 
 nextUdpPort :: HasUdpState state => state -> Addr -> IO (Maybe UdpPort)
 nextUdpPort state addr =
-  modifyMVar udpPorts (pickFreshPort udpRecv (Key addr))
+  modifyMVar udpPorts (pickFreshPort udpRecv addr)
   where
   UdpState { .. } = view udpState state
 
-pickFreshPort :: HT.HashTable Key UdpBuffer -> (UdpPort -> Key) -> UdpPort
+pickFreshPort :: HT.HashTable Key UdpBuffer -> Addr -> UdpPort
               -> IO (UdpPort, Maybe UdpPort)
-pickFreshPort ht mkKey p0 = go 0 p0
+pickFreshPort ht addr p0 = go 0 p0
   where
+
+  mkKey1 = Key addr
+  mkKey2 = Key (wildcardAddr addr)
+
+  check
+    | isWildcardAddr addr = \port -> HT.hasKey (mkKey1 port) ht
+    | otherwise           = \port ->
+      do used <- HT.hasKey (mkKey1 port) ht
+         if not used
+            then HT.hasKey (mkKey2 port) ht
+            else return True
 
   go :: Int -> UdpPort -> IO (UdpPort,Maybe UdpPort)
   go i _ | i > 65535 = return (p0, Nothing)
   go i 0             = go (i+1) 1025
   go i port          =
-    do used <- HT.hasKey (mkKey port) ht
+    do used <- check port
        if not used
           then return (port, Just port)
           else go (i + 1) (port + 1)

@@ -40,22 +40,25 @@ processUdp ns dev src dst bytes =
 
      ((hdr,payloadLen),payload) <- decode' (devStats dev) getUdpHeader bytes
 
+     let local  = toAddr dst
+         remote = toAddr src
+
      -- attempt to find a destination for this packet
-     io (routeMsg ns dev (toAddr src) (toAddr dst) hdr (S.take payloadLen payload))
+     io (routeMsg ns dev local remote hdr (S.take payloadLen payload))
 
 routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO Bool
-routeMsg ns dev src dst hdr payload =
-  do mb <- lookupRecv ns dst (udpDestPort hdr)
+routeMsg ns dev local remote hdr payload =
+  do mb <- lookupRecv ns remote (udpDestPort hdr)
      case mb of
 
        -- XXX: which stat should increment when writeChunk fails?
        Just buf ->
-         do _ <- DG.writeChunk buf (dev,src,udpSourcePort hdr,dst,udpDestPort hdr) payload
+         do _ <- DG.writeChunk buf (dev,remote,udpSourcePort hdr,local,udpDestPort hdr) payload
             return True
 
        -- Check to see if there's a forwarding rule to use
        Nothing ->
-         do mbFwd <- tryForwardUdp ns src dst hdr
+         do mbFwd <- tryForwardUdp ns local remote hdr
             case mbFwd of
               Just (ri,dst',hdr') -> queueUdp ns ri dst' hdr' (L.fromStrict payload)
               Nothing             -> return False

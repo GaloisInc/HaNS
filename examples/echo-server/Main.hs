@@ -63,6 +63,9 @@ main  =
                , routeDevice  = dev
                }
 
+     forwardTcpPort ns WildcardIP4 22 (packIP4 172 16 181 1) 22
+     forwardUdpPort ns WildcardIP4 9090 (packIP4 172 16 181 128) 9090
+
      sock <- sListen ns defaultSocketConfig WildcardIP4 9001 10
 
      _    <- forkIO $ forever $
