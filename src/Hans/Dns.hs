@@ -77,18 +77,18 @@ sendRequest ns src =
 
      when (null nameServers) (throwIO NoNameServers)
 
-     sock <- newUdpSocket ns defaultSocketConfig Nothing WildcardIP4 Nothing
+     bracket (newUdpSocket ns defaultSocketConfig Nothing WildcardIP4 Nothing)
+             sClose $ \ sock ->
+       do let req = runPutPacket 1450 1450 L.empty (putDNSPacket (mkPacket src 0))
 
-     let req = runPutPacket 1450 1450 L.empty (putDNSPacket (mkPacket src 0))
-
-     mbResp <- queryServers4 sock req nameServers
-     case mbResp of
-       Just DNSPacket { .. }
-         | DNSHeader { .. } <- dnsHeader
-         , dnsRC == RespNoError ->
-           return (Just (parseHostEntry src dnsAnswers))
-       _ ->
-         return Nothing
+          mbResp <- queryServers4 sock req nameServers
+          case mbResp of
+            Just DNSPacket { .. }
+              | DNSHeader { .. } <- dnsHeader
+              , dnsRC == RespNoError ->
+                return (Just (parseHostEntry src dnsAnswers))
+            _ ->
+              return Nothing
 
 
 queryServers4 :: UdpSocket IP4 -> L.ByteString -> [IP4] -> IO (Maybe DNSPacket)
