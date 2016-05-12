@@ -10,6 +10,7 @@ module Hans.Tcp.Packet (
     TcpHeader(..),
     TcpPort, putTcpPort,
     emptyTcpHeader,
+    tcpHeaderSize,
 
     -- ** Sequence Numbers
     TcpSeqNum, TcpAckNum,
@@ -31,6 +32,8 @@ module Hans.Tcp.Packet (
     TcpOption(..),
     TcpOptionTag(..), tcpOptionTag,
     SackBlock(..),
+    tcpOptionsSize,
+    tcpOptionSize,
 
     -- * Segment Operations
     tcpSegLen,
@@ -181,8 +184,14 @@ tcpFin = tcpFlags . bit 0
 
 
 -- | The length of the fixed part of the TcpHeader, in 4-byte octets.
-tcpFixedHeaderLength :: Int
-tcpFixedHeaderLength  = 5
+tcpFixedHeaderSize :: Int
+tcpFixedHeaderSize  = 5
+
+-- | The encoded size of a header.
+tcpHeaderSize :: TcpHeader -> Int
+tcpHeaderSize TcpHeader { .. } =
+  let (size,padding) = tcpOptionsSize tcpOptions_
+   in size + padding + tcpFixedHeaderSize
 
 -- | Render a TcpHeader.  The checksum value is never rendered, as it is
 -- expected to be calculated and poked in afterwords.
@@ -192,8 +201,8 @@ putTcpHeader TcpHeader { .. } =
      putTcpPort tcpDestPort
      putTcpSeqNum tcpSeqNum
      putTcpAckNum tcpAckNum
-     let (optLen,padding) = tcpOptionsLength tcpOptions_
-     putTcpControl (tcpFixedHeaderLength + optLen) tcpFlags_
+     let (optLen,padding) = tcpOptionsSize tcpOptions_
+     putTcpControl (tcpFixedHeaderSize + optLen) tcpFlags_
      putWord16be tcpWindow
      putWord16be 0
      putWord16be tcpUrgentPointer
@@ -217,7 +226,7 @@ getTcpHeader  = label "TcpHeader" $
      tcpUrgentPointer <- getWord16be
 
      -- options, not including the end-of-list option
-     let optsLen = dataOff - tcpFixedHeaderLength
+     let optsLen = dataOff - tcpFixedHeaderSize
      opts <- label "options" (isolate (optsLen `shiftL` 2) getTcpOptions)
      let tcpOptions_ = filter (/= OptEndOfOptions) opts
 
@@ -322,23 +331,23 @@ tcpOptionTag (OptUnknown ty _ _) = OptTagUnknown ty
 
 -- | Get the rendered length of a list of TcpOptions, in 4-byte words, and the
 -- number of padding bytes required.  This rounds up to the nearest 4-byte word.
-tcpOptionsLength :: [TcpOption] -> (Int,Int)
-tcpOptionsLength opts
+tcpOptionsSize :: [TcpOption] -> (Int,Int)
+tcpOptionsSize opts
   | left == 0 = (len,0)
   | otherwise = (len + 1,4 - left)
   where
-  (len,left) = F.foldl' (\acc o -> acc + tcpOptionLength o) 0 opts `quotRem` 4
+  (len,left) = F.foldl' (\acc o -> acc + tcpOptionSize o) 0 opts `quotRem` 4
 
 
-tcpOptionLength :: TcpOption -> Int
-tcpOptionLength OptEndOfOptions{}    = 1
-tcpOptionLength OptNoOption{}        = 1
-tcpOptionLength OptMaxSegmentSize{}  = 4
-tcpOptionLength OptWindowScaling{}   = 3
-tcpOptionLength OptSackPermitted{}   = 2
-tcpOptionLength (OptSack bs)         = sackLength bs
-tcpOptionLength OptTimestamp{}       = 10
-tcpOptionLength (OptUnknown _ len _) = fromIntegral len
+tcpOptionSize :: TcpOption -> Int
+tcpOptionSize OptEndOfOptions{}    = 1
+tcpOptionSize OptNoOption{}        = 1
+tcpOptionSize OptMaxSegmentSize{}  = 4
+tcpOptionSize OptWindowScaling{}   = 3
+tcpOptionSize OptSackPermitted{}   = 2
+tcpOptionSize (OptSack bs)         = sackLength bs
+tcpOptionSize OptTimestamp{}       = 10
+tcpOptionSize (OptUnknown _ len _) = fromIntegral len
 
 
 putTcpOption :: Putter TcpOption
