@@ -65,12 +65,18 @@ sendFin ns tcb =
 -- | Send a data segment. When the remote window is full, this returns 0.
 sendData :: NetworkStack -> Tcb -> L.ByteString -> IO Int64
 sendData ns tcb bytes =
-  do let hdr = set tcpAck True
-             $ set tcpPsh True emptyTcpHeader
-     mb <- sendWithTcb ns tcb hdr bytes
+  do mss <- readIORef (tcbMss tcb)
+     mb  <- sendWithTcb ns tcb hdr (L.take (fromIntegral mss) bytes)
      case mb of
        Just len -> return len
        Nothing  -> return 0
+
+  where
+
+  hdr = set tcpAck True
+      $ set tcpPsh True
+        emptyTcpHeader
+
 
 -- | Send a segment and queue it in the remote window. The number of bytes that
 -- were sent is returned.
