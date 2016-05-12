@@ -53,7 +53,8 @@ tryForwardTcp ns local remote hdr =
   rewrite key entry =
     let other = otherSide key entry
         hdr'  = hdr { tcpSourcePort = flowLocalPort  other
-                    , tcpDestPort   = flowRemotePort other }
+                    , tcpDestPort   = flowRemotePort other
+                    , tcpChecksum   = 0 }
 
      in hdr' `seq` Just (flowLocal other, flowRemote other, hdr')
 
@@ -95,7 +96,8 @@ tryForwardUdp ns local remote hdr =
   rewrite key entry =
     let other = otherSide key entry
         hdr' = hdr { udpSourcePort = flowLocalPort  other
-                   , udpDestPort   = flowRemotePort other }
+                   , udpDestPort   = flowRemotePort other
+                   , udpChecksum   = 0 }
 
      in hdr' `seq` Just (flowLocal other, flowRemote other, hdr')
 
