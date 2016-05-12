@@ -15,9 +15,9 @@ import           Hans.Tcp.Output
 import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Types
 
-import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar)
+import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar,yield)
 import           Control.Exception (throwIO)
-import           Control.Monad (unless)
+import           Control.Monad (unless,when)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 import           Data.Time.Clock (getCurrentTime)
@@ -193,6 +193,10 @@ instance DataSocket TcpSocket where
   -- been moved into the send window
   sWrite TcpSocket { .. } bytes =
     guardSend tcpTcb $ do len <- sendData tcpNS tcpTcb bytes
+                          print ("chunk", len, L.length bytes)
+
+                          when (len < L.length bytes) yield
+
                           return $! fromIntegral len
 
   sRead    TcpSocket { .. } len = guardRecv tcpTcb (receiveBytes    len tcpTcb)
