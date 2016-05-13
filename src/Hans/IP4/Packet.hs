@@ -216,7 +216,8 @@ ip4FragmentOffset :: Lens' IP4Header Word16
 ip4FragmentOffset  = ip4Fragment . lens f g
   where
   f frag     = (frag .&. 0x1fff) `shiftL` 3
-  g frag len = frag .|. ((len `shiftR` 3) .&. 0x1fff)
+  g frag len = (frag .&. complement 0x1fff)
+           .|. ((len `shiftR` 3) .&. 0x1fff)
 {-# INLINE ip4FragmentOffset #-}
 
 
