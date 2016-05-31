@@ -16,6 +16,7 @@ module Hans.Socket (
     newUdpSocket,
     sendto,
     recvfrom,
+    recvfrom',
 
     -- ** TCP Sockets
     TcpSocket(),
