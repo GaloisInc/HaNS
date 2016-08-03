@@ -57,8 +57,6 @@ library
                                 cryptonite,
                                 memory
 
-        ghc-prof-options:       -fprof-auto-top
-
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
                                 Hans.Addr
