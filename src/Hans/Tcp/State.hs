@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE LambdaCase #-}
-{-# BangPatterns #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Hans.Tcp.State (
     -- * Tcp State
