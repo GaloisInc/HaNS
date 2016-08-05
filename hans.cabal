@@ -155,4 +155,5 @@ test-suite hans-tests
                                 Tests.IP4.Fragmentation
                                 Tests.IP4.Icmp4
                                 Tests.IP4.Packet
+                                Tests.Network
                                 Tests.Utils
