@@ -41,7 +41,7 @@ import           Data.Time.Clock
 --
 -- INVARIANT: there should never be entries in the map that aren't also in the
 -- heap.
-data ArpTable = ArpTable { atMacs        :: HT.HashTable IP4 Entry
+data ArpTable = ArpTable { atMacs        :: !(HT.HashTable IP4 Entry)
                          , atLifetime    :: !NominalDiffTime
                          , atPurgeThread :: !ThreadId
                          }

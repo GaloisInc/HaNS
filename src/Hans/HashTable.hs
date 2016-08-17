@@ -31,7 +31,18 @@ data HashTable k a =
 
 type Bucket k a = IORef [(k,a)]
 
+cons' :: a -> [a] -> [a]
+cons' h tl = h `seq` tl `seq` (h:tl)
+{-# INLINE cons' #-}
 
+nfList :: [a] -> ()
+nfList []       = ()
+nfList (a:rest) = a `seq` nfList rest
+{-# INLINE nfList #-}
+
+nfListId :: [a] -> [a]
+nfListId xs = nfList xs `seq` xs
+{-# INLINE nfListId #-}
 
 -- | Create a new hash table with the given size.
 newHashTable :: (Eq k, Hashable k) => Int -> IO (HashTable k a)
@@ -50,10 +61,13 @@ mapBuckets f HashTable { .. } = go 0
         | otherwise   = return ()
 {-# INLINE mapBuckets #-}
 
-
 filterHashTable :: (Eq k, Hashable k)
                 => (k -> a -> Bool) -> HashTable k a -> IO ()
-filterHashTable p = mapBuckets (filter (uncurry p))
+filterHashTable p = mapBuckets go
+  where
+  go []                         = []
+  go (x@(k,a):rest) | p k a     = cons' x (go rest)
+                    | otherwise = go rest
 {-# INLINE filterHashTable #-}
 
 -- | Monadic mapping over the values of a hash table.
@@ -69,9 +83,10 @@ mapHashTableM_ f HashTable { .. } = go 0
 {-# INLINE mapHashTableM_ #-}
 
 mapHashTable :: (Eq k, Hashable k) => (k -> a -> a) -> HashTable k a -> IO ()
-mapHashTable f = mapBuckets (map f')
+mapHashTable f = mapBuckets go
   where
-  f' (k,a) = (k, f k a)
+  go []           = []
+  go ((k,a):rest) = cons' ((,) k $! f k a) (go rest)
 {-# INLINE mapHashTable #-}
 
 getBucket :: Hashable k => HashTable k a -> k -> Bucket k a
@@ -92,7 +107,7 @@ lookup k ht =
 {-# INLINE lookup #-}
 
 delete :: (Eq k, Hashable k) => k -> HashTable k a -> IO ()
-delete k ht = modifyBucket ht k (\ bucket -> (removeEntry bucket, ()))
+delete k ht = modifyBucket ht k (\ bucket -> (nfListId (removeEntry bucket), ()))
 
   where
 
@@ -138,7 +153,7 @@ deletes ks ht =
 -- behaviors all perform slightly better.
 alter :: (Eq k, Hashable k)
        => (Maybe a -> (Maybe a, b)) -> k -> HashTable k a -> IO b
-alter f k ht = modifyBucket ht k (update id)
+alter f k ht = modifyBucket ht k (update nfListId)
   where
 
   update mkBucket (e@(k',a):rest)

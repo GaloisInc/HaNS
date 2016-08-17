@@ -31,7 +31,7 @@ tcpTimers ns = loop True
        let delay = 0.250 - diffUTCTime end start
        when (delay > 0) (threadDelay (toUSeconds delay))
 
-       loop (not runSlow)
+       loop $! not runSlow
 
 
 -- | The body of the fast and slow tick handlers. The boolean indicates whether
