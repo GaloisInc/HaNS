@@ -193,7 +193,6 @@ instance DataSocket TcpSocket where
   -- been moved into the send window
   sWrite TcpSocket { .. } bytes =
     guardSend tcpTcb $ do len <- sendData tcpNS tcpTcb bytes
-                          print ("chunk", len, L.length bytes)
 
                           when (len < L.length bytes) yield
 
