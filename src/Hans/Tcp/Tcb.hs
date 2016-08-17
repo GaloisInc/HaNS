@@ -77,6 +77,7 @@ import qualified Data.ByteString.Lazy as L
 import           Data.IORef
                      (IORef,newIORef,atomicModifyIORef',readIORef
                      ,atomicWriteIORef)
+import           Data.Int (Int64)
 import qualified Data.Sequence as Seq
 import           Data.Time.Clock (NominalDiffTime,getCurrentTime)
 import           Data.Word (Word16,Word32)
@@ -403,7 +404,7 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbRemote    :: !Addr             -- ^ Remote host
 
                  -- Fragmentation information
-               , tcbMss :: !(IORef Int) -- ^ Maximum segment size
+               , tcbMss :: !(IORef Int64) -- ^ Maximum segment size
 
                  -- Timers
                , tcbTimers :: !(IORef TcpTimers)
@@ -446,7 +447,7 @@ newTcb cxt tcbParent iss tcbRouteInfo tcbLocalPort tcbRemote tcbRemotePort
      tcbRcvUp  <- newIORef 0
      tcbNeedsDelayedAck <- newIORef False
      tcbIrs    <- newIORef 0
-     tcbMss    <- newIORef cfgTcpInitialMSS
+     tcbMss    <- newIORef (fromIntegral cfgTcpInitialMSS)
      tcbTimers <- newIORef emptyTcpTimers
 
      tcbTSRecent     <- newIORef 0

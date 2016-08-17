@@ -62,16 +62,31 @@ sendFin ns tcb =
      _ <- sendWithTcb ns tcb hdr L.empty
      return ()
 
--- | Send a data segment. When the remote window is full, this returns 0.
+-- | Send a data segment, potentially sending multiple packets if the send
+-- window allows, and the payload is larger than MSS. When the remote window is
+-- full, this returns 0.
 sendData :: NetworkStack -> Tcb -> L.ByteString -> IO Int64
-sendData ns tcb bytes =
-  do mss <- readIORef (tcbMss tcb)
-     mb  <- sendWithTcb ns tcb hdr (L.take (fromIntegral mss) bytes)
-     case mb of
-       Just len -> return len
-       Nothing  -> return 0
-
+sendData ns tcb = go 0
   where
+  -- technically the MSS could change between sends, so this ensures that we
+  -- would pick up that change.
+  go acc bytes
+    | L.null bytes =
+      return acc
+
+    | otherwise =
+      do mss <- fromIntegral `fmap` readIORef (tcbMss tcb)
+         mb  <- sendWithTcb ns tcb hdr (L.take mss bytes)
+         case mb of
+
+           -- when the amount sent was less than mss, we've filled the send
+           -- window, and won't be able to send any more.
+           Just len | len < mss -> return $! acc + len
+                    | otherwise -> let acc' = acc + len
+                                    in acc' `seq` go acc' (L.drop len bytes)
+
+           -- the send window is full, return the accumulator
+           Nothing -> return acc
 
   hdr = set tcpAck True
       $ set tcpPsh True

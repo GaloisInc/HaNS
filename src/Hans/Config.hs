@@ -91,7 +91,9 @@ defaultConfig  = Config { cfgInputQueueSize     = 128
                         , cfgTcpListenTableSize = 5
                         , cfgTcpActiveTableSize = 67
                         , cfgTcpTimeoutTimeWait = 60.0 -- one minute
-                        , cfgTcpInitialMSS      = 512
+                        , cfgTcpInitialMSS      = 1380
+                          -- ^ 1500 - (max (20 for IPv4) (60 for IPv6)
+                          --          + 60 for maximum TCP header)
                         , cfgTcpMaxSynBacklog   = 128
                         , cfgTcpInitialWindow   = 14600
                         , cfgTcpMSL             = 60 -- one minute
