@@ -2,7 +2,7 @@
 
 module Hans.Nat.Forward ( tryForwardUdp, tryForwardTcp ) where
 
-import Hans.Addr.Types (Addr)
+import Hans.Addr (IP4,toIP6)
 import Hans.Lens (view)
 import Hans.Network (lookupRoute,RouteInfo(..))
 import Hans.Tcp.Packet (TcpHeader(..),tcpSyn)
@@ -15,10 +15,10 @@ import Hans.Udp.Packet (UdpHeader(..))
 -- | Try to produce a new TCP packet that should be forwarded. Returns 'Nothing'
 -- if the packet was destined for the local machine.
 tryForwardTcp :: NetworkStack
-              -> Addr -- ^ Local addr
-              -> Addr -- ^ Remote addr
+              -> IP4 -- ^ Local addr
+              -> IP4 -- ^ Remote addr
               -> TcpHeader
-              -> IO (Maybe (RouteInfo Addr,Addr,TcpHeader))
+              -> IO (Maybe (RouteInfo IP4,IP4,TcpHeader))
 tryForwardTcp ns local remote hdr =
   do let key = Flow local (tcpDestPort hdr) remote (tcpSourcePort hdr)
      mbEntry <- tcpForwardingActive ns key
@@ -64,10 +64,10 @@ tryForwardTcp ns local remote hdr =
 -- | Try to produce a new TCP packet that should be forwarded. Returns 'Nothing'
 -- if the packet was destined for the local machine.
 tryForwardUdp :: NetworkStack
-              -> Addr -- ^ Local addr
-              -> Addr -- ^ Remote addr
+              -> IP4 -- ^ Local addr
+              -> IP4 -- ^ Remote addr
               -> UdpHeader
-              -> IO (Maybe (RouteInfo Addr,Addr,UdpHeader))
+              -> IO (Maybe (RouteInfo IP4,IP4,UdpHeader))
 tryForwardUdp ns local remote hdr =
   do let key = Flow local (udpDestPort hdr) remote (udpSourcePort hdr)
      mbEntry <- udpForwardingActive ns key
@@ -102,11 +102,11 @@ tryForwardUdp ns local remote hdr =
      in hdr' `seq` Just (flowLocal other, flowRemote other, hdr')
 
 
-newSession :: NetworkStack -> Flow Addr -> PortForward -> IO (Maybe Session)
+newSession :: NetworkStack -> Flow IP4 -> PortForward -> IO (Maybe Session)
 newSession ns flow rule =
   do l <- lookupRoute ns (flowRemote flow)
      r <- lookupRoute ns (pfDestAddr rule)
-     p <- nextTcpPort ns (flowLocal flow) (pfDestAddr rule) (pfDestPort rule)
+     p <- nextTcpPort ns (toIP6 (flowLocal flow)) (toIP6 (pfDestAddr rule)) (pfDestPort rule)
 
      case (l,r,p) of
        (Just riLeft, Just riRight, Just rightPort) ->

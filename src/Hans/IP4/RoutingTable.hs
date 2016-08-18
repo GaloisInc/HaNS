@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Hans.IP4.RoutingTable (
     Route(..), RouteType(..),
@@ -13,14 +14,12 @@ module Hans.IP4.RoutingTable (
     routesForDev,
   ) where
 
+import Hans.Addr
 import Hans.Device.Types (Device)
-import Hans.IP4.Packet
 
 import Control.Monad (guard)
-import Data.Bits ((.&.))
 import Data.List (insertBy)
 import Data.Maybe (mapMaybe)
-import Data.Word (Word32)
 
 
 data RouteType = Direct
@@ -33,7 +32,7 @@ data Route = Route { routeNetwork :: {-# UNPACK #-} !IP4Mask
                    }
 
 routeSource :: Route -> IP4
-routeSource Route { routeNetwork = IP4Mask addr _ } = addr
+routeSource Route { .. } = maskAddr routeNetwork
 
 routeNextHop :: IP4 -> Route -> IP4
 routeNextHop dest route =
@@ -43,9 +42,8 @@ routeNextHop dest route =
     Loopback         -> routeSource route
 
 
-data Rule = Rule { ruleMask   :: {-# UNPACK #-} !Word32
-                 , rulePrefix :: {-# UNPACK #-} !Word32
-                 , ruleRoute  ::                !Route
+data Rule = Rule { ruleTest  :: !(IP4 -> Bool)
+                 , ruleRoute :: !Route
                  }
 
 ruleMaskLen :: Rule -> Int
@@ -58,15 +56,10 @@ ruleDevice :: Rule -> Device
 ruleDevice rule = routeDevice (ruleRoute rule)
 
 mkRule :: Route -> Rule
-mkRule ruleRoute = Rule { .. }
-  where
-  IP4Mask (IP4 w) bits = routeNetwork ruleRoute
-
-  ruleMask             = netmask bits
-  rulePrefix           = ruleMask .&. w
+mkRule ruleRoute = Rule { ruleTest = isMember (routeNetwork ruleRoute), .. }
 
 routesTo :: Rule -> IP4 -> Bool
-routesTo Rule { .. } (IP4 addr) = addr .&. ruleMask == rulePrefix
+routesTo Rule { .. } = ruleTest
 
 -- | Simple routing.
 data RoutingTable = RoutingTable { rtRules :: [Rule]

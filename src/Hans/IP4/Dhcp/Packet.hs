@@ -50,10 +50,10 @@ module Hans.IP4.Dhcp.Packet
 
   ) where
 
+import Hans.Addr (IP4,pattern WildcardIP4)
 import Hans.Ethernet (Mac)
 import Hans.IP4.Dhcp.Codec
 import Hans.IP4.Dhcp.Options
-import Hans.IP4.Packet (IP4(..),pattern WildcardIP4)
 
 import qualified Control.Applicative as A
 import           Control.Monad (unless)

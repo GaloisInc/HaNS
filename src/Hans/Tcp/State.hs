@@ -41,7 +41,7 @@ module Hans.Tcp.State (
     nextIss,
   ) where
 
-import           Hans.Addr (Addr,wildcardAddr,putAddr)
+import           Hans.Addr (IP6,wildcardAddr,putIP6,toIP4,toIP6)
 import           Hans.Config (HasConfig(..),Config(..))
 import qualified Hans.HashTable as HT
 import           Hans.Lens
@@ -72,7 +72,7 @@ import           System.Random (newStdGen,random,randoms)
 
 -- General State ---------------------------------------------------------------
 
-data ListenKey = ListenKey !Addr !TcpPort
+data ListenKey = ListenKey !IP6 !TcpPort
                  deriving (Show,Eq,Ord,Generic)
 
 listenKey :: Getting r ListenTcb ListenKey
@@ -80,9 +80,9 @@ listenKey  = to (\ ListenTcb { .. } -> ListenKey lSrc lPort)
 {-# INLINE listenKey #-}
 
 
-data Key = Key !Addr    -- Remote address
+data Key = Key !IP6     -- Remote address
                !TcpPort -- Remote port
-               !Addr    -- Local address
+               !IP6     -- Local address
                !TcpPort -- Local port
            deriving (Show,Eq,Ord,Generic)
 
@@ -113,7 +113,7 @@ data TcpState =
            }
 
 -- | Requests that can be made to the responder thread.
-data TcpResponderRequest = SendSegment !(RouteInfo Addr) !Addr !TcpHeader !L.ByteString
+data TcpResponderRequest = SendSegment !(RouteInfo IP6) !IP6 !TcpHeader !L.ByteString
                          | SendWithTcb !Tcb !TcpHeader !L.ByteString
 
 tcpQueue :: HasTcpState state => Getting r state (BC.BoundedChan TcpResponderRequest)
@@ -212,13 +212,25 @@ deleteListening state tcb =
 
 -- | Lookup a socket in the Listen state.
 lookupListening :: HasTcpState state
-                => state -> Addr -> TcpPort -> IO (Maybe ListenTcb)
+                => state -> IP6 -> TcpPort -> IO (Maybe ListenTcb)
 lookupListening state src port =
   do mb <- HT.lookup (ListenKey src port) (view tcpListen state)
      case mb of
-       Just {} -> return mb
+       Just {} ->
+            return mb
+
        Nothing ->
-         HT.lookup (ListenKey (wildcardAddr src) port) (view tcpListen state)
+         case toIP4 src of
+           Just ip4 ->
+             do mb' <- HT.lookup (ListenKey (toIP6 (wildcardAddr ip4)) port)
+                                 (view tcpListen state)
+                case mb' of
+                  Just{}  -> return mb'
+                  Nothing -> HT.lookup (ListenKey (wildcardAddr src) port)
+                                       (view tcpListen state)
+
+           Nothing ->
+                HT.lookup (ListenKey (wildcardAddr src) port) (view tcpListen state)
 {-# INLINE lookupListening #-}
 
 
@@ -299,7 +311,7 @@ updateTimeWait state update =
 
 -- | Lookup a socket in the TimeWait state.
 lookupTimeWait :: HasTcpState state
-             => state -> Addr -> TcpPort -> Addr -> TcpPort
+             => state -> IP6 -> TcpPort -> IP6 -> TcpPort
              -> IO (Maybe TimeWaitTcb)
 lookupTimeWait state dst dstPort src srcPort =
   do heap <- readIORef (view tcpTimeWait state)
@@ -335,7 +347,7 @@ registerActive state tcb =
 
 -- | Lookup an active socket.
 lookupActive :: HasTcpState state
-             => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO (Maybe Tcb)
+             => state -> IP6 -> TcpPort -> IP6 -> TcpPort -> IO (Maybe Tcb)
 lookupActive state dst dstPort src srcPort =
   HT.lookup (Key dst dstPort src srcPort) (view tcpActive state)
 {-# INLINE lookupActive #-}
@@ -360,7 +372,7 @@ deleteActive state tcb =
 
 -- | Pick a fresh port for a connection.
 nextTcpPort :: HasTcpState state
-            => state -> Addr -> Addr -> TcpPort -> IO (Maybe TcpPort)
+            => state -> IP6 -> IP6 -> TcpPort -> IO (Maybe TcpPort)
 nextTcpPort state src dst dstPort =
   modifyMVar tcpPorts (pickFreshPort tcpActive_ (Key dst dstPort src))
   where
@@ -384,7 +396,7 @@ pickFreshPort ht mkKey p0 = go 0 p0
 -- Sequence Numbers ------------------------------------------------------------
 
 nextIss :: HasTcpState state
-        => state -> Addr -> TcpPort -> Addr -> TcpPort -> IO TcpSeqNum
+        => state -> IP6 -> TcpPort -> IP6 -> TcpPort -> IO TcpSeqNum
 nextIss state src srcPort dst dstPort =
   do let TcpState { .. } = view tcpState state
      now <- getCurrentTime
@@ -397,9 +409,9 @@ nextIss state src srcPort dst dstPort =
 
            digest :: Digest MD5
            digest  = hash $ runPut $
-             do putAddr src
+             do putIP6 src
                 putTcpPort srcPort
-                putAddr dst
+                putIP6 dst
                 putTcpPort dstPort
                 putByteString tcpSecret
 

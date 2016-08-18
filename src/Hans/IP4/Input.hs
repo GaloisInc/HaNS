@@ -7,6 +7,7 @@ module Hans.IP4.Input (
     handleIP4,
   ) where
 
+import Hans.Addr
 import Hans.Checksum (computeChecksum)
 import Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)

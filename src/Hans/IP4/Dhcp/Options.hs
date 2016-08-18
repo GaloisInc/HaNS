@@ -1,7 +1,7 @@
 module Hans.IP4.Dhcp.Options where
 
+import Hans.Addr (IP4,IP4Mask)
 import Hans.IP4.Dhcp.Codec
-import Hans.IP4.Packet (IP4,IP4Mask)
 
 import qualified Control.Applicative as A
 import           Control.Monad (unless)

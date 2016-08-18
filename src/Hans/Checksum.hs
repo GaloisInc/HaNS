@@ -26,7 +26,7 @@ module Hans.Checksum(
 
 import           Data.Bits (Bits(shiftL,shiftR,complement,clearBit,(.&.)))
 import           Data.List (foldl')
-import           Data.Word (Word8,Word16,Word32)
+import           Data.Word (Word8,Word16,Word32,Word64)
 import qualified Data.ByteString        as S
 import qualified Data.ByteString.Lazy   as L
 import qualified Data.ByteString.Short  as Sh
@@ -86,6 +86,12 @@ instance Checksum Word32 where
   extendChecksum w = \pc ->
     extendChecksum (fromIntegral  w              :: Word16) $
     extendChecksum (fromIntegral (w `shiftR` 16) :: Word16) pc
+  {-# INLINE extendChecksum #-}
+
+instance Checksum Word64 where
+  extendChecksum w = \pc ->
+    extendChecksum (fromIntegral  w              :: Word32) $
+    extendChecksum (fromIntegral (w `shiftR` 32) :: Word32) pc
   {-# INLINE extendChecksum #-}
   
 instance Checksum a => Checksum [a] where

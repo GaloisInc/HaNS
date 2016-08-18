@@ -22,7 +22,7 @@ module Hans.Dns.Packet (
   , putDNSPacket
   ) where
 
-import Hans.IP4.Packet (IP4,getIP4,putIP4)
+import Hans.Addr (IP4,getIP4,putIP4)
 
 import           Control.Monad
 import           Data.Bits

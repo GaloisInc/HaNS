@@ -62,7 +62,7 @@ module Hans.Tcp.Tcb (
     mkTimeWaitTcb,
   ) where
 
-import           Hans.Addr (Addr)
+import           Hans.Addr (IP6)
 import           Hans.Buffer.Signal
 import qualified Hans.Buffer.Stream as Stream
 import           Hans.Config (HasConfig(..),Config(..))
@@ -247,7 +247,7 @@ data State = Listen
 
 -- Listening Sockets -----------------------------------------------------------
 
-data ListenTcb = ListenTcb { lSrc    :: !Addr
+data ListenTcb = ListenTcb { lSrc    :: !IP6
                            , lPort   :: !TcpPort
 
                              -- accept
@@ -258,7 +258,7 @@ data ListenTcb = ListenTcb { lSrc    :: !Addr
                            }
 
 -- | Create a new listening socket.
-newListenTcb :: Addr -> TcpPort -> Int -> IO ListenTcb
+newListenTcb :: IP6 -> TcpPort -> Int -> IO ListenTcb
 newListenTcb lSrc lPort aqFree =
   do lAccept       <- newIORef (AcceptQueue { aqTcbs = Seq.empty, .. })
      lAcceptSignal <- newSignal
@@ -272,7 +272,7 @@ newListenTcb lSrc lPort aqFree =
 
 -- | Create a child from a Syn request.
 createChild :: HasConfig cfg
-            => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo Addr -> Addr -> TcpHeader
+            => cfg -> TcpSeqNum -> ListenTcb -> RouteInfo IP6 -> IP6 -> TcpHeader
             -> (Tcb -> State -> IO ()) -- ^ On Established
             -> (Tcb -> State -> IO ()) -- ^ On Closed
             -> IO Tcb
@@ -401,8 +401,8 @@ data Tcb = Tcb { tcbParent :: Maybe ListenTcb
                , tcbRemotePort :: !TcpPort -- ^ Remote port
 
                  -- Routing information
-               , tcbRouteInfo :: !(RouteInfo Addr) -- ^ Cached routing
-               , tcbRemote    :: !Addr             -- ^ Remote host
+               , tcbRouteInfo :: !(RouteInfo IP6) -- ^ Cached routing
+               , tcbRemote    :: !IP6             -- ^ Remote host
 
                  -- Fragmentation information
                , tcbMss :: !(IORef Int64) -- ^ Maximum segment size
@@ -419,7 +419,7 @@ newTcb :: HasConfig state
        => state
        -> Maybe ListenTcb
        -> TcpSeqNum -- ^ ISS
-       -> RouteInfo Addr -> TcpPort -> Addr -> TcpPort
+       -> RouteInfo IP6 -> TcpPort -> IP6 -> TcpPort
        -> State
        -> Send.TSClock
        -> (Tcb -> State -> IO ())
@@ -528,8 +528,8 @@ data TimeWaitTcb = TimeWaitTcb { twSndNxt     :: !TcpSeqNum     -- ^ SND.NXT
                                , twRemotePort :: !TcpPort
 
                                  -- Routing information
-                               , twRouteInfo  :: !(RouteInfo Addr)
-                               , twRemote     :: !Addr
+                               , twRouteInfo  :: !(RouteInfo IP6)
+                               , twRemote     :: !IP6
                                } deriving (Eq)
 
 mkTimeWaitTcb :: Tcb -> IO TimeWaitTcb

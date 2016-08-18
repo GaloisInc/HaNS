@@ -6,8 +6,7 @@ module Hans.Network (
     module Hans.Network.Types
   ) where
 
-import           Hans.Addr (NetworkAddr)
-import           Hans.Addr.Types (Addr(..))
+import           Hans.Addr (IsAddr,IP6,IP4,toIP4,toIP6)
 import           Hans.Checksum (PartialChecksum)
 import           Hans.Device.Types (Device)
 import qualified Hans.IP4        as IP4
@@ -20,7 +19,7 @@ import qualified Data.ByteString.Lazy as L
 
 
 -- | Interaction with routing and message delivery for a network layer.
-class NetworkAddr addr => Network addr where
+class IsAddr addr => Network addr where
   -- | Calculate the pseudo-header for checksumming a packet at this layer of
   -- the network.
   pseudoHeader :: addr -> addr -> NetworkProtocol -> Int -> PartialChecksum
@@ -85,24 +84,35 @@ findNextHop ns mbDev mbSrc dst =
 
 -- Generic ---------------------------------------------------------------------
 
-instance Network Addr where
-  pseudoHeader (Addr4 src) (Addr4 dst) = \ prot len -> pseudoHeader src dst prot len
-  {-# INLINE pseudoHeader #-}
+instance Network IP6 where
+  pseudoHeader src dst =
+    case (toIP4 src, toIP4 dst) of
+      (Just a, Just b)   -> pseudoHeader a b
+      (Nothing, Nothing) -> error "pseudoHeader: IP6 not implemented"
+      _                  -> error "pseudoHeader: src and dest are on different networks"
 
-  lookupRoute ns (Addr4 dst) =
-    do ri <- lookupRoute ns dst
-       return (fmap (fmap Addr4) ri)
+  lookupRoute ns dst =
+    case toIP4 dst of
+      Just ip4 ->
+        do ri <- lookupRoute ns ip4
+           return (fmap (fmap toIP6) ri)
+
+      Nothing ->
+           error "lookupRoute: IP6 not implemented"
   {-# INLINE lookupRoute #-}
 
-  sendDatagram' ns dev (Addr4 src) (Addr4 dst) (Addr4 next) =
-    sendDatagram' ns dev src dst next
+  sendDatagram' ns dev src dst next =
+    case (toIP4 src, toIP4 dst, toIP4 next) of
+      (Just a, Just b, Just c)    -> sendDatagram' ns dev a b c
+      (Nothing, Nothing, Nothing) -> error "sendDatagram': IP6 not implemented"
+      _                           -> error "sendDatagram': src dest or next on different networks"
   {-# INLINE sendDatagram' #-}
 
 
 
 -- IP4 -------------------------------------------------------------------------
 
-instance Network IP4.IP4 where
+instance Network IP4 where
   pseudoHeader = IP4.ip4PseudoHeader
   {-# INLINE pseudoHeader #-}
 

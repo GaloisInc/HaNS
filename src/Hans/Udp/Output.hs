@@ -9,7 +9,7 @@ module Hans.Udp.Output (
     queueUdp,
   ) where
 
-import Hans.Addr.Types (Addr)
+import Hans.Addr (IP6)
 import Hans.Checksum (finalizeChecksum,extendChecksum)
 import Hans.Device.Types (ChecksumOffload(..),txOffload)
 import Hans.Lens (view)
@@ -37,7 +37,7 @@ responder ns = forever $
   where
   chan = view udpQueue ns
 
-queueUdp :: NetworkStack -> RouteInfo Addr -> Addr -> UdpHeader -> L.ByteString
+queueUdp :: NetworkStack -> RouteInfo IP6 -> IP6 -> UdpHeader -> L.ByteString
          -> IO Bool
 queueUdp ns ri dst hdr body
     -- XXX should this record an error?

@@ -1,9 +1,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Hans.IP4.Dhcp.Codec where
 
+import Hans.Addr (IP4,IP4Mask,pattern IP4Mask,getIP4,putIP4,maskAddr,maskBits)
 import Hans.Ethernet (Mac,getMac,putMac)
-import Hans.IP4.Packet (IP4,IP4Mask(..),getIP4,putIP4)
 
 import Data.List (find)
 import Data.Serialize.Get
@@ -60,9 +61,9 @@ instance CodecAtom IP4Mask where
        SubnetMask mask <- getAtom
        return $! IP4Mask addr mask
 
-  putAtom (IP4Mask addr mask) =
-    do putAtom addr
-       putAtom (SubnetMask mask)
+  putAtom m =
+    do putAtom (maskAddr m)
+       putAtom (SubnetMask (maskBits m))
 
   atomSize _    = atomSize (undefined :: IP4)
                 + atomSize (undefined :: SubnetMask)

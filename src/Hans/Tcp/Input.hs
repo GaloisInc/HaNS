@@ -5,7 +5,7 @@ module Hans.Tcp.Input (
     processTcp
   ) where
 
-import Hans.Addr (Addr,NetworkAddr(..))
+import Hans.Addr (IP6,IsAddr(..))
 import Hans.Checksum (finalizeChecksum,extendChecksum)
 import Hans.Config (config)
 import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
@@ -43,13 +43,13 @@ processTcp ns dev src dst bytes =
 
      (hdr,payload) <- decode' (devStats dev) getTcpHeader bytes
 
-     let remote = toAddr src
-     let local  = toAddr dst
+     let remote = toIP6 src
+     let local  = toIP6 dst
 
      tryActive ns dev remote local hdr payload
 
 -- | A single case for an incoming segment.
-type InputCase = NetworkStack -> Device -> Addr -> Addr -> TcpHeader
+type InputCase = NetworkStack -> Device -> IP6 -> IP6 -> TcpHeader
               -> S.ByteString -> Hans ()
 
 -- | Process incoming segments that are destined for an active connection.
@@ -84,15 +84,19 @@ tryTimeWait ns dev remote local hdr payload =
 
 -- | Process incoming segments to a forwarded port.
 tryForward :: InputCase
-tryForward ns dev remote local hdr payload =
-  do mbHdr <- io (tryForwardTcp ns local remote hdr)
-     case mbHdr of
+tryForward ns dev remote local hdr payload
+  | Just local' <- fromIP6 local, Just remote' <- fromIP6 remote =
+    do mbHdr <- io (tryForwardTcp ns local' remote' hdr)
+       case mbHdr of
 
-       Just (ri,dst,hdr') -> io $
-         do _ <- queueTcp ns ri dst hdr' (L.fromStrict payload)
-            return ()
+         Just (ri,dst,hdr') -> io $
+           do _ <- queueTcp ns (fmap toIP6 ri) (toIP6 dst) hdr' (L.fromStrict payload)
+              return ()
 
-       Nothing            -> handleClosed ns dev remote local hdr payload
+         Nothing            -> handleClosed ns dev remote local hdr payload
+
+  | otherwise =
+       handleClosed ns dev remote local hdr payload
 {-# INLINE tryForward #-}
 
 
@@ -388,7 +392,7 @@ handleSynSent ns _dev hdr _payload tcb =
 -- | Respond to a segment directed at a socket in the Listen state. This
 -- implements the LISTEN case from pages 64-67 of RFC793.
 handleListening :: NetworkStack
-                -> Device -> Addr -> Addr -> TcpHeader -> S.ByteString
+                -> Device -> IP6 -> IP6 -> TcpHeader -> S.ByteString
                 -> ListenTcb -> Hans ()
 
 handleListening ns dev remote local hdr _payload tcb =
@@ -417,7 +421,7 @@ handleListening ns dev remote local hdr _payload tcb =
 
 
 -- | Create a child TCB from a listening one.
-createChildTcb :: NetworkStack -> Device -> Addr -> Addr -> TcpHeader -> ListenTcb
+createChildTcb :: NetworkStack -> Device -> IP6 -> IP6 -> TcpHeader -> ListenTcb
                -> Hans ()
 createChildTcb ns dev remote local hdr parent =
 
@@ -478,7 +482,7 @@ processSynOptions Tcb { .. } hdr =
 
 
 -- | Reject the SYN by sending an RST, drop the segment and return.
-rejectSyn :: NetworkStack -> Device -> Addr -> Addr -> TcpHeader -> Hans a
+rejectSyn :: NetworkStack -> Device -> IP6 -> IP6 -> TcpHeader -> Hans a
 rejectSyn ns dev remote local hdr =
   do hdr' <- io (mkRst hdr)
      _    <- io (routeTcp ns dev local remote hdr' L.empty)
@@ -541,7 +545,7 @@ handleTimeWait ns hdr payload tcb =
 -- | Respond to a segment that was directed at a closed port. This implements
 -- the CLOSED case on page 64 of RFC793
 handleClosed :: NetworkStack
-             -> Device -> Addr -> Addr -> TcpHeader -> S.ByteString -> Hans ()
+             -> Device -> IP6 -> IP6 -> TcpHeader -> S.ByteString -> Hans ()
 handleClosed ns dev remote local hdr payload =
   do when (view tcpRst hdr) escape
 

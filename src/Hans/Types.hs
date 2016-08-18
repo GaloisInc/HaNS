@@ -5,6 +5,7 @@ module Hans.Types (
     module Exports
   ) where
 
+import Hans.Addr (IP4)
 import Hans.Config (Config,HasConfig(..))
 import Hans.Device.Types (Device)
 import Hans.IP4.ArpTable as Exports (ArpTable)

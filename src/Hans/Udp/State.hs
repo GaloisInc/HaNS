@@ -15,7 +15,7 @@ module Hans.Udp.State (
     udpQueue,
   ) where
 
-import           Hans.Addr (NetworkAddr(..),Addr)
+import           Hans.Addr (IP6,wildcardAddr,toIP4,toIP6,isWildcard)
 import qualified Hans.Buffer.Datagram as DG
 import           Hans.Config
 import           Hans.Device.Types (Device)
@@ -31,20 +31,20 @@ import           Data.Hashable (Hashable)
 import           GHC.Generics (Generic)
 
 
-data Key = Key !Addr !UdpPort
+data Key = Key !IP6 !UdpPort
            deriving (Eq,Show,Generic)
 
 instance Hashable Key
 
 
-type UdpBuffer = DG.Buffer (Device,Addr,UdpPort,Addr,UdpPort)
+type UdpBuffer = DG.Buffer (Device,IP6,UdpPort,IP6,UdpPort)
 
 data UdpState = UdpState { udpRecv  :: !(HT.HashTable Key UdpBuffer)
                          , udpPorts :: !(MVar UdpPort)
                          , udpQueue_:: !(BC.BoundedChan UdpResponderRequest)
                          }
 
-data UdpResponderRequest = SendDatagram !(RouteInfo Addr) !Addr !UdpHeader !L.ByteString
+data UdpResponderRequest = SendDatagram !(RouteInfo IP6) !IP6 !UdpHeader !L.ByteString
 
 
 newUdpState :: Config -> IO UdpState
@@ -66,7 +66,7 @@ udpQueue :: HasUdpState state => Getting r state (BC.BoundedChan UdpResponderReq
 udpQueue  = udpState . to udpQueue_
 
 lookupRecv :: HasUdpState state
-           => state -> Addr -> UdpPort -> IO (Maybe UdpBuffer)
+           => state -> IP6 -> UdpPort -> IO (Maybe UdpBuffer)
 lookupRecv state addr dstPort =
   do mb <- HT.lookup (Key addr dstPort) (udpRecv (view udpState state))
      case mb of
@@ -75,16 +75,25 @@ lookupRecv state addr dstPort =
        Just _  -> return mb
 
        -- try the generic receiver for that port
-       Nothing -> do
-         mb' <- HT.lookup (Key (wildcardAddr addr) dstPort)
-                          (udpRecv (view udpState state))
-         return mb'
+       Nothing ->
+         case toIP4 addr of
+
+           Just ip4 ->
+             do mb' <- HT.lookup (Key (toIP6 (wildcardAddr ip4)) dstPort)
+                                 (udpRecv (view udpState state))
+                case mb' of
+                  Just{}  -> return mb'
+                  Nothing -> HT.lookup (Key (wildcardAddr addr) dstPort)
+                                       (udpRecv (view udpState state))
+
+           Nothing -> HT.lookup (Key (wildcardAddr addr) dstPort)
+                                (udpRecv (view udpState state))
 
 
 -- | Register a listener for messages to this address and port, returning 'Just'
 -- an action to unregister the listener on success.
 registerRecv :: HasUdpState state
-             => state -> Addr -> UdpPort -> UdpBuffer -> IO (Maybe (IO ()))
+             => state -> IP6 -> UdpPort -> UdpBuffer -> IO (Maybe (IO ()))
 registerRecv state addr srcPort buf =
   do registered <- HT.alter update key table
      if registered
@@ -101,13 +110,13 @@ registerRecv state addr srcPort buf =
 
 -- Port Management -------------------------------------------------------------
 
-nextUdpPort :: HasUdpState state => state -> Addr -> IO (Maybe UdpPort)
+nextUdpPort :: HasUdpState state => state -> IP6 -> IO (Maybe UdpPort)
 nextUdpPort state addr =
   modifyMVar udpPorts (pickFreshPort udpRecv addr)
   where
   UdpState { .. } = view udpState state
 
-pickFreshPort :: HT.HashTable Key UdpBuffer -> Addr -> UdpPort
+pickFreshPort :: HT.HashTable Key UdpBuffer -> IP6 -> UdpPort
               -> IO (UdpPort, Maybe UdpPort)
 pickFreshPort ht addr p0 = go 0 p0
   where
@@ -116,8 +125,13 @@ pickFreshPort ht addr p0 = go 0 p0
   mkKey2 = Key (wildcardAddr addr)
 
   check
-    | isWildcardAddr addr = \port -> HT.hasKey (mkKey1 port) ht
-    | otherwise           = \port ->
+    | isWildcard addr = \port ->
+         HT.hasKey (mkKey1 port) ht
+
+    | Just ip4 <- toIP4 addr, isWildcard ip4 = \port ->
+         HT.hasKey (mkKey1 port) ht
+
+    | otherwise = \port ->
       do used <- HT.hasKey (mkKey1 port) ht
          if not used
             then HT.hasKey (mkKey2 port) ht

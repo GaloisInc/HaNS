@@ -6,7 +6,7 @@
 
 module Hans.IP4.Packet where
 
-import Hans.Addr (IP4,getIP4,putIP4)
+import Hans.Addr (IP4,getIP4,putIP4,pattern WildcardIP4)
 import Hans.Checksum
            (Checksum(..),PartialChecksum,Pair8(..),emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
@@ -20,16 +20,13 @@ import           Data.Bits as B
                      ,complement)
 import qualified Data.ByteString.Short as Sh
 import qualified Data.ByteString.Lazy as L
-import           Data.Hashable (Hashable)
 import           Data.Int (Int64)
 import           Data.Serialize
-                    (Get,getWord8,getWord16be,getWord32be,getShortByteString
-                    ,label,isolate,Serialize(..)
-                    ,Putter,Put,putWord8,putWord16be,putWord32be
+                    (Get,getWord8,getWord16be,getShortByteString
+                    ,label,isolate
+                    ,Putter,Put,putWord8,putWord16be
                     ,putLazyByteString,putShortByteString)
-import           Data.Typeable (Typeable)
-import           Data.Word (Word8,Word16,Word32)
-import           GHC.Generics (Generic)
+import           Data.Word (Word8,Word16)
 
 
 -- IP4 Pseudo Header -----------------------------------------------------------
@@ -76,8 +73,8 @@ emptyIP4Header  = IP4Header
   , ip4TimeToLive     = 127
   , ip4Protocol       = 0
   , ip4Checksum       = 0
-  , ip4SourceAddr     = IP4 0
-  , ip4DestAddr       = IP4 0
+  , ip4SourceAddr     = WildcardIP4
+  , ip4DestAddr       = WildcardIP4
   , ip4Options        = []
   }
 

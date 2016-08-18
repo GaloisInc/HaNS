@@ -5,11 +5,10 @@ module Hans.Udp.Input (
     processUdp
   ) where
 
-import           Hans.Addr (Addr,toAddr)
+import           Hans.Addr (IP6,IP4,toIP6,fromIP6)
 import qualified Hans.Buffer.Datagram as DG
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
-import           Hans.IP4.Packet (IP4)
 import           Hans.Lens (view)
 import           Hans.Monad (Hans,decode',dropPacket,io)
 import           Hans.Nat.Forward (tryForwardUdp)
@@ -40,13 +39,13 @@ processUdp ns dev src dst bytes =
 
      ((hdr,payloadLen),payload) <- decode' (devStats dev) getUdpHeader bytes
 
-     let local  = toAddr dst
-         remote = toAddr src
+     let local  = toIP6 dst
+         remote = toIP6 src
 
      -- attempt to find a destination for this packet
      io (routeMsg ns dev local remote hdr (S.take payloadLen payload))
 
-routeMsg :: NetworkStack -> Device -> Addr -> Addr -> UdpHeader -> S.ByteString -> IO Bool
+routeMsg :: NetworkStack -> Device -> IP6 -> IP6 -> UdpHeader -> S.ByteString -> IO Bool
 routeMsg ns dev local remote hdr payload =
   do mb <- lookupRecv ns remote (udpDestPort hdr)
      case mb of
@@ -57,8 +56,10 @@ routeMsg ns dev local remote hdr payload =
             return True
 
        -- Check to see if there's a forwarding rule to use
-       Nothing ->
-         do mbFwd <- tryForwardUdp ns local remote hdr
+       Nothing | Just local' <- fromIP6 local, Just remote' <- fromIP6 remote ->
+         do mbFwd <- tryForwardUdp ns local' remote' hdr
             case mbFwd of
-              Just (ri,dst',hdr') -> queueUdp ns ri dst' hdr' (L.fromStrict payload)
+              Just (ri,dst',hdr') -> queueUdp ns (fmap toIP6 ri) (toIP6 dst') hdr' (L.fromStrict payload)
               Nothing             -> return False
+
+       _ -> return False

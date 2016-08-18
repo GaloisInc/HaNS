@@ -15,11 +15,11 @@ module Hans.IP4.ArpTable (
 
   ) where
 
+import           Hans.Addr (IP4)
 import           Hans.Config (Config(..))
 import           Hans.Device.Types (DeviceStats,updateError,statTX)
 import           Hans.Ethernet (Mac)
 import qualified Hans.HashTable as HT
-import           Hans.IP4.Packet (IP4)
 import           Hans.Threads (forkNamed)
 import           Hans.Time (toUSeconds)
 

@@ -60,7 +60,6 @@ library
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans
                                 Hans.Addr
-                                Hans.Addr.Types
                                 Hans.Checksum
                                 Hans.Config
                                 Hans.Device

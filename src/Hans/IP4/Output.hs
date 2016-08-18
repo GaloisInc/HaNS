@@ -12,6 +12,7 @@ module Hans.IP4.Output (
     portUnreachable,
   ) where
 
+import Hans.Addr (IP4,pattern BroadcastIP4)
 import Hans.Checksum (computeChecksum)
 import Hans.Config (config,Config(..))
 import Hans.Device

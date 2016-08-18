@@ -5,9 +5,9 @@
 
 module Hans.Dns where
 
+import Hans.Addr
 import Hans.Config
 import Hans.Dns.Packet
-import Hans.IP4.Packet
 import Hans.Lens
 import Hans.Serialize (runPutPacket)
 import Hans.Socket

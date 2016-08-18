@@ -13,12 +13,13 @@ module Hans.IP4.State (
     routesForDev,
   ) where
 
+import           Hans.Addr (IP4)
 import           Hans.Config (Config(..))
 import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
-import           Hans.IP4.Packet (IP4,IP4Ident)
+import           Hans.IP4.Packet (IP4Ident)
 import qualified Hans.IP4.RoutingTable as RT
 import           Hans.Lens
 import           Hans.Network.Types (NetworkProtocol)

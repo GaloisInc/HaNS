@@ -37,16 +37,16 @@ instance HasNetworkStack (TcpSocket addr) where
   networkStack = to tcpNS
 
 -- | Routing information for this socket.
-tcpRoute :: NetworkAddr addr => Getting r (TcpSocket addr) (RouteInfo addr)
+tcpRoute :: IsAddr addr => Getting r (TcpSocket addr) (RouteInfo addr)
 tcpRoute  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRouteInfo)
   where
   cast RouteInfo { .. } =
-    case (fromAddr riSource, fromAddr riNext) of
+    case (fromIP6 riSource, fromIP6 riNext) of
       (Just a,Just b) -> RouteInfo { riSource = a, riNext = b, .. }
       _               -> error "tcpRoute: invalid address combination"
 
 -- | The source address of this socket.
-tcpLocalAddr :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpLocalAddr :: IsAddr addr => Getting r (TcpSocket addr) addr
 tcpLocalAddr  = tcpRoute . to riSource
 
 -- | The local port for this socket.
@@ -54,11 +54,11 @@ tcpLocalPort :: Getting r (TcpSocket addr) SockPort
 tcpLocalPort  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> tcbLocalPort )
 
 -- | The remote address of this socket.
-tcpRemoteAddr :: NetworkAddr addr => Getting r (TcpSocket addr) addr
+tcpRemoteAddr :: IsAddr addr => Getting r (TcpSocket addr) addr
 tcpRemoteAddr  = to (\ TcpSocket { tcpTcb = Tcb { .. } } -> cast tcbRemote)
   where
   cast addr =
-    case fromAddr addr of
+    case fromIP6 addr of
       Just a  -> a
       Nothing -> error "tcpRemoteHost: invalid remote address"
 
@@ -73,8 +73,8 @@ activeOpen :: Network addr
            => NetworkStack -> RouteInfo addr -> SockPort -> addr -> SockPort
            -> IO Tcb
 activeOpen ns ri srcPort dst dstPort =
-  do let ri'  = toAddr `fmap` ri
-         dst' = toAddr dst
+  do let ri'  = toIP6 `fmap` ri
+         dst' = toIP6 dst
 
      done <- newEmptyMVar
 
@@ -182,7 +182,7 @@ instance DataSocket TcpSocket where
        srcPort <- case mbSrcPort of
                     Just port -> return port
                     Nothing   ->
-                      do mb <- nextTcpPort tcpNS (toAddr (riSource ri)) (toAddr dst) dstPort
+                      do mb <- nextTcpPort tcpNS (toIP6 (riSource ri)) (toIP6 dst) dstPort
                          case mb of
                            Just port -> return port
                            Nothing   -> throwIO NoPortAvailable
@@ -229,7 +229,7 @@ instance ListenSocket TcpListenSocket where
 
   sListen ns SocketConfig { .. } src srcPort backlog =
     do let tlNS = view networkStack ns
-       tlTcb <- newListenTcb (toAddr src) srcPort backlog
+       tlTcb <- newListenTcb (toIP6 src) srcPort backlog
 
        created <- registerListening tlNS tlTcb
        unless created (throwIO AlreadyListening)

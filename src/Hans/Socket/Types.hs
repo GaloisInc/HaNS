@@ -4,7 +4,7 @@
 
 module Hans.Socket.Types where
 
-import Hans.Addr (isWildcardAddr)
+import Hans.Addr (isWildcard)
 import Hans.Device.Types (Device)
 import Hans.Network (Network(..),RouteInfo(..))
 import Hans.Types (HasNetworkStack,NetworkStack)
@@ -139,7 +139,7 @@ route' ns mbDev src dst =
   do mbRoute <- lookupRoute ns dst
      case mbRoute of
        Just ri | maybe True (riDev ri ==) mbDev
-                 && (src == riSource ri || isWildcardAddr src) ->
+                 && (src == riSource ri || isWildcard src) ->
                  return (Just ri)
 
        _ -> return Nothing

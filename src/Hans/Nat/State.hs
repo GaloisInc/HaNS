@@ -21,7 +21,7 @@ module Hans.Nat.State (
     tcpForwardingActive, addTcpSession, shouldForwardTcp,
   ) where
 
-import           Hans.Addr (Addr,isWildcardAddr)
+import           Hans.Addr (IP4,isWildcard)
 import           Hans.Config (Config(..))
 import           Hans.Lens (Getting,view)
 import           Hans.Network.Types (RouteInfo(..))
@@ -47,7 +47,7 @@ import           GHC.Generics (Generic)
 -- parameterized on the port type.
 data Flow local = Flow { flowLocal      :: !local
                        , flowLocalPort  :: !Word16
-                       , flowRemote     :: !Addr
+                       , flowRemote     :: !IP4
                        , flowRemotePort :: !Word16
                        } deriving (Functor,Eq,Ord,Generic,Show)
 
@@ -77,14 +77,14 @@ class HasNatState state where
 instance HasNatState NatState where
   natState = id
 
-data PortForward = PortForward { pfSourceAddr :: !Addr
+data PortForward = PortForward { pfSourceAddr :: !IP4
                                  -- ^ Local address to listen on
 
                                , pfSourcePort :: !Word16
                                  -- ^ The port on this network stack to
                                  -- forward
 
-                               , pfDestAddr :: !Addr
+                               , pfDestAddr :: !IP4
                                  -- ^ Destination machine to forward to
 
                                , pfDestPort :: !Word16
@@ -104,20 +104,20 @@ newNatState cfg =
 
 -- Nat Tables ------------------------------------------------------------------
 
-data Session = Session { sessLeft, sessRight :: !(Flow (RouteInfo Addr)) }
+data Session = Session { sessLeft, sessRight :: !(Flow (RouteInfo IP4)) }
 
 -- | Gives back the other end of the session.
-otherSide :: Flow Addr -> Session -> Flow (RouteInfo Addr)
+otherSide :: Flow IP4 -> Session -> Flow (RouteInfo IP4)
 otherSide flow Session { .. } =
   if flowRemote flow == flowRemote sessLeft
      && flowRemotePort flow == flowRemotePort sessLeft
      then sessRight else sessLeft
 
-sessionFlows :: Session -> (Flow Addr, Flow Addr)
+sessionFlows :: Session -> (Flow IP4, Flow IP4)
 sessionFlows Session { .. } = (fmap riSource sessLeft, fmap riSource sessRight)
 
 
-type Sessions = Q.HashPSQ (Flow Addr) UTCTime Session
+type Sessions = Q.HashPSQ (Flow IP4) UTCTime Session
 
 addSession :: UTCTime -> Session -> Sessions -> Sessions
 addSession age a q =
@@ -130,7 +130,7 @@ removeOldest q =
     Just (k,_,a,q') -> Q.delete (fmap riSource (otherSide k a)) q'
     Nothing         -> q
 
-removeSession :: Flow Addr -> Sessions -> Maybe (Session,Sessions)
+removeSession :: Flow IP4 -> Sessions -> Maybe (Session,Sessions)
 removeSession flow q =
   case Q.deleteView flow q of
     Just (_,a,q') -> Just (a,Q.delete (fmap riSource (otherSide flow a)) q')
@@ -174,7 +174,7 @@ expireEntries now NatTable { .. } =
       Nothing -> (Q.empty, ())
 
 -- | Lookup and touch an entry in the NAT table.
-lookupNatTable :: Flow Addr -> NatTable -> IO (Maybe Session)
+lookupNatTable :: Flow IP4 -> NatTable -> IO (Maybe Session)
 lookupNatTable key NatTable { .. } =
   do now <- getCurrentTime
      atomicModifyIORef' natTable $ \ q ->
@@ -206,7 +206,7 @@ addTcpPortForward state rule =
      atomicModifyIORef' natTcpRules_ (\rs -> (rule : rs, ()))
 
 -- | Remove port forwarding for UDP based on source address and port number.
-removeTcpPortForward :: HasNatState state => state -> Addr -> TcpPort -> IO ()
+removeTcpPortForward :: HasNatState state => state -> IP4 -> TcpPort -> IO ()
 removeTcpPortForward state addr port =
   do let NatState { .. } = view natState state
      atomicModifyIORef' natTcpRules_ (\rs -> (filter keepRule rs, ()))
@@ -219,7 +219,7 @@ addUdpPortForward state rule =
      atomicModifyIORef' natUdpRules_ (\rs -> (rule : rs, ()))
 
 -- | Remove port forwarding for UDP based on source address and port number.
-removeUdpPortForward :: HasNatState state => state -> Addr -> UdpPort -> IO ()
+removeUdpPortForward :: HasNatState state => state -> IP4 -> UdpPort -> IO ()
 removeUdpPortForward state addr port =
   do let NatState { .. } = view natState state
      atomicModifyIORef' natUdpRules_ (\rs -> (filter keepRule rs, ()))
@@ -231,7 +231,7 @@ removeUdpPortForward state addr port =
 
 -- | Lookup information about an active forwarding session.
 tcpForwardingActive :: HasNatState state
-                    => state -> Flow Addr -> IO (Maybe Session)
+                    => state -> Flow IP4 -> IO (Maybe Session)
 tcpForwardingActive state key =
   do let NatState { .. } = view natState state
      lookupNatTable key natTcpTable_
@@ -239,7 +239,7 @@ tcpForwardingActive state key =
 
 -- | Lookup information about an active forwarding session.
 udpForwardingActive :: HasNatState state
-                    => state -> Flow Addr -> IO (Maybe Session)
+                    => state -> Flow IP4 -> IO (Maybe Session)
 udpForwardingActive state key =
   do let NatState { .. } = view natState state
      lookupNatTable key natUdpTable_
@@ -258,15 +258,15 @@ addUdpSession state sess =
   do let NatState { .. } = view natState state
      insertNatTable sess natUdpTable_
 
-ruleApplies :: Flow Addr -> PortForward -> Bool
+ruleApplies :: Flow IP4 -> PortForward -> Bool
 ruleApplies Flow { .. } = \ PortForward { .. } ->
   flowLocalPort == pfSourcePort &&
-  (flowLocal == pfSourceAddr || isWildcardAddr pfSourceAddr)
+  (flowLocal == pfSourceAddr || isWildcard pfSourceAddr)
 
 
 -- | Returns the forwarding rule to use, if this connection should be forwarded.
 shouldForwardTcp :: HasNatState state
-                 => state -> Flow Addr -> IO (Maybe PortForward)
+                 => state -> Flow IP4 -> IO (Maybe PortForward)
 shouldForwardTcp state flow =
   do let NatState { .. } = view natState state
      rules <- readIORef natTcpRules_
@@ -275,7 +275,7 @@ shouldForwardTcp state flow =
 
 -- | Returns the forwarding rule to use, if this session should be forwarded
 shouldForwardUdp :: HasNatState state
-                 => state -> Flow Addr -> IO (Maybe PortForward)
+                 => state -> Flow IP4 -> IO (Maybe PortForward)
 shouldForwardUdp state flow =
   do let NatState { .. } = view natState state
      rules <- readIORef natUdpRules_

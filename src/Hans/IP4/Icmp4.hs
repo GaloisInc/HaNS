@@ -2,9 +2,9 @@
 
 module Hans.IP4.Icmp4 where
 
+import Hans.Addr (IP4,getIP4,putIP4)
 import Hans.Checksum (computeChecksum)
 import Hans.Device.Types (ChecksumOffload(..))
-import Hans.IP4.Packet (IP4,getIP4,putIP4)
 import Hans.Serialize (runPutPacket)
 
 import           Control.Monad (unless,when,replicateM,liftM2)

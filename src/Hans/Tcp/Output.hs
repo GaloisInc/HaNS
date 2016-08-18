@@ -22,7 +22,7 @@ module Hans.Tcp.Output (
     -- $notes
   ) where
 
-import           Hans.Addr.Types (Addr)
+import           Hans.Addr (IP6)
 import           Hans.Config (config)
 import           Hans.Checksum (finalizeChecksum,extendChecksum)
 import           Hans.Device.Types (Device(..),ChecksumOffload(..),txOffload)
@@ -180,7 +180,7 @@ responder ns = forever $
 --
 -- See note "No Retransmit Queue" ("Hans.Tcp.Output#no-retransmit-queue").
 queueTcp :: NetworkStack
-         -> RouteInfo Addr -> Addr -> TcpHeader -> L.ByteString -> IO Bool
+         -> RouteInfo IP6 -> IP6 -> TcpHeader -> L.ByteString -> IO Bool
 queueTcp ns ri dst hdr body =
   BC.tryWriteChan (view tcpQueue ns) $! SendSegment ri dst hdr body
 

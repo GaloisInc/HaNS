@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Hans (
     -- * Network Stack
@@ -17,25 +18,26 @@ module Hans (
     startDevice,
 
     -- * Network Layer
-    Addr(), sameFamily,
-    NetworkAddr(..),
+    IsAddr(..), IsMask(..),
     Network(..),
     RouteInfo(..),
 
     -- ** IP4
-    IP4.IP4(), IP4.packIP4, IP4.unpackIP4,
-    IP4.IP4Mask(..),
+    IP4(), packIP4, unpackIP4,
+    IP4Mask(), pattern IP4Mask,
     IP4.Route(..), IP4.RouteType(Direct,Indirect),
     addIP4Route,
 
+    -- ** IP6
+    IP6(), IP6Mask(..),
+
   ) where
 
-import           Hans.Addr (NetworkAddr(..),Addr(),sameFamily)
+import           Hans.Addr
 import           Hans.Config
 import           Hans.Device
 import           Hans.Device.Loopback
 import qualified Hans.IP4.State as IP4
-import qualified Hans.IP4.Packet as IP4
 import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
@@ -84,7 +86,7 @@ registerLoopback ns =
 
      -- add the route for 127.0.0.0/8
      addIP4Route ns False
-         IP4.Route { routeNetwork = IP4.IP4Mask (IP4.packIP4 127 0 0 1) 8
+         IP4.Route { routeNetwork = IP4Mask (packIP4 127 0 0 1) 8
                    , routeType    = IP4.Direct
                    , routeDevice  = lo }
 

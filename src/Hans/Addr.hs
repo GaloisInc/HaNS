@@ -5,16 +5,27 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE Rank2Types #-}
 
 module Hans.Addr (
   -- * Addresses
+  IsAddr(..),
 
   -- ** IPv6
-  IP6(),
+  IP6(), isIP4, toIP4,
+  getIP6, putIP6,
+
+  -- *** Unicast
+  interfaceIdentifier, routingPrefixSubnetId,
+
+  -- *** Link-local
+  linkLocalPrefix,
+
+  -- *** Multicast
+  multicast, multicastR, multicastP, multicastT,
 
   -- ** IPv4 Address
   IP4, pattern Addr4,
-  toIP6,
   getIP4, putIP4,
   packIP4, unpackIP4,
   showIP4, readIP4,
@@ -36,13 +47,14 @@ module Hans.Addr (
   ) where
 
 import Hans.Checksum (Checksum(..))
-import Hans.Lens (view,byte,set)
+import Hans.Lens as Lens (Getting,Lens',view,byte,set,bit,to)
 
-import Data.Bits ((.&.),(.|.),shiftR,bit,complement)
+import Data.Bits as Bits ((.&.),(.|.),shiftR,shiftL,bit,complement)
 import Data.Hashable (Hashable)
-import Data.Serialize (Serialize(..),Putter,Get,getWord32be,putWord32be)
+import Data.Serialize (Serialize(..),Putter,Get,getWord32be,putWord32be
+                      ,putWord64be,getWord64be)
 import Data.Typeable (Typeable)
-import Data.Word (Word8,Word32,Word64)
+import Data.Word (Word8,Word16,Word32,Word64)
 import GHC.Generics (Generic)
 import Numeric (readDec)
 
@@ -53,6 +65,12 @@ import Numeric (readDec)
 data IP6 = IP6 {-# UNPACK #-} !Word64
                {-# UNPACK #-} !Word64
            deriving (Eq,Ord,Show,Read,Generic,Typeable)
+
+front :: Lens' IP6 Word64
+front f = \ (IP6 a b) -> fmap (\ a' -> IP6 a' b) (f a)
+
+back :: Lens' IP6 Word64
+back f = \ (IP6 a b) -> fmap (\ b' -> IP6 a b') (f b)
 
 instance Hashable IP6
 
@@ -70,19 +88,77 @@ instance Eq IP6Mask where
 instance Hashable IP6Mask
 
 
+putIP6 :: Putter IP6
+putIP6 (IP6 a b) =
+  do putWord64be a
+     putWord64be b
+{-# INLINE putIP6 #-}
+
+getIP6 :: Get IP6
+getIP6  =
+  do a <- getWord64be
+     b <- getWord64be
+     return (IP6 a b)
+{-# INLINE getIP6 #-}
+
+interfaceIdentifier :: Lens' IP6 Word64
+interfaceIdentifier  = back
+{-# INLINE interfaceIdentifier #-}
+
+routingPrefixSubnetId :: Int -> Lens' IP6 (Word64,Word64)
+routingPrefixSubnetId len f =
+  let off  = 64 - min 64 (max 48 len)
+      mask = Bits.bit off - 1
+   in \ (IP6 a b) ->
+        fmap (\ (x,y) -> IP6 (x `shiftL` off .|. y .&. mask) b)
+             (f (a `shiftR` off, a .&. mask))
+{-# INLINE routingPrefixSubnetId #-}
+
+linkLocalPrefix :: Lens' IP6 Word16
+linkLocalPrefix f = \ (IP6 a b) ->
+  fmap (\w -> IP6 ((fromIntegral w `shiftL` 54) .|. (a .&. mask)) b)
+       (f (fromIntegral (a `shiftR` 54)))
+  where
+  mask = Bits.bit 54 - 1
+{-# INLINE linkLocalPrefix #-}
+
+-- Should this be a Lens'?
+multicast :: Getting r IP6 Bool
+multicast  = front . to l
+  where
+  mask = 0xff `shiftL` 56
+  l a  = a .&. mask == mask
+{-# INLINE multicast #-}
+
+multicastR :: Lens' IP6 Bool
+multicastR  = front . Lens.bit 54
+{-# INLINE multicastR #-}
+
+multicastP :: Lens' IP6 Bool
+multicastP  = front . Lens.bit 53
+{-# INLINE multicastP #-}
+
+multicastT :: Lens' IP6 Bool
+multicastT  = front . Lens.bit 52
+{-# INLINE multicastT #-}
+
 -- IPv4 Addresses --------------------------------------------------------------
 
-isIPv4 :: IP6 -> Maybe IP4
-isIPv4 addr@(IP6 0x0 w64) | w64 `shiftR` 32 == 0xffff = Just (IP4 addr)
-isIPv4 _                                              = Nothing
+isIP4 :: IP6 -> Bool
+isIP4 (IP6 0x0 w64) = w64 `shiftR` 32 == 0xffff
+isIP4 _             = False
 
-pattern Addr4 addr <- (isIPv4 -> Just addr)
+toIP4 :: IP6 -> Maybe IP4
+toIP4 addr | isIP4 addr = Just (IP4 addr)
+toIP4 _                 = Nothing
+
+pattern Addr4 addr <- (toIP4 -> Just addr)
   where
   Addr4 (IP4 addr) = addr
 
 
 newtype IP4 = IP4 IP6
-              deriving (Eq,Ord,Show,Read,Generic,Typeable,Checksum)
+              deriving (Eq,Ord,Show,Read,Generic,Typeable,Checksum,Hashable)
 
 instance Serialize IP4 where
   get = getIP4
@@ -94,10 +170,6 @@ pattern BroadcastIP4      = IP4 (IP6 0x0 0xffffffffffff)
 pattern CurrentNetworkIP4 = IP4 (IP6 0x0 0xffff00000000)
 pattern WildcardIP4       = IP4 (IP6 0x0 0xffff00000000)
 
-
-toIP6 :: IP4 -> IP6
-toIP6 (IP4 addr) = addr
-{-# INLINE toIP6 #-}
 
 fromIP4 :: Word32 -> IP6
 fromIP4 w32 = IP6 0x0 (0xffff00000000 .|. fromIntegral w32)
@@ -199,8 +271,8 @@ instance IsMask IP6Mask IP6 where
   hostmask i = IP6 a b
     where
     i' = 128 - i
-    a  = bit (max 0 (i' - 64)) - 1
-    b  = bit (max 0 i')        - 1
+    a  = Bits.bit (max 0 (i' - 64)) - 1
+    b  = Bits.bit (max 0 i')        - 1
 
   clearHostBits (IP6Mask (IP6 a b) bits) =
     case netmask bits of
@@ -233,11 +305,11 @@ instance IsMask IP6Mask IP6 where
 instance IsMask IP4Mask IP4 where
   toIP6Mask (IP4Mask_ mask) = mask
 
-  netmask i = IP4 (IP6 0x0 (0xffff00000000 .|. complement (bit i' - 1)))
+  netmask i = IP4 (IP6 0x0 (0xffff00000000 .|. complement (Bits.bit i' - 1)))
     where
     i' = 32 - i
 
-  hostmask i = IP4 (IP6 0x0 (0xffff00000000 .&. (bit i' - 1)))
+  hostmask i = IP4 (IP6 0x0 (0xffff00000000 .&. (Bits.bit i' - 1)))
     where
     i' = 32 - i
 
@@ -265,3 +337,47 @@ instance IsMask IP4Mask IP4 where
   {-# INLINE maskAddr #-}
   {-# INLINE maskBits #-}
   {-# INLINE isMember #-}
+
+
+class (Typeable addr, Eq addr) => IsAddr addr where
+  toIP6        :: addr -> IP6
+  fromIP6      :: IP6  -> Maybe addr
+  isWildcard   :: addr -> Bool
+  wildcardAddr :: addr -> addr
+
+  -- | Check to see if this is a broadcast/multicast address.
+  isBroadcast  :: addr -> Bool
+
+instance IsAddr IP6 where
+  toIP6   = id
+  fromIP6 = Just
+
+  isWildcard (IP6 0x0 0x0) = True
+  isWildcard _             = False
+
+  wildcardAddr _ = IP6 0x0 0x0
+
+  isBroadcast = view multicast
+
+  {-# INLINE toIP6 #-}
+  {-# INLINE fromIP6 #-}
+  {-# INLINE isWildcard #-}
+  {-# INLINE wildcardAddr #-}
+  {-# INLINE isBroadcast #-}
+
+instance IsAddr IP4 where
+  toIP6 (IP4 addr) = addr
+  fromIP6          = toIP4
+
+  isWildcard (IP4 (IP6 _ 0xffff00000000)) = True
+  isWildcard _                            = False
+
+  wildcardAddr _ = IP4 (IP6 0x0 0xffff00000000)
+
+  isBroadcast addr = addr == BroadcastIP4
+
+  {-# INLINE toIP6 #-}
+  {-# INLINE fromIP6 #-}
+  {-# INLINE isWildcard #-}
+  {-# INLINE wildcardAddr #-}
+  {-# INLINE isBroadcast #-}

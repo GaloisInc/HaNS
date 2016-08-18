@@ -3,7 +3,7 @@
 
 module Hans.Socket.Udp where
 
-import           Hans.Addr (toAddr,fromAddr,isBroadcastAddr)
+import           Hans.Addr (toIP6,fromIP6,isBroadcast)
 import qualified Hans.Buffer.Datagram as DGram
 import           Hans.Device.Types (Device)
 import           Hans.Lens (view,to)
@@ -55,7 +55,7 @@ newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
   do let udpNS = view networkStack ns
 
      srcPort <- case mbSrcPort of
-                 Nothing -> do mb <- nextUdpPort udpNS (toAddr src)
+                 Nothing -> do mb <- nextUdpPort udpNS (toIP6 src)
                                case mb of
                                  Just port -> return port
                                  Nothing   -> throwIO NoPortAvailable
@@ -68,7 +68,7 @@ newUdpSocket ns SocketConfig { .. } mbDev src mbSrcPort =
 
      -- XXX: Need some SocketError exceptions: this only happens if there's
      -- already something listening
-     mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
+     mbClose  <- registerRecv udpNS (toIP6 src) srcPort udpBuffer
      udpClose <- case mbClose of
                    Just unreg -> return unreg
                    Nothing    -> throwIO AlreadyListening
@@ -87,7 +87,7 @@ instance DataSocket UdpSocket where
 
        srcPort <- case mbPort of
                     Just p  -> return p
-                    Nothing -> do mb <- nextUdpPort udpNS (toAddr (riSource ri))
+                    Nothing -> do mb <- nextUdpPort udpNS (toIP6 (riSource ri))
                                   case mb of
                                     Just port -> return port
                                     Nothing   -> throwIO NoPortAvailable
@@ -96,7 +96,7 @@ instance DataSocket UdpSocket where
 
        udpBuffer <- DGram.newBuffer scRecvBufferSize
 
-       mbClose  <- registerRecv udpNS (toAddr src) srcPort udpBuffer
+       mbClose  <- registerRecv udpNS (toIP6 src) srcPort udpBuffer
        udpClose <- case mbClose of
                      Just unreg -> return unreg
                      Nothing    -> throwIO AlreadyConnected
@@ -152,7 +152,7 @@ recvfrom' UdpSocket { .. } = loop
   -- that we receive a packet destined for a different protocol address
   loop =
     do ((dev,srcAddr,srcPort,dstAddr,_), chunk) <- DGram.readChunk udpBuffer
-       case (fromAddr srcAddr, fromAddr dstAddr) of
+       case (fromIP6 srcAddr, fromIP6 dstAddr) of
          (Just srcAddr', Just dstAddr') ->
            return (dev,srcAddr',srcPort,dstAddr',L.fromStrict chunk)
          _ -> loop
@@ -176,7 +176,7 @@ sendto UdpSocket { .. } = \ dst dstPort bytes ->
 
               -- no route found, but we're broadcasting using a known device
               Nothing
-                | Just dev <- mbDev, isBroadcastAddr dst ->
+                | Just dev <- mbDev, isBroadcast dst ->
                   do let ri = RouteInfo { riSource = src
                                         , riNext   = dst
                                         , riDev    = dev }

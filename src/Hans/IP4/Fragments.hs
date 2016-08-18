@@ -7,6 +7,7 @@ module Hans.IP4.Fragments (
     processFragment,
   ) where
 
+import           Hans.Addr (IP4)
 import           Hans.Config
 import qualified Hans.HashTable as HT
 import           Hans.IP4.Packet
