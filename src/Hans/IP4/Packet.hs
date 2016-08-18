@@ -6,6 +6,7 @@
 
 module Hans.IP4.Packet where
 
+import Hans.Addr (IP4,getIP4,putIP4)
 import Hans.Checksum
            (Checksum(..),PartialChecksum,Pair8(..),emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
@@ -29,112 +30,6 @@ import           Data.Serialize
 import           Data.Typeable (Typeable)
 import           Data.Word (Word8,Word16,Word32)
 import           GHC.Generics (Generic)
-import           Numeric (readDec)
-
-
--- IP4 Addresses ---------------------------------------------------------------
-
-newtype IP4 = IP4 Word32
-              deriving (Eq,Ord,Show,Read,Hashable,Checksum,Typeable,Generic)
-
-instance Serialize IP4 where
-  get = getIP4
-  put = putIP4
-  {-# INLINE get #-}
-  {-# INLINE put #-}
-
-getIP4 :: Get IP4
-getIP4  =
-  do w <- getWord32be
-     return (IP4 w)
-
-putIP4 :: Putter IP4
-putIP4 (IP4 w) = putWord32be w
-
-packIP4 :: Word8 -> Word8 -> Word8 -> Word8 -> IP4
-packIP4 a b c d = IP4 $! set (byte 3) a
-                      $! set (byte 2) b
-                      $! set (byte 1) c
-                      $! set (byte 0) d 0
-{-# INLINE packIP4 #-}
-
-
-unpackIP4 :: IP4 -> (Word8,Word8,Word8,Word8)
-unpackIP4 (IP4 w) = ( view (byte 3) w
-                    , view (byte 2) w
-                    , view (byte 1) w
-                    , view (byte 0) w
-                    )
-{-# INLINE unpackIP4 #-}
-
-showIP4 :: IP4 -> ShowS
-showIP4 ip4 =
-  let (a,b,c,d) = unpackIP4 ip4
-   in shows a . showChar '.' .
-      shows b . showChar '.' .
-      shows c . showChar '.' .
-      shows d
-{-# INLINE showIP4 #-}
-
-readIP4 :: ReadS IP4
-readIP4 str =
-  do (a,'.':rest1) <- readDec str
-     (b,'.':rest2) <- readDec rest1
-     (c,'.':rest3) <- readDec rest2
-     (d,rest4)     <- readDec rest3
-     return (packIP4 a b c d, rest4)
-{-# INLINE readIP4 #-}
-
-
-pattern BroadcastIP4 = IP4 0xffffffff
-
-pattern CurrentNetworkIP4 = IP4 0x0
-
-pattern WildcardIP4 = IP4 0x0
-
-
--- IP4 Masks -------------------------------------------------------------------
-
-data IP4Mask = IP4Mask {-# UNPACK #-} !IP4
-                       {-# UNPACK #-} !Int -- ^ Between 0 and 32
-               deriving (Show,Read)
-
-instance Eq IP4Mask where
-  m1 == m2 = maskBits m1 == maskBits m2
-          && clearHostBits m1 == clearHostBits m2
-
-hostmask :: Int -> Word32
-hostmask bits = B.bit (32 - bits) - 1
-
-netmask :: Int -> Word32
-netmask bits = complement (hostmask bits)
-
-maskRange :: IP4Mask -> (IP4,IP4)
-maskRange mask = (clearHostBits mask, setHostBits mask)
-
-maskBits :: IP4Mask -> Int
-maskBits (IP4Mask _ bits) = bits
-
-maskAddr :: IP4Mask -> IP4
-maskAddr (IP4Mask addr _) = addr
-
-clearHostBits :: IP4Mask -> IP4
-clearHostBits (IP4Mask (IP4 addr) bits)= IP4 (addr .&. netmask bits)
-
-setHostBits :: IP4Mask -> IP4
-setHostBits (IP4Mask (IP4 addr) bits) = IP4 (addr .|. hostmask bits)
-
-broadcastAddress :: IP4Mask -> IP4
-broadcastAddress  = setHostBits
-
-readIP4Mask :: ReadS IP4Mask
-readIP4Mask str =
-  do (addr,'/':rest1) <- readIP4 str
-     (bits,rest2)     <- readDec rest1
-     return (IP4Mask addr bits, rest2)
-
-showIP4Mask :: IP4Mask -> ShowS
-showIP4Mask (IP4Mask addr bits) = showIP4 addr . showChar '/' . shows bits
 
 
 -- IP4 Pseudo Header -----------------------------------------------------------
