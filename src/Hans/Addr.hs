@@ -6,7 +6,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ViewPatterns #-}
 
-module Hans.Addr.Types (
+module Hans.Addr (
   -- * Addresses
 
   -- ** IPv6
@@ -14,6 +14,7 @@ module Hans.Addr.Types (
 
   -- ** IPv4 Address
   IP4, pattern Addr4,
+  toIP6,
   getIP4, putIP4,
   packIP4, unpackIP4,
   showIP4, readIP4,
@@ -25,15 +26,16 @@ module Hans.Addr.Types (
   IsMask(..),
 
   -- ** IPv6
-  IP6Mask(),
+  IP6Mask(..),
 
   -- ** IPv4
-  IP4Mask(),
+  IP4Mask(), pattern IP4Mask,
   broadcastAddress,
   readIP4Mask, showIP4Mask,
 
   ) where
 
+import Hans.Checksum (Checksum(..))
 import Hans.Lens (view,byte,set)
 
 import Data.Bits ((.&.),(.|.),shiftR,bit,complement)
@@ -54,6 +56,9 @@ data IP6 = IP6 {-# UNPACK #-} !Word64
 
 instance Hashable IP6
 
+instance Checksum IP6 where
+  extendChecksum (IP6 a b) = \pc -> extendChecksum a (extendChecksum b pc)
+  {-# INLINE extendChecksum #-}
 
 data IP6Mask = IP6Mask {-# UNPACK #-} !IP6
                        {-# UNPACK #-} !Int
@@ -77,7 +82,7 @@ pattern Addr4 addr <- (isIPv4 -> Just addr)
 
 
 newtype IP4 = IP4 IP6
-              deriving (Eq,Ord,Show,Read,Generic,Typeable)
+              deriving (Eq,Ord,Show,Read,Generic,Typeable,Checksum)
 
 instance Serialize IP4 where
   get = getIP4
@@ -89,6 +94,10 @@ pattern BroadcastIP4      = IP4 (IP6 0x0 0xffffffffffff)
 pattern CurrentNetworkIP4 = IP4 (IP6 0x0 0xffff00000000)
 pattern WildcardIP4       = IP4 (IP6 0x0 0xffff00000000)
 
+
+toIP6 :: IP4 -> IP6
+toIP6 (IP4 addr) = addr
+{-# INLINE toIP6 #-}
 
 fromIP4 :: Word32 -> IP6
 fromIP4 w32 = IP6 0x0 (0xffff00000000 .|. fromIntegral w32)
@@ -143,8 +152,12 @@ readIP4 str =
 {-# INLINE readIP4 #-}
 
 
-newtype IP4Mask = IP4Mask IP6Mask
+newtype IP4Mask = IP4Mask_ IP6Mask
                   deriving (Show,Read,Eq)
+
+pattern IP4Mask addr bits <- IP4Mask_ (IP6Mask (IP4 -> addr) bits)
+  where
+  IP4Mask (IP4 addr) bits = IP4Mask_ (IP6Mask addr bits)
 
 broadcastAddress :: IP4Mask -> IP4
 broadcastAddress  = setHostBits
@@ -153,7 +166,7 @@ readIP4Mask :: ReadS IP4Mask
 readIP4Mask str =
   do (IP4 addr,'/':rest1) <- readIP4 str
      (bits,rest2)         <- readDec rest1
-     return (IP4Mask (IP6Mask addr bits), rest2)
+     return (IP4Mask_ (IP6Mask addr bits), rest2)
 
 showIP4Mask :: IP4Mask -> ShowS
 showIP4Mask m = showIP4 (maskAddr m) . showChar '/' . shows (maskBits m)
@@ -162,24 +175,22 @@ showIP4Mask m = showIP4 (maskAddr m) . showChar '/' . shows (maskBits m)
 class IsMask mask addr | mask -> addr, addr -> mask where
   toIP6Mask     :: mask -> IP6Mask
 
-  mkMask        :: addr -> Int -> mask
-
   netmask       :: Int  -> addr
   hostmask      :: Int  -> addr
   clearHostBits :: mask -> addr
   setHostBits   :: mask -> addr
 
   maskRange     :: mask -> (addr,addr)
-  maskRange  mask = (clearHostBits mask, setHostBits mask)
+  maskRange m = (clearHostBits m, setHostBits m)
 
   maskAddr      :: mask -> addr
   maskBits      :: mask -> Int
 
+  isMember      :: mask -> addr -> Bool
+
 
 instance IsMask IP6Mask IP6 where
   toIP6Mask = id
-
-  mkMask = IP6Mask
 
   netmask i =
     case hostmask i of
@@ -203,45 +214,54 @@ instance IsMask IP6Mask IP6 where
 
   maskBits (IP6Mask _ bits) = bits
 
+  isMember (IP6Mask (IP6 a b) bits) =
+    let IP6 ma mb = netmask bits
+        pa        = a .&. ma
+        pb        = b .&. mb
+     in \ (IP6 x y) -> (x .&. ma) == pa && (y .&. mb) == pb
+
   {-# INLINE toIP6Mask #-}
-  {-# INLINE mkMask #-}
   {-# INLINE netmask #-}
   {-# INLINE hostmask #-}
   {-# INLINE clearHostBits #-}
   {-# INLINE setHostBits #-}
   {-# INLINE maskAddr #-}
   {-# INLINE maskBits #-}
+  {-# INLINE isMember #-}
 
 
 instance IsMask IP4Mask IP4 where
-  toIP6Mask (IP4Mask mask) = mask
+  toIP6Mask (IP4Mask_ mask) = mask
 
-  mkMask (IP4 addr) bits = IP4Mask (IP6Mask addr bits)
-
-  netmask i = IP4 (fromIP4 (complement (bit i' - 1)))
+  netmask i = IP4 (IP6 0x0 (0xffff00000000 .|. complement (bit i' - 1)))
     where
     i' = 32 - i
 
-  hostmask i = IP4 (fromIP4 (bit i' - 1))
+  hostmask i = IP4 (IP6 0x0 (0xffff00000000 .&. (bit i' - 1)))
     where
     i' = 32 - i
 
-  clearHostBits (IP4Mask (IP6Mask (IP6 _ b) bits)) =
+  clearHostBits (IP4Mask_ (IP6Mask (IP6 _ b) bits)) =
     case netmask bits of
       IP4 (IP6 _ mb) -> IP4 (IP6 0x0 (b .&. mb))
 
-  setHostBits (IP4Mask (IP6Mask (IP6 _ b) bits)) =
+  setHostBits (IP4Mask_ (IP6Mask (IP6 _ b) bits)) =
     case netmask bits of
       IP4 (IP6 _ mb) -> IP4 (IP6 0x0 (b .|. mb))
 
-  maskAddr (IP4Mask (IP6Mask addr _)) = IP4 addr
-  maskBits (IP4Mask (IP6Mask _ bits)) = bits
+  maskAddr (IP4Mask_ (IP6Mask addr _)) = IP4 addr
+  maskBits (IP4Mask_ (IP6Mask _ bits)) = bits
+
+  isMember (IP4Mask_ (IP6Mask (IP6 _ b) bits)) =
+    let IP4 (IP6 _ mb) = netmask bits
+        pb             = b .&. mb
+     in \ (IP4 (IP6 _ y)) -> (y .&. mb) == pb
 
   {-# INLINE toIP6Mask #-}
-  {-# INLINE mkMask #-}
   {-# INLINE netmask #-}
   {-# INLINE hostmask #-}
   {-# INLINE clearHostBits #-}
   {-# INLINE setHostBits #-}
   {-# INLINE maskAddr #-}
   {-# INLINE maskBits #-}
+  {-# INLINE isMember #-}
