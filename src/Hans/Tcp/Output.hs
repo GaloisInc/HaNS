@@ -141,7 +141,6 @@ sendWithTcb ns Tcb { .. } hdr body =
             when startRT (atomicModifyIORef' tcbTimers resetRetransmit)
 
             -- send the frame
-            putStrLn ("Payload size is " ++ show (L.length body'))
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
 
             -- return how much of the segment was actually delivered
