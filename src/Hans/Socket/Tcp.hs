@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -21,6 +22,7 @@ import           Control.Monad (unless,when)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 import           Data.Time.Clock (getCurrentTime)
+import           Data.Typeable(Typeable)
 import           System.CPUTime (getCPUTime)
 
 
@@ -29,6 +31,7 @@ import           System.CPUTime (getCPUTime)
 data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
                                 , tcpTcb :: !Tcb
                                 }
+ deriving (Typeable)
 
 instance HasNetworkStack (TcpSocket addr) where
   networkStack = to tcpNS
