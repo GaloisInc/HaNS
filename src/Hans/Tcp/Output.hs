@@ -11,6 +11,7 @@ module Hans.Tcp.Output (
     sendAck,
     sendFin,
     sendData,
+    canSend,
 
     -- ** From the fast-path
     queueTcp,
@@ -93,6 +94,12 @@ sendData ns tcb = go 0
         emptyTcpHeader
 
 
+-- | Determine if there is any room in the remote window for us to send
+-- data.
+canSend :: Tcb -> IO Bool
+canSend Tcb { .. } =
+  (not . Send.fullWindow) `fmap` readIORef tcbSendWindow
+
 -- | Send a segment and queue it in the remote window. The number of bytes that
 -- were sent is returned.
 sendWithTcb :: NetworkStack -> Tcb -> TcpHeader -> L.ByteString -> IO (Maybe Int64)
@@ -134,6 +141,7 @@ sendWithTcb ns Tcb { .. } hdr body =
             when startRT (atomicModifyIORef' tcbTimers resetRetransmit)
 
             -- send the frame
+            putStrLn ("Payload size is " ++ show (L.length body'))
             _ <- sendTcp ns tcbRouteInfo tcbRemote hdr' body'
 
             -- return how much of the segment was actually delivered

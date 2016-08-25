@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE RecordWildCards    #-}
+{-# LANGUAGE TypeFamilies       #-}
 
 module Hans.Socket.Tcp where
 
@@ -192,6 +192,9 @@ instance DataSocket TcpSocket where
        tcpTcb <- activeOpen tcpNS ri srcPort dst dstPort
        return TcpSocket { .. }
 
+  sCanWrite TcpSocket { .. } =
+    guardSend tcpTcb $ canSend tcpTcb
+
   -- segmentize the bytes, and return to the user the number of bytes that have
   -- been moved into the send window
   sWrite TcpSocket { .. } bytes =
@@ -201,6 +204,7 @@ instance DataSocket TcpSocket where
 
                           return $! fromIntegral len
 
+  sCanRead TcpSocket { .. }     = guardRecv tcpTcb (haveBytesAvail      tcpTcb)
   sRead    TcpSocket { .. } len = guardRecv tcpTcb (receiveBytes    len tcpTcb)
   sTryRead TcpSocket { .. } len = guardRecv tcpTcb (tryReceiveBytes len tcpTcb)
 

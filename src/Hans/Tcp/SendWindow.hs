@@ -9,6 +9,7 @@ module Hans.Tcp.SendWindow (
     sndUna,
     sndWnd,
     nullWindow,
+    fullWindow,
     flushWindow,
 
     -- ** Timestamp Clock
@@ -171,6 +172,10 @@ flushWindow Window { .. } = (Window { wRetransmitQueue = [], .. }, ())
 -- | True when the window is empty.
 nullWindow :: Window -> Bool
 nullWindow Window { .. } = null wRetransmitQueue
+
+-- | True when the window is full.
+fullWindow :: Window -> Bool
+fullWindow Window { .. } = wSndAvail == 0
 
 -- | The value of SND.NXT.
 --
