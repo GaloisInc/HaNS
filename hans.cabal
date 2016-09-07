@@ -1,5 +1,5 @@
 name:           hans
-version:        3.0.0.1
+version:        3.0.1
 cabal-version:  >= 1.18
 license:        BSD3
 license-file:   LICENSE
@@ -92,6 +92,7 @@ library
                                 Hans.Network.Types
                                 Hans.Serialize
                                 Hans.Socket
+                                Hans.Socket.Handle
                                 Hans.Tcp.Input
                                 Hans.Tcp.Message
                                 Hans.Tcp.Output
