@@ -17,7 +17,7 @@ import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Types
 
 import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar,yield)
-import           Control.Exception (throwIO)
+import           Control.Exception (throwIO, handle)
 import           Control.Monad (unless,when)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
@@ -193,7 +193,8 @@ instance DataSocket TcpSocket where
        return TcpSocket { .. }
 
   sCanWrite TcpSocket { .. } =
-    guardSend tcpTcb $ canSend tcpTcb
+    handle ((\ _ -> return False) :: (ConnectionException -> IO Bool)) $
+      guardSend tcpTcb (canSend tcpTcb)
 
   -- segmentize the bytes, and return to the user the number of bytes that have
   -- been moved into the send window
