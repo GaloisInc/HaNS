@@ -80,10 +80,10 @@ listenKey  = to (\ ListenTcb { .. } -> ListenKey lSrc lPort)
 {-# INLINE listenKey #-}
 
 
-data Key = Key !Addr    -- ^ Remote address
-               !TcpPort -- ^ Remote port
-               !Addr    -- ^ Local address
-               !TcpPort -- ^ Local port
+data Key = Key !Addr    -- Remote address
+               !TcpPort -- Remote port
+               !Addr    -- Local address
+               !TcpPort -- Local port
            deriving (Show,Eq,Ord,Generic)
 
 tcbKey :: Getting r Tcb Key
