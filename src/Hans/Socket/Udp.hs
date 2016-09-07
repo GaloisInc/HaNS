@@ -103,6 +103,12 @@ instance DataSocket UdpSocket where
 
        return UdpSocket { .. }
 
+  sCanWrite UdpSocket { .. } =
+    do path <- readIORef udpSockState
+       case path of
+         KnownRoute _ _ _ _ -> return True
+         KnownSource{}      -> return False
+
   sWrite UdpSocket { .. } bytes =
     do path <- readIORef udpSockState
        case path of
@@ -115,6 +121,9 @@ instance DataSocket UdpSocket where
 
          KnownSource{} ->
               throwIO NoConnection
+
+  sCanRead UdpSocket { .. } =
+    not `fmap` DGram.isEmptyBuffer udpBuffer
 
   sRead UdpSocket { .. } len =
     do (_,buf) <- DGram.readChunk udpBuffer

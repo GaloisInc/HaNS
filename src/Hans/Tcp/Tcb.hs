@@ -54,6 +54,7 @@ module Hans.Tcp.Tcb (
 
     -- ** Windowing
     queueBytes,
+    haveBytesAvail,
     receiveBytes, tryReceiveBytes,
 
     -- * TimeWait TCBs
@@ -483,6 +484,11 @@ finalizeTcb Tcb { .. } =
 -- | Queue bytes in the receive buffer.
 queueBytes :: S.ByteString -> Tcb -> IO ()
 queueBytes bytes Tcb { .. } = Stream.putBytes bytes tcbRecvBuffer
+
+-- | Determine if there are bytes in the receive buffer that can be read.
+haveBytesAvail :: Tcb -> IO Bool
+haveBytesAvail Tcb { .. } =
+  Stream.bytesAvailable tcbRecvBuffer
 
 -- | Remove data from the receive buffer, and move the right-side of the receive
 -- window. Reading 0 bytes indicates that the remote side has closed the

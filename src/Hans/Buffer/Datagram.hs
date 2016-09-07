@@ -6,13 +6,14 @@ module Hans.Buffer.Datagram (
     writeChunk,
     readChunk,
     tryReadChunk,
+    isEmptyBuffer
   ) where
 
 import Hans.Buffer.Signal
 
 import           Control.Monad (when)
 import qualified Data.ByteString as S
-import           Data.IORef (IORef,newIORef,atomicModifyIORef')
+import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
 import qualified Data.Sequence as Seq
 
 
@@ -68,6 +69,10 @@ tryReadChunk Buffer { .. } =
        Nothing ->
             return Nothing
 
+-- | See if the buffer is empty.
+isEmptyBuffer :: Buffer a -> IO Bool
+isEmptyBuffer Buffer { .. } =
+  (Seq.null . bufChunks) `fmap` readIORef bufContents
 
 -- Buffer State ----------------------------------------------------------------
 

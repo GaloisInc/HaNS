@@ -59,8 +59,18 @@ class Socket sock => DataSocket sock where
            -> SockPort       -- ^ Remote port
            -> IO (sock addr)
 
+  -- | Returns True iff there is currently space in the buffer to accept a
+  -- write. Note, this is probably a bad thing to count on in a concurrent
+  -- system ...
+  sCanWrite :: Network addr => sock addr -> IO Bool
+
   -- | Send a chunk of data on a socket.
   sWrite :: Network addr => sock addr -> L.ByteString -> IO Int
+
+  -- | Returns True iff there is data in the buffer that can be read.
+  -- Note, this is probably a bad thing to count on in a concurrent
+  -- system ...
+  sCanRead :: Network addr => sock addr -> IO Bool
 
   -- | Read a chunk of data from a socket. Reading an empty result indicates
   -- that the socket has closed.

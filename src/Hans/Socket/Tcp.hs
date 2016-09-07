@@ -1,5 +1,6 @@
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE RecordWildCards    #-}
+{-# LANGUAGE TypeFamilies       #-}
 
 module Hans.Socket.Tcp where
 
@@ -16,11 +17,12 @@ import qualified Hans.Tcp.SendWindow as Send
 import           Hans.Types
 
 import           Control.Concurrent (newEmptyMVar,tryPutMVar,takeMVar,yield)
-import           Control.Exception (throwIO)
+import           Control.Exception (throwIO, handle)
 import           Control.Monad (unless,when)
 import qualified Data.ByteString.Lazy as L
 import           Data.IORef (readIORef)
 import           Data.Time.Clock (getCurrentTime)
+import           Data.Typeable(Typeable)
 import           System.CPUTime (getCPUTime)
 
 
@@ -29,6 +31,7 @@ import           System.CPUTime (getCPUTime)
 data TcpSocket addr = TcpSocket { tcpNS  :: !NetworkStack
                                 , tcpTcb :: !Tcb
                                 }
+ deriving (Typeable)
 
 instance HasNetworkStack (TcpSocket addr) where
   networkStack = to tcpNS
@@ -189,6 +192,10 @@ instance DataSocket TcpSocket where
        tcpTcb <- activeOpen tcpNS ri srcPort dst dstPort
        return TcpSocket { .. }
 
+  sCanWrite TcpSocket { .. } =
+    handle ((\ _ -> return False) :: (ConnectionException -> IO Bool)) $
+      guardSend tcpTcb (canSend tcpTcb)
+
   -- segmentize the bytes, and return to the user the number of bytes that have
   -- been moved into the send window
   sWrite TcpSocket { .. } bytes =
@@ -198,6 +205,7 @@ instance DataSocket TcpSocket where
 
                           return $! fromIntegral len
 
+  sCanRead TcpSocket { .. }     = guardRecv tcpTcb (haveBytesAvail      tcpTcb)
   sRead    TcpSocket { .. } len = guardRecv tcpTcb (receiveBytes    len tcpTcb)
   sTryRead TcpSocket { .. } len = guardRecv tcpTcb (tryReceiveBytes len tcpTcb)
 
