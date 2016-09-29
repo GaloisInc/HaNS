@@ -171,7 +171,7 @@ awaitAck sock = go
 -- | Perform a DHCP Renew.
 renew :: NetworkStack -> DhcpConfig -> Device -> Offer -> IO ()
 renew ns cfg dev offer =
-  do sock <- newUdpSocket ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootps)
+  do sock <- newUdpSocket ns defaultSocketConfig (Just dev) WildcardIP4 (Just bootpc)
      _    <- dhcpRequest cfg dev sock offer
 
      return ()
