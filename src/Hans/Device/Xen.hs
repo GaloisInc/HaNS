@@ -10,13 +10,14 @@ import Hans.Types
 import           Control.Concurrent (newMVar,modifyMVar_,killThread)
 import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,tryWriteChan,readChan)
+import           Control.Exception(try)
 import           Control.Monad (forever)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
+import           Hypervisor.ErrorCodes(ErrorCode)
 import           Hypervisor.XenStore (XenStore)
 import           XenDevice.NIC (NIC,listNICs,openNIC,setReceiveHandler,sendPacket)
-
 
 listDevices :: XenStore -> IO [DeviceName]
 listDevices xs =
@@ -73,12 +74,15 @@ openDevice xs ns devName devConfig =
 -- NOTE: No way to update stats here, as we can't tell if sendPacket failed.
 xenSendLoop :: DeviceStats -> NIC -> BoundedChan L.ByteString -> IO ()
 xenSendLoop stats nic chan = forever $
-  do bs <- readChan chan
-     sendPacket nic bs
+  do bs  <- readChan chan
+     res <- try $ sendPacket nic bs
 
-     -- NOTE: sendPacket always succeeds
-     updateBytes   statTX stats (fromIntegral (L.length bs))
-     updatePackets statTX stats
+     case res :: Either ErrorCode () of
+       Right () ->
+         do updateBytes   statTX stats (fromIntegral (L.length bs))
+            updatePackets statTX stats
+       Left _ ->
+            updateError   statTX stats
 
 xenRecv :: NetworkStack -> Device -> L.ByteString -> IO ()
 xenRecv ns dev @ Device { .. } = \ bytes ->
