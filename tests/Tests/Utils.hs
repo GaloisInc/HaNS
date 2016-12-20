@@ -15,6 +15,5 @@ encodeDecodeIdentity put get gen =
 showReadIdentity :: (Eq a, Show a) => (a -> ShowS) -> ReadS a -> Gen a -> Property
 showReadIdentity sw rd gen =
   forAll gen $ \ a ->
-    case rd (sw a "") of
-      [(a',_)] -> a === a'
-      _        -> property False
+    disjoin (map (matches a) (rd (sw a "")))
+ where matches a (b,_) = a === b

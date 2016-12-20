@@ -14,6 +14,8 @@ module Hans.Addr (
   -- ** IPv6
   IP6(), isIP4, toIP4,
   getIP6, putIP6,
+  packIP6, unpackIP6,
+  showIP6, readIP6,
 
   -- *** Unicast
   interfaceIdentifier, routingPrefixSubnetId,
@@ -38,6 +40,7 @@ module Hans.Addr (
 
   -- ** IPv6
   IP6Mask(..),
+  readIP6Mask, showIP6Mask,
 
   -- ** IPv4
   IP4Mask(), pattern IP4Mask,
@@ -49,14 +52,18 @@ module Hans.Addr (
 import Hans.Checksum (Checksum(..))
 import Hans.Lens as Lens (Getting,Lens',view,byte,set,bit,to)
 
+import Control.Monad(void,unless)
 import Data.Bits as Bits ((.&.),(.|.),shiftR,shiftL,bit,complement)
+import Data.Char (isHexDigit,digitToInt)
+import Data.List (intercalate)
 import Data.Hashable (Hashable)
 import Data.Serialize (Serialize(..),Putter,Get,getWord32be,putWord32be
                       ,putWord64be,getWord64be)
 import Data.Typeable (Typeable)
 import Data.Word (Word8,Word16,Word32,Word64)
 import GHC.Generics (Generic)
-import Numeric (readDec)
+import Numeric (readDec,showHex)
+import Text.ParserCombinators.ReadP(ReadP,choice,option,char,satisfy,readP_to_S)
 
 
 -- IPv6 Addresses --------------------------------------------------------------
@@ -78,6 +85,142 @@ instance Checksum IP6 where
   extendChecksum (IP6 a b) = \pc -> extendChecksum a (extendChecksum b pc)
   {-# INLINE extendChecksum #-}
 
+packIP6 :: Word64 -> Word64 -> IP6
+packIP6 a b = IP6 a b
+{-# INLINE packIP6 #-}
+
+unpackIP6 :: IP6 -> (Word64, Word64)
+unpackIP6 (IP6 a b) = (a,b)
+{-# INLINE unpackIP6 #-}
+
+getIP6 :: Get IP6
+getIP6 = IP6 <$> getWord64be <*> getWord64be
+{-# INLINE getIP6 #-}
+
+putIP6 :: Putter IP6
+putIP6 (IP6 a b) =
+  do putWord64be a
+     putWord64be b
+{-# INLINE putIP6 #-}
+
+readIP6 :: ReadS IP6
+readIP6 = readP_to_S parseIP6
+
+parseIP6 :: ReadP IP6
+parseIP6 =
+  do listform <- choice [startsWithDouble, startsWithChunk]
+     unless (length listform == 8) $ fail "bad length"
+     let ([a,b,c,d],[e,f,g,h]) = splitAt 4 listform
+     return (IP6 (unsplit64 a b c d) (unsplit64 e f g h))
+ where
+  startsWithDouble :: ReadP [Word16]
+  startsWithDouble =
+    do doubleColon
+       option (replicate 8 0) $
+         do x      <- readIP6Chunk
+            result <- normalOperation [x]
+            let numZeros = 8 - length result
+            return (replicate numZeros 0 ++ result)
+  startsWithChunk :: ReadP [Word16]
+  startsWithChunk =
+    do chunk1 <- readIP6Chunk
+       doublePossible [chunk1]
+  doublePossible :: [Word16] -> ReadP [Word16]
+  doublePossible acc =
+    option (reverse acc) $
+      choice [hitDouble acc, hitSingle acc]
+  hitDouble :: [Word16] -> ReadP [Word16]
+  hitDouble acc =
+    do doubleColon
+       option (let numZeros = 8 - length acc
+                   zeros    = replicate numZeros 0
+               in reverse acc ++ zeros) $
+         do x    <- readIP6Chunk
+            rest <- normalOperation [x]
+            let numZeros = 8 - (length acc + length rest)
+                zeros    = replicate numZeros 0
+            return (reverse acc ++ zeros ++ rest)
+  hitSingle :: [Word16] -> ReadP [Word16]
+  hitSingle acc =
+    do void (char ':')
+       chunk <- readIP6Chunk
+       doublePossible (chunk : acc)
+  normalOperation :: [Word16] -> ReadP [Word16]
+  normalOperation acc =
+    option (reverse acc) $
+      do void (char ':')
+         chunk <- readIP6Chunk
+         normalOperation (chunk : acc)
+
+doubleColon :: ReadP ()
+doubleColon =
+  do void (char ':')
+     void (char ':')
+
+readIP6Chunk :: ReadP Word16
+readIP6Chunk =
+  do a <- hexDigit
+     option a $
+       do b <- hexDigit
+          let res2 = (a `shiftL` 4) + b
+          option res2 $
+            do c <- hexDigit
+               let res3 = (res2 `shiftL` 4) + c
+               option res3 $
+                 do d <- hexDigit
+                    return ((res3 `shiftL` 4) + d)
+
+hexDigit :: Integral a => ReadP a
+hexDigit =
+  do a <- satisfy isHexDigit
+     return (fromIntegral (digitToInt a))
+
+showIP6 :: IP6 -> ShowS
+showIP6 (IP6 x y) = 
+  let base     = split64 x ++ split64 y
+      zeroMap  = numZeros base
+      maxZeros = maximum (map snd zeroMap)
+      result   = go maxZeros zeroMap
+  in \ rest -> result ++ rest
+ where
+  go :: Int -> [(Word16, Int)] -> String
+  go _ [] = ""
+  go maxZeros ((0,count):rest) | count == maxZeros =
+    let nonZeros = drop (count - 1) rest
+        digits   = map fst nonZeros
+        restStr  = intercalate ":" (map showHex' digits)
+    in "::" ++ restStr
+  go maxZeros ((v,_):rest) =
+    let res = go maxZeros rest
+    in case res of
+         (':':_)             -> showHex v res
+         _       | null rest -> showHex v ""
+         _                   -> showHex v ":" ++ res
+  --
+  numZeros :: [Word16] -> [(Word16, Int)]
+  numZeros [] = []
+  numZeros (0:rest) =
+    let count = 1 + length (takeWhile (== 0) rest)
+    in (0, count) : numZeros rest
+  numZeros (v:rest) =
+    (v,0) : numZeros rest
+
+unsplit64 :: Word16 -> Word16 -> Word16 -> Word16 -> Word64
+unsplit64 a b c d =
+  ((fromIntegral a `shiftL` 48) .|.
+   (fromIntegral b `shiftL` 32) .|.
+   (fromIntegral c `shiftL` 16) .|.
+   (fromIntegral d))
+
+split64 :: Word64 -> [Word16]
+split64 x = [ fromIntegral (x `shiftR` 48)
+            , fromIntegral (x `shiftR` 32)
+            , fromIntegral (x `shiftR` 16)
+            , fromIntegral x ]
+
+showHex' :: (Show a, Integral a) => a -> String
+showHex' x = showHex x ""
+
 data IP6Mask = IP6Mask {-# UNPACK #-} !IP6
                        {-# UNPACK #-} !Int
                deriving (Ord,Show,Read,Generic,Typeable)
@@ -87,19 +230,14 @@ instance Eq IP6Mask where
 
 instance Hashable IP6Mask
 
+readIP6Mask :: ReadS IP6Mask
+readIP6Mask str =
+  do (addr,'/':rest1) <- readIP6 str
+     (bits,rest2)     <- readDec rest1
+     return (IP6Mask addr bits, rest2)
 
-putIP6 :: Putter IP6
-putIP6 (IP6 a b) =
-  do putWord64be a
-     putWord64be b
-{-# INLINE putIP6 #-}
-
-getIP6 :: Get IP6
-getIP6  =
-  do a <- getWord64be
-     b <- getWord64be
-     return (IP6 a b)
-{-# INLINE getIP6 #-}
+showIP6Mask :: IP6Mask -> ShowS
+showIP6Mask m = showIP6 (maskAddr m) . showChar '/' . shows (maskBits m)
 
 interfaceIdentifier :: Lens' IP6 Word64
 interfaceIdentifier  = back

@@ -1,5 +1,6 @@
 module Tests.IP4.Fragmentation where
 
+import Tests.Address
 import Tests.IP4.Packet
 import Tests.Network
 

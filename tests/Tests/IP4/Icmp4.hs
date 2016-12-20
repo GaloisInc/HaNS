@@ -1,6 +1,6 @@
 module Tests.IP4.Icmp4 where
 
-import Tests.IP4.Packet (arbitraryIP4)
+import Tests.Address(arbitraryIP4)
 import Tests.Utils
 
 import Hans.IP4.Icmp4

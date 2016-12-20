@@ -2,9 +2,10 @@
 
 module Tests.IP4.Packet where
 
+import Tests.Address (arbitraryIP4)
 import Tests.Ethernet (arbitraryMac)
 import Tests.Network (arbitraryProtocol)
-import Tests.Utils (encodeDecodeIdentity,showReadIdentity)
+import Tests.Utils (encodeDecodeIdentity)
 
 import Hans.IP4.Packet
 import Hans.Lens
@@ -18,22 +19,6 @@ import           Test.Tasty.QuickCheck (testProperty)
 
 
 -- Packet Generator Support ----------------------------------------------------
-
-arbitraryIP4 :: Gen IP4
-arbitraryIP4  =
-  do a <- arbitraryBoundedRandom
-     b <- arbitraryBoundedRandom
-     c <- arbitraryBoundedRandom
-     d <- arbitraryBoundedRandom
-     return $! packIP4 a b c d
-
-
-arbitraryIP4Mask :: Gen IP4Mask
-arbitraryIP4Mask  =
-  do addr <- arbitraryIP4
-     bits <- choose (0,32)
-     return (IP4Mask addr bits)
-
 
 arbitraryIdent :: Gen IP4Ident
 arbitraryIdent  = arbitraryBoundedRandom
@@ -106,28 +91,19 @@ arbitraryArpPacket  =
 
 packetTests :: TestTree
 packetTests  = testGroup "Packet"
-  [ testProperty "IP4 Address encode/decode" $
-    encodeDecodeIdentity putIP4 getIP4 arbitraryIP4
-
-  , let get =
-          do (hdr,20,0) <- getIP4Packet
-             return hdr
+  [ let get =
+         do (hdr,20,0) <- getIP4Packet
+            return hdr
 
         put hdr =
              putIP4Header hdr 0
 
-     in testProperty "Header encode/decode" $
-        encodeDecodeIdentity put get arbitraryIP4Header
+    in testProperty "Header encode/decode" $
+       encodeDecodeIdentity put get arbitraryIP4Header
 
   , testProperty "Option encode/decode" $
     encodeDecodeIdentity putIP4Option getIP4Option arbitraryIP4Option
 
   , testProperty "Arp Message encode/decode" $
     encodeDecodeIdentity putArpPacket getArpPacket arbitraryArpPacket
-
-  , testProperty "IP4 Addr read/show" $
-    showReadIdentity showIP4 readIP4 arbitraryIP4
-
-  , testProperty "IP4 Mask read/show" $
-    showReadIdentity showIP4Mask readIP4Mask arbitraryIP4Mask
   ]
