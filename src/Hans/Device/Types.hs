@@ -20,6 +20,7 @@ import           Data.Typeable (Typeable)
 type DeviceName = S.ByteString
 
 data ChecksumOffload = ChecksumOffload { coIP4   :: !Bool
+                                       , coIP6   :: !Bool
                                        , coUdp   :: !Bool
                                        , coTcp   :: !Bool
                                        , coIcmp4 :: !Bool
@@ -27,6 +28,7 @@ data ChecksumOffload = ChecksumOffload { coIP4   :: !Bool
 
 defaultChecksumOffload :: ChecksumOffload
 defaultChecksumOffload  = ChecksumOffload { coIP4   = False
+                                          , coIP6   = False
                                           , coUdp   = False
                                           , coTcp   = False
                                           , coIcmp4 = False }

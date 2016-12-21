@@ -24,6 +24,8 @@ import qualified Data.ByteString.Lazy as L
 
 {-# SPECIALIZE processUdp :: NetworkStack -> Device -> IP4 -> IP4
                           -> S.ByteString -> Hans Bool #-}
+{-# SPECIALIZE processUdp :: NetworkStack -> Device -> IP6 -> IP6
+                          -> S.ByteString -> Hans Bool #-}
 
 -- | Process a message destined for the UDP layer. When the message cannot be
 -- routed, 'False' is returned.

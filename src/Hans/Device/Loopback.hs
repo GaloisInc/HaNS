@@ -16,6 +16,7 @@ import Control.Concurrent.BoundedChan (newBoundedChan)
 newLoopbackDevice :: NetworkStack -> IO Device
 newLoopbackDevice _ns =
   do let noChecksum = ChecksumOffload { coIP4   = True
+                                      , coIP6   = True
                                       , coUdp   = True
                                       , coTcp   = True
                                       , coIcmp4 = True }

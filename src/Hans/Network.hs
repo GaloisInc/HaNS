@@ -11,6 +11,7 @@ import           Hans.Checksum (PartialChecksum)
 import           Hans.Device.Types (Device)
 import qualified Hans.IP4        as IP4
 import qualified Hans.IP4.State  as IP4
+import qualified Hans.IP6        as IP6
 import           Hans.Lens
 import           Hans.Network.Types
 import           Hans.Types
@@ -84,11 +85,13 @@ findNextHop ns mbDev mbSrc dst =
 
 -- Generic ---------------------------------------------------------------------
 
+-- XXX: (ACW) I'm not sure this guessing about whether or not things should be
+-- interpreted is a good idea. Actually, it seems like a bad idea.
 instance Network IP6 where
   pseudoHeader src dst =
     case (toIP4 src, toIP4 dst) of
       (Just a, Just b)   -> pseudoHeader a b
-      (Nothing, Nothing) -> error "pseudoHeader: IP6 not implemented"
+      (Nothing, Nothing) -> IP6.ip6PseudoHeader src dst
       _                  -> error "pseudoHeader: src and dest are on different networks"
 
   lookupRoute ns dst =

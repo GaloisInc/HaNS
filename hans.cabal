@@ -83,6 +83,9 @@ library
                                 Hans.IP4.Packet
                                 Hans.IP4.RoutingTable
                                 Hans.IP4.State
+                                Hans.IP6.Input
+                                Hans.IP6.Packet
+                                Hans.IP6.State
                                 Hans.Input
                                 Hans.Lens
                                 Hans.Monad
