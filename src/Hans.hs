@@ -38,10 +38,10 @@ import           Hans.Config
 import           Hans.Device
 import           Hans.Device.Loopback
 import qualified Hans.IP4.State as IP4
-import qualified Hans.IP4.RoutingTable as IP4 (Route(..),RouteType(..))
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Network
+import qualified Hans.Network.RoutingTable as IP4 (Route(..),RouteType(..))
 import           Hans.Threads (forkNamed)
 import           Hans.Types
 import qualified Hans.Tcp.Output as Tcp (responder)
@@ -108,6 +108,6 @@ addDevice ns devName devConfig =
 #endif
 
 -- | Add a route to the IP4 layer.
-addIP4Route :: NetworkStack -> Bool -> IP4.Route -> IO ()
+addIP4Route :: NetworkStack -> Bool -> IP4.Route IP4 IP4Mask -> IO ()
 addIP4Route NetworkStack { .. } = IP4.addRoute nsIP4State
 {-# INLINE addIP4Route #-}

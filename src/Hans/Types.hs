@@ -11,9 +11,9 @@ import Hans.Device.Types (Device)
 import Hans.IP4.ArpTable as Exports (ArpTable)
 import Hans.IP4.Packet
 import Hans.IP4.State as Exports
-import Hans.IP4.RoutingTable as Exports (RoutingTable)
 import Hans.Lens
 import Hans.Nat.State as Exports
+import Hans.Network.RoutingTable as Exports (RoutingTable)
 import Hans.Tcp.State as Exports
 import Hans.Udp.State as Exports
 

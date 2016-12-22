@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 
-module Hans.IP4.RoutingTable (
+module Hans.Network.RoutingTable (
     Route(..), RouteType(..),
     routeSource, routeNextHop,
     RoutingTable,
@@ -22,19 +22,20 @@ import Data.List (insertBy)
 import Data.Maybe (mapMaybe)
 
 
-data RouteType = Direct
-               | Indirect !IP4
-               | Loopback
+data RouteType addr = Direct
+                    | Indirect !addr
+                    | Loopback
 
-data Route = Route { routeNetwork :: {-# UNPACK #-} !IP4Mask
-                   , routeType    ::                !RouteType
-                   , routeDevice  ::                !Device
-                   }
+data (Eq mask, IsMask mask addr) => Route addr mask = Route {
+         routeNetwork :: !mask
+       , routeType    :: !(RouteType addr)
+       , routeDevice  :: !Device
+       }
 
-routeSource :: Route -> IP4
+routeSource :: IsMask mask addr => Route addr mask -> addr
 routeSource Route { .. } = maskAddr routeNetwork
 
-routeNextHop :: IP4 -> Route -> IP4
+routeNextHop :: IsMask mask addr => addr -> Route addr mask -> addr
 routeNextHop dest route =
   case routeType route of
     Direct           -> dest
@@ -42,41 +43,44 @@ routeNextHop dest route =
     Loopback         -> routeSource route
 
 
-data Rule = Rule { ruleTest  :: !(IP4 -> Bool)
-                 , ruleRoute :: !Route
-                 }
+data Rule addr mask = Rule { ruleTest  :: !(addr -> Bool)
+                           , ruleRoute :: !(Route addr mask)
+                           }
 
-ruleMaskLen :: Rule -> Int
+ruleMaskLen :: IsMask mask addr => Rule addr mask -> Int
 ruleMaskLen rule = maskBits (routeNetwork (ruleRoute rule))
 
-ruleSource :: Rule -> IP4
+ruleSource :: IsMask mask addr => Rule addr mask -> addr
 ruleSource rule = maskAddr (routeNetwork (ruleRoute rule))
 
-ruleDevice :: Rule -> Device
+ruleDevice :: IsMask mask addr => Rule addr mask -> Device
 ruleDevice rule = routeDevice (ruleRoute rule)
 
-mkRule :: Route -> Rule
+mkRule :: IsMask mask addr => Route addr mask -> Rule addr mask
 mkRule ruleRoute = Rule { ruleTest = isMember (routeNetwork ruleRoute), .. }
 
-routesTo :: Rule -> IP4 -> Bool
+routesTo :: Rule addr mask -> addr -> Bool
 routesTo Rule { .. } = ruleTest
 
 -- | Simple routing.
-data RoutingTable = RoutingTable { rtRules :: [Rule]
-                                   -- ^ Insertions must keep this list ordered
-                                   -- by the network prefix length, descending.
+data RoutingTable addr mask = RoutingTable {
+         rtRules :: [Rule addr mask]
+         -- ^ Insertions must keep this list ordered
+         -- by the network prefix length, descending.
 
-                                 , rtDefault :: !(Maybe Route)
-                                   -- ^ Optional default route.
-                                 }
+       , rtDefault :: !(Maybe (Route addr mask))
+         -- ^ Optional default route.
+       }
 
-empty :: RoutingTable
+empty :: RoutingTable addr mask
 empty  = RoutingTable { rtRules = [], rtDefault = Nothing }
 
-getRoutes :: RoutingTable -> [Route]
+getRoutes :: RoutingTable addr mask -> [Route addr mask]
 getRoutes RoutingTable { .. } = map ruleRoute rtRules
 
-addRule :: Bool -> Route -> RoutingTable -> RoutingTable
+addRule :: IsMask mask addr =>
+           Bool -> Route addr mask -> RoutingTable addr mask ->
+           RoutingTable addr mask
 addRule isDefault route RoutingTable { .. } =
   rule `seq`
     RoutingTable { rtRules   = insertBy maskLenDesc rule rtRules
@@ -92,7 +96,9 @@ addRule isDefault route RoutingTable { .. } =
 
   rule = mkRule route
 
-deleteRule :: IP4Mask -> RoutingTable -> RoutingTable
+deleteRule :: IsMask mask addr =>
+              mask -> RoutingTable addr mask ->
+              RoutingTable addr mask
 deleteRule mask RoutingTable { .. } =
   rules' `seq` def' `seq` RoutingTable { rtRules = rules', rtDefault = def' }
 
@@ -108,7 +114,7 @@ deleteRule mask RoutingTable { .. } =
       Just Route { .. } | routeNetwork == mask -> Nothing
       _                                        -> rtDefault
 
-lookupRoute :: IP4 -> RoutingTable -> Maybe Route
+lookupRoute :: addr -> RoutingTable addr mask -> Maybe (Route addr mask)
 lookupRoute dest RoutingTable { .. } = foldr findRoute rtDefault rtRules
   where
   findRoute rule continue
@@ -117,7 +123,9 @@ lookupRoute dest RoutingTable { .. } = foldr findRoute rtDefault rtRules
 
 -- | If the address given is the source address for a rule in the table, return
 -- the associated 'Device'.
-isLocal :: IP4 -> RoutingTable -> Maybe Route
+isLocal :: IsMask mask addr =>
+           addr -> RoutingTable addr mask ->
+           Maybe (Route addr mask)
 isLocal addr RoutingTable { .. } = foldr hasSource Nothing rtRules
   where
   hasSource rule continue
@@ -125,7 +133,9 @@ isLocal addr RoutingTable { .. } = foldr hasSource Nothing rtRules
     | otherwise               = continue
 
 -- | Give back routes that involve this device.
-routesForDev :: Device -> RoutingTable -> [Route]
+routesForDev :: IsMask mask addr =>
+                Device -> RoutingTable addr mask ->
+                [Route addr mask]
 routesForDev dev RoutingTable { .. } = mapMaybe usesDev rtRules
   where
   usesDev rule | ruleDevice rule == dev = Just (ruleRoute rule)

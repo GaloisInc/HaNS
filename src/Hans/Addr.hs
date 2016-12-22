@@ -382,7 +382,7 @@ showIP4Mask :: IP4Mask -> ShowS
 showIP4Mask m = showIP4 (maskAddr m) . showChar '/' . shows (maskBits m)
 
 
-class IsMask mask addr | mask -> addr, addr -> mask where
+class (Eq mask, Eq addr) => IsMask mask addr | mask -> addr, addr -> mask where
   toIP6Mask     :: mask -> IP6Mask
 
   netmask       :: Int  -> addr

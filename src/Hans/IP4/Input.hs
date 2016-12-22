@@ -16,9 +16,9 @@ import Hans.IP4.Fragments (processFragment)
 import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet)
 import Hans.IP4.Output (queueIcmp4,portUnreachable)
 import Hans.IP4.Packet
-import Hans.IP4.RoutingTable (Route(..))
 import Hans.Lens (view)
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
+import Hans.Network.RoutingTable (Route(..))
 import Hans.Network.Types
 import Hans.Serialize (runPutPacket)
 import Hans.Types

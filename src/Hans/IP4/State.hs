@@ -13,15 +13,15 @@ module Hans.IP4.State (
     routesForDev,
   ) where
 
-import           Hans.Addr (IP4)
+import           Hans.Addr (IP4, IP4Mask)
 import           Hans.Config (Config(..))
 import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
 import           Hans.IP4.Fragments (FragTable,newFragTable)
 import           Hans.IP4.Packet (IP4Ident)
-import qualified Hans.IP4.RoutingTable as RT
 import           Hans.Lens
+import qualified Hans.Network.RoutingTable as RT
 import           Hans.Network.Types (NetworkProtocol)
 
 
@@ -50,7 +50,7 @@ data ResponderRequest = Finish !Device !Mac [L.ByteString]
                        -- ^ Send this IP4 payload to this address
 
 
-data IP4State = IP4State { ip4Routes :: !(IORef RT.RoutingTable)
+data IP4State = IP4State { ip4Routes :: !(IORef (RT.RoutingTable IP4 IP4Mask))
                            -- ^ Addresses currently assigned to devices.
 
                          , ip4ArpTable :: !ArpTable
@@ -88,7 +88,7 @@ instance HasIP4State IP4State where
   {-# INLINE ip4State #-}
 
 
-addRoute :: HasIP4State state => state -> Bool -> RT.Route -> IO ()
+addRoute :: HasIP4State state => state -> Bool -> RT.Route IP4 IP4Mask -> IO ()
 addRoute state = \ defRoute route ->
   atomicModifyIORef' ip4Routes (\ table -> (RT.addRule defRoute route table, ()))
   where
@@ -109,7 +109,9 @@ lookupRoute4 state = \ dest ->
 
 
 -- | Is this an address that's assigned to a device in the network stack?
-isLocalAddr :: HasIP4State state => state -> IP4 -> IO (Maybe RT.Route)
+isLocalAddr :: HasIP4State state =>
+               state -> IP4 ->
+               IO (Maybe (RT.Route IP4 IP4Mask))
 isLocalAddr state = \ dst ->
   do rt <- readIORef ip4Routes
      return $! RT.isLocal dst rt
@@ -126,7 +128,9 @@ nextIdent state =
 
 
 -- | Give back the list of routing rules associated with this device.
-routesForDev :: HasIP4State state => state -> Device -> IO [RT.Route]
+routesForDev :: HasIP4State state =>
+                state -> Device ->
+                IO [RT.Route IP4 IP4Mask]
 routesForDev state dev =
   do routes <- readIORef (ip4Routes (view ip4State state))
      return $! RT.routesForDev dev routes

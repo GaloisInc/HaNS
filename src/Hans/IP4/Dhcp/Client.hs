@@ -13,8 +13,8 @@ import Hans.Device.Types (Device(devMac))
 import Hans.IP4.Dhcp.Codec (SubnetMask(..))
 import Hans.IP4.Dhcp.Packet
 import Hans.IP4.Dhcp.Options
-import Hans.IP4.RoutingTable(Route(..),RouteType(..))
 import Hans.Lens
+import Hans.Network.RoutingTable(Route(..),RouteType(..))
 import Hans.Socket
            (UdpSocket,newUdpSocket,sClose,sendto,recvfrom,SockPort
            ,defaultSocketConfig)

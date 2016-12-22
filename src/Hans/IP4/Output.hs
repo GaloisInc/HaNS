@@ -27,8 +27,8 @@ import Hans.IP4.ArpTable
 import Hans.IP4.Icmp4
            (Icmp4Packet(..),DestinationUnreachableCode(..),renderIcmp4Packet)
 import Hans.IP4.Packet
-import Hans.IP4.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Lens
+import Hans.Network.RoutingTable (Route(..),routeSource,routeNextHop)
 import Hans.Network.Types
 import Hans.Serialize (runPutPacket)
 import Hans.Threads (forkNamed)
