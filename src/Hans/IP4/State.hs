@@ -18,9 +18,9 @@ import           Hans.Config (Config(..))
 import           Hans.Device.Types (Device(..))
 import           Hans.Ethernet (Mac)
 import           Hans.IP4.ArpTable (ArpTable,newArpTable)
-import           Hans.IP4.Fragments (FragTable,newFragTable)
-import           Hans.IP4.Packet (IP4Ident)
+import           Hans.IP4.Packet (IP4Ident, IP4Header)
 import           Hans.Lens
+import           Hans.Network.Fragments (FragTable,newFragTable)
 import qualified Hans.Network.RoutingTable as RT
 import           Hans.Network.Types (NetworkProtocol)
 
@@ -56,7 +56,7 @@ data IP4State = IP4State { ip4Routes :: !(IORef (RT.RoutingTable IP4 IP4Mask))
                          , ip4ArpTable :: !ArpTable
                            -- ^ The ARP cache.
 
-                         , ip4Fragments :: !FragTable
+                         , ip4Fragments :: !(FragTable IP4 IP4Ident IP4Header)
                            -- ^ IP4 packet fragments
 
                          , ip4ArpRetry :: {-# UNPACK #-} !Int
@@ -73,7 +73,7 @@ newIP4State :: Config -> IO IP4State
 newIP4State cfg =
   do ip4Routes         <- newIORef RT.empty
      ip4ArpTable       <- newArpTable cfg
-     ip4Fragments      <- newFragTable cfg
+     ip4Fragments      <- newFragTable cfg "IP4"
      ip4ResponderQueue <- BC.newBoundedChan 32
      ip4RandomSeed     <- newIORef =<< newStdGen
      return IP4State { ip4ArpRetry      = cfgArpRetry cfg

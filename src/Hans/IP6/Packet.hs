@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -10,6 +11,7 @@ import Hans.Addr (IP6,getIP6,putIP6,packIP6)
 import Hans.Checksum
            (Checksum(..),PartialChecksum,emptyPartialChecksum)
 import Hans.Lens as L
+import Hans.Network.Fragments(Fragmentable(..))
 import Hans.Network.Types (NetworkProtocol)
 
 import Control.Monad (unless)
@@ -136,3 +138,10 @@ putIP6Header IP6Header { .. } pktlen =
 
 
 type IP6Ident = Word32
+
+instance Fragmentable IP6 Word32 IP6Header where
+  mkKey hdr = (ip6SourceAddr hdr, ip6DestAddr hdr, ip6NextHeader hdr, undefined)
+  hdrMoreFragments = undefined
+  hdrFragOffset = undefined
+
+

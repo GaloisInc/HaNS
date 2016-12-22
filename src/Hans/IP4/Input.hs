@@ -12,12 +12,12 @@ import Hans.Checksum (computeChecksum)
 import Hans.Device (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Ethernet (Mac,pattern ETYPE_ARP,sendEthernet)
 import Hans.IP4.ArpTable (addEntry,lookupEntry)
-import Hans.IP4.Fragments (processFragment)
 import Hans.IP4.Icmp4 (Icmp4Packet(..),getIcmp4Packet)
 import Hans.IP4.Output (queueIcmp4,portUnreachable)
 import Hans.IP4.Packet
 import Hans.Lens (view)
 import Hans.Monad (Hans,io,dropPacket,escape,decode,decode')
+import Hans.Network.Fragments (processFragment)
 import Hans.Network.RoutingTable (Route(..))
 import Hans.Network.Types
 import Hans.Serialize (runPutPacket)

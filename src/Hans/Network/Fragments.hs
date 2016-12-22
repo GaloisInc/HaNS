@@ -1,17 +1,16 @@
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternGuards #-}
 
-module Hans.IP4.Fragments (
-    FragTable(),
+module Hans.Network.Fragments (
+    FragTable(), Fragmentable(..),
     newFragTable, cleanupFragTable,
     processFragment,
   ) where
 
-import           Hans.Addr (IP4)
 import           Hans.Config
 import qualified Hans.HashTable as HT
-import           Hans.IP4.Packet
-import           Hans.Lens (view)
 import           Hans.Monad
 import           Hans.Network.Types (NetworkProtocol)
 import           Hans.Threads (forkNamed)
@@ -20,42 +19,54 @@ import           Hans.Time (toUSeconds)
 import           Control.Concurrent (ThreadId,threadDelay,killThread)
 import           Control.Monad (forever)
 import qualified Data.ByteString as S
+import           Data.Hashable(Hashable)
 import           Data.Time.Clock
                      (UTCTime,getCurrentTime,NominalDiffTime,addUTCTime)
-
+import           Data.Word(Word16)
 
 -- | Keys are of the form @(src,dest,prot,ident)@.
-type Key = (IP4,IP4,NetworkProtocol,IP4Ident)
+type Key addr ident = (addr,addr,NetworkProtocol,ident)
 
-type Table  = HT.HashTable Key Buffer
+class (Eq addr, Eq ident, Hashable addr, Hashable ident) =>
+        Fragmentable addr ident hdr | hdr -> addr, hdr -> ident
+ where
+  mkKey            :: hdr -> Key addr ident
+  hdrMoreFragments :: hdr -> Bool
+  hdrFragOffset    :: hdr -> Word16
+
+type Table addr ident hdr = HT.HashTable (Key addr ident) (Buffer hdr)
 
 -- XXX: there isn't any way to limit the size of the fragment table right now.
-data FragTable = FragTable { ftEntries     :: !Table
-                           , ftDuration    :: !NominalDiffTime
-                           , ftPurgeThread :: !ThreadId
-                           }
+data FragTable addr ident hdr = FragTable {
+         ftEntries     :: !(Table addr ident hdr)
+       , ftDuration    :: !NominalDiffTime
+       , ftPurgeThread :: !ThreadId
+       }
 
-newFragTable :: Config -> IO FragTable
-newFragTable Config { .. } =
+newFragTable :: Fragmentable addr ident hdr =>
+                Config -> String ->
+                IO (FragTable addr ident hdr)
+newFragTable Config { .. } protName =
   do ftEntries     <- HT.newHashTable 31
-     ftPurgeThread <- forkNamed "IP4 Fragment Purge Thread"
+     ftPurgeThread <- forkNamed (protName ++ " Fragment Purge Thread")
                           (purgeEntries cfgIP4FragTimeout ftEntries)
      return FragTable { ftDuration = cfgIP4FragTimeout, .. }
 
 
-cleanupFragTable :: FragTable -> IO ()
+cleanupFragTable :: FragTable addr ident hdr -> IO ()
 cleanupFragTable FragTable { .. } = killThread ftPurgeThread
 
 
 -- | Handle an incoming fragment. If the fragment is buffered, but doesn't
 -- complete the packet, the escape continuation is invoked.
-processFragment :: FragTable -> IP4Header -> S.ByteString
-                -> Hans (IP4Header,S.ByteString)
+processFragment :: Fragmentable addr ident hdr =>
+                   FragTable addr ident hdr -> hdr -> S.ByteString
+                -> Hans (hdr,S.ByteString)
 
 processFragment FragTable { .. } hdr body
 
     -- no fragments
-  | not (view ip4MoreFragments hdr) && view ip4FragmentOffset hdr == 0 =
+  | not (hdrMoreFragments hdr) && (hdrFragOffset hdr) == 0 =
     return (hdr,body)
 
     -- fragment
@@ -78,7 +89,9 @@ processFragment FragTable { .. } hdr body
 -- Table Purging ---------------------------------------------------------------
 
 -- | Every second, purge the fragment table of entries that have expired.
-purgeEntries :: NominalDiffTime -> Table -> IO ()
+purgeEntries :: Fragmentable addr ident hdr =>
+                NominalDiffTime -> Table addr ident hdr ->
+                IO ()
 purgeEntries lifetime entries = forever $
   do threadDelay halfLife
 
@@ -94,33 +107,31 @@ purgeEntries lifetime entries = forever $
 -- INVARIANT: When new fragments are inserted into bufFragments, they are merged
 -- together when possible. This makes it easier to check the state of the whole
 -- buffer.
-data Buffer = Buffer { bufExpire    :: !UTCTime
-                     , bufSize      :: !(Maybe Int)
-                     , bufHeader    :: !(Maybe IP4Header)
-                     , bufFragments :: ![Fragment]
-                     }
+data Buffer hdr = Buffer { bufExpire    :: !UTCTime
+                         , bufSize      :: !(Maybe Int)
+                         , bufHeader    :: !(Maybe hdr)
+                         , bufFragments :: ![Fragment]
+                         }
 
 data Fragment = Fragment { fragStart   :: {-# UNPACK #-} !Int
                          , fragEnd     :: {-# UNPACK #-} !Int
                          , fragPayload ::                 [S.ByteString]
                          } deriving (Show)
 
-mkKey :: IP4Header -> Key
-mkKey IP4Header { .. } = (ip4SourceAddr,ip4DestAddr,ip4Protocol,ip4Ident)
-
-
-mkFragment :: IP4Header -> S.ByteString -> Fragment
+mkFragment :: Fragmentable addr ident hdr => hdr -> S.ByteString -> Fragment
 mkFragment hdr body = Fragment { .. }
   where
-  fragStart   = fromIntegral (view ip4FragmentOffset hdr)
+  fragStart   = fromIntegral (hdrFragOffset hdr)
   fragEnd     = fragStart + S.length body
   fragPayload = [body]
 
 
 -- | Create a buffer, given an expiration time, initial fragment, and
--- 'IP4Header' of that initial fragment. The initial header is included for the
+-- header of that initial fragment. The initial header is included for the
 -- case where the initial fragment is also the first fragment in the sequence.
-mkBuffer :: UTCTime -> IP4Header -> Fragment -> Buffer
+mkBuffer :: Fragmentable addr ident hdr =>
+            UTCTime -> hdr -> Fragment ->
+            Buffer hdr
 mkBuffer bufExpire hdr frag =
   addFragment hdr frag
   Buffer { bufHeader    = Nothing
@@ -134,8 +145,9 @@ mkBuffer bufExpire hdr frag =
 -- there's no result yet. When the first element is 'Nothing', the second will
 -- be 'Just', indicating that the entry should be removed from the table, and
 -- that this is the final buffer.
-updateBuffer :: UTCTime -> IP4Header -> Fragment -> Maybe Buffer
-               -> (Maybe Buffer,Maybe (IP4Header,S.ByteString))
+updateBuffer :: Fragmentable addr ident hdr =>
+                UTCTime -> hdr -> Fragment -> Maybe (Buffer hdr) ->
+                (Maybe (Buffer hdr), Maybe (hdr, S.ByteString))
 
 -- the entry already exists in the table, removing it if it's full
 updateBuffer _ hdr frag (Just buf) =
@@ -152,7 +164,7 @@ updateBuffer expire hdr frag Nothing =
 
 -- | When the buffer is full and all fragments are accounted for, reassemble it
 -- into a new packet.
-bufFull :: Buffer -> Maybe (IP4Header,S.ByteString)
+bufFull :: Buffer hdr -> Maybe (hdr, S.ByteString)
 bufFull Buffer { .. }
 
   | Just size <- bufSize
@@ -166,21 +178,23 @@ bufFull Buffer { .. }
 
 
 -- | Insert the fragment into the buffer.
-addFragment :: IP4Header -> Fragment -> Buffer -> Buffer
+addFragment :: Fragmentable addr ident hdr =>
+               hdr -> Fragment -> Buffer hdr ->
+               Buffer hdr
 addFragment hdr frag buf =
   Buffer { bufExpire    = bufExpire buf
          , bufSize      = size'
          , bufHeader    = case bufHeader buf of
-                            Nothing | view ip4FragmentOffset hdr == 0 -> Just hdr
-                            _                                         -> bufHeader buf
+                            Nothing | hdrFragOffset hdr == 0 -> Just hdr
+                            _                                -> bufHeader buf
 
          , bufFragments = insertFragment (bufFragments buf)
          }
 
   where
 
-  size' | view ip4MoreFragments hdr = bufSize buf
-        | otherwise                 = Just $! fragEnd frag
+  size' | hdrMoreFragments hdr = bufSize buf
+        | otherwise            = Just $! fragEnd frag
 
   insertFragment frags@(f:fs)
     | fragEnd   frag == fragStart f = mergeFragment frag f : fs

@@ -76,7 +76,6 @@ library
                                 Hans.IP4.Dhcp.Codec
                                 Hans.IP4.Dhcp.Packet
                                 Hans.IP4.Dhcp.Options
-                                Hans.IP4.Fragments
                                 Hans.IP4.Icmp4
                                 Hans.IP4.Input
                                 Hans.IP4.Output
@@ -90,6 +89,7 @@ library
                                 Hans.Monad
                                 Hans.Nat
                                 Hans.Network
+                                Hans.Network.Fragments
                                 Hans.Network.RoutingTable
                                 Hans.Network.Types
                                 Hans.Serialize

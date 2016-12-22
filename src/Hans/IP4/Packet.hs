@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -11,6 +12,7 @@ import Hans.Checksum
            (Checksum(..),PartialChecksum,Pair8(..),emptyPartialChecksum)
 import Hans.Ethernet (Mac,getMac,putMac,pattern ETYPE_IPV4)
 import Hans.Lens as L
+import Hans.Network.Fragments(Fragmentable(..))
 import Hans.Network.Types (NetworkProtocol)
 import Hans.Serialize (runPutPacket)
 
@@ -50,7 +52,6 @@ ip4PseudoHeader src dst prot len =
 -- IP4 Packets -----------------------------------------------------------------
 
 type IP4Ident = Word16
-
 
 data IP4Header = IP4Header
   { ip4TypeOfService  :: {-# UNPACK #-} !Word8
@@ -166,6 +167,10 @@ fragmentPacket mtu0 hdr0 = loop hdr0
 ip4VersionIHL :: Int -> Word8
 ip4VersionIHL ihl = 4 `shiftL` 4 .|. fromIntegral (ihl `shiftR` 2)
 
+instance Fragmentable IP4 Word16 IP4Header where
+  mkKey IP4Header{..} = (ip4SourceAddr, ip4DestAddr, ip4Protocol, ip4Ident)
+  hdrMoreFragments = view ip4MoreFragments
+  hdrFragOffset = fromIntegral . view ip4FragmentOffset
 
 --  0                   1                   2                   3   
 --  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 
