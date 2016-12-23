@@ -38,6 +38,7 @@ import           Hans.Config
 import           Hans.Device
 import           Hans.Device.Loopback
 import qualified Hans.IP4.State as IP4
+import qualified Hans.IP6.State as IP6
 import qualified Hans.IP4.Output as IP4 (responder)
 import           Hans.Input
 import           Hans.Network
@@ -63,6 +64,7 @@ newNetworkStack nsConfig =
      nsNat          <- newNatState nsConfig
      nsDevices      <- newIORef []
      nsIP4State     <- newIP4State nsConfig
+     nsIP6State     <- newIP6State nsConfig
      nsUdpState     <- newUdpState nsConfig
      nsTcpState     <- newTcpState nsConfig
      nsNameServers4 <- newIORef []

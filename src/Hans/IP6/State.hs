@@ -11,16 +11,17 @@ import           Data.IORef(IORef,newIORef,atomicModifyIORef',readIORef)
 import           Hans.Addr(IP6,IP6Mask)
 import           Hans.Config(Config(..))
 import           Hans.Device.Types(Device(..))
-import           Hans.IP6.Packet(IP6Ident,IP6Header)
+import           Hans.IP6.Packet(IP6Ident,IP6Fragment)
 import           Hans.Network.Fragments(FragTable,newFragTable)
 import qualified Hans.Network.RoutingTable as RT
 import           Hans.Lens
 import           System.Random(StdGen,newStdGen,Random(random))
 
-data IP6State = IP6State { ip6Routes     :: !(IORef (RT.RoutingTable IP6 IP6Mask))
-                         , ip6Fragments  :: !(FragTable IP6 IP6Ident IP6Header)
-                         , ip6RandomSeed :: !(IORef StdGen)
-                         }
+data IP6State = IP6State {
+        ip6Routes    :: !(IORef (RT.RoutingTable IP6 IP6Mask))
+     , ip6Fragments  :: !(FragTable IP6 IP6Ident IP6Fragment)
+     , ip6RandomSeed :: !(IORef StdGen)
+     }
 
 newIP6State :: Config -> IO IP6State
 newIP6State cfg =

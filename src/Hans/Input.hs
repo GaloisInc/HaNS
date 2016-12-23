@@ -6,6 +6,7 @@ module Hans.Input where
 import Hans.Device (Device(..))
 import Hans.Ethernet
 import Hans.IP4.Input (processArp,processIP4,handleIP4)
+import Hans.IP6.Input (processIP6,handleIP6)
 import Hans.Monad (Hans,runHans,dropPacket,io,escape,decode')
 import Hans.Types (NetworkStack(..),InputPacket(..))
 
@@ -23,7 +24,7 @@ processPackets ns = runHans $
      case input of
        FromDevice dev pkt   -> processEthernet ns dev pkt
        FromIP4 dev hdr body -> handleIP4 ns dev Nothing hdr body
-
+       FromIP6 dev hdr body -> handleIP6 ns dev Nothing hdr body
 
 processEthernet :: NetworkStack -> Device -> S.ByteString -> Hans ()
 processEthernet ns dev bytes =
@@ -40,6 +41,9 @@ processEthernet ns dev bytes =
 
        ETYPE_IPV4 ->
          processIP4 ns dev payload
+
+       ETYPE_IPV6 ->
+         processIP6 ns dev payload
 
        ETYPE_ARP ->
          processArp ns dev payload

@@ -11,6 +11,8 @@ import Hans.Device.Types (Device)
 import Hans.IP4.ArpTable as Exports (ArpTable)
 import Hans.IP4.Packet
 import Hans.IP4.State as Exports
+import Hans.IP6.Packet
+import Hans.IP6.State as Exports(IP6State,HasIP6State(..),newIP6State)
 import Hans.Lens
 import Hans.Nat.State as Exports
 import Hans.Network.RoutingTable as Exports (RoutingTable)
@@ -25,6 +27,7 @@ import           Data.IORef (IORef,atomicModifyIORef',readIORef)
 
 data InputPacket = FromDevice !Device !S.ByteString
                  | FromIP4 !Device !IP4Header !S.ByteString
+                 | FromIP6 !Device !IP6Header !S.ByteString
 
 
 data NetworkStack = NetworkStack { nsConfig :: !Config
@@ -42,6 +45,9 @@ data NetworkStack = NetworkStack { nsConfig :: !Config
 
                                  , nsIP4State :: !IP4State
                                    -- ^ State for IP4 processing
+
+                                 , nsIP6State :: !IP6State
+                                   -- ^ State for IP6 processing
 
                                  , nsIP4Responder :: !ThreadId
                                    -- ^ Internal IP4 responder for messages
@@ -74,6 +80,10 @@ instance HasConfig NetworkStack where
 instance HasIP4State NetworkStack where
   ip4State = to nsIP4State
   {-# INLINE ip4State #-}
+
+instance HasIP6State NetworkStack where
+  ip6State = to nsIP6State
+  {-# INLINE ip6State #-}
 
 instance HasUdpState NetworkStack where
   udpState = to nsUdpState
