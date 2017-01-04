@@ -183,6 +183,9 @@ handleActiveSegs ns tcb now = go
        -- check ACK
        unless (view tcpAck hdr) continue
 
+       -- Reset idle timeout
+       io $ atomicModifyIORef' (tcbTimers tcb) resetIdleTimer
+
        -- update the send window
        mbAck <- io $
          do mbAck <- atomicModifyIORef' (tcbSendWindow tcb)
