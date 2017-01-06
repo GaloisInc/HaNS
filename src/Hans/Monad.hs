@@ -4,6 +4,7 @@ module Hans.Monad (
     Hans()
   , runHans, runHansOnce
   , setEscape, escape, dropPacket
+  , callCC
   , io
   , decode, decode'
   ) where
@@ -72,6 +73,12 @@ setEscape m = Hans (\ _ k -> unHans m (k ()) k)
 escape :: Hans a
 escape  = Hans (\ e _ -> e)
 {-# INLINE escape #-}
+
+-- | Call-cc. NOTE: the continuation will inherit the escape point of the
+-- calling context.
+callCC :: ((b -> Hans a) -> Hans b) -> Hans b
+callCC f = Hans (\e k -> unHans (f (\b -> Hans (\_ _ -> k b))) e k)
+{-# INLINE callCC #-}
 
 -- | Synonym for 'escape' that also updates device statistics.
 dropPacket :: DeviceStats -> Hans a
