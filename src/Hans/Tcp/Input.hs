@@ -292,7 +292,8 @@ processFinWait2 _ns Tcb { .. } =
 -- that was derived from it.
 enterTimeWait :: NetworkStack -> Tcb -> Hans ()
 enterTimeWait ns tcb =
-  do tw <- io (mkTimeWaitTcb tcb)
+  do io (closeActive tcb)
+     tw <- io (mkTimeWaitTcb tcb)
      io (registerTimeWait ns tw)
      escape
 
