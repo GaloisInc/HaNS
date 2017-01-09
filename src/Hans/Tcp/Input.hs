@@ -10,7 +10,7 @@ import Hans.Checksum (finalizeChecksum,extendChecksum)
 import Hans.Config (config)
 import Hans.Device.Types (Device(..),ChecksumOffload(..),rxOffload)
 import Hans.Lens (view,set)
-import Hans.Monad (Hans,escape,decode',dropPacket,io,callCC)
+import Hans.Monad (Hans,escape,decode',dropPacket,io)
 import Hans.Nat.Forward (tryForwardTcp)
 import Hans.Network
 import Hans.Tcp.Message
@@ -158,33 +158,31 @@ handleActiveSegs ns tcb now = go
   where
   go []                   = return ()
   go ((hdr,payload):segs) =
-    do callCC $ \ k ->
-         do let continue = k ()
+    do -- page 70 and page 71
+       -- check RST/check SYN
+       when (view tcpRst hdr || view tcpSyn hdr) $
+         do io $ do when (view tcpSyn hdr) $
+                      do let rst = set tcpRst True emptyTcpHeader
+                         _ <- queueWithTcb ns tcb rst L.empty
+                         return ()
 
-            -- page 70 and page 71
-            -- check RST/check SYN
-            when (view tcpRst hdr || view tcpSyn hdr) $
-              do io $ do when (view tcpSyn hdr) $
-                           do let rst = set tcpRst True emptyTcpHeader
-                              _ <- queueWithTcb ns tcb rst L.empty
-                              return ()
+                    -- when the tcb was passively opened, this will free its
+                    -- accept queue slot.
+                    setState tcb Closed
 
-                         -- when the tcb was passively opened, this will free its
-                         -- accept queue slot.
-                         setState tcb Closed
+                    closeActive ns tcb
 
-                         closeActive ns tcb
+            escape
 
-                 escape
+       -- page 71
+       -- skipping security/precedence
 
-            -- page 71
-            -- skipping security/precedence
-
-            -- page 72
-            -- check ACK
-            unless (view tcpAck hdr) continue
-
-            -- Reset idle timeout
+       -- page 72
+       -- check ACK
+       -- NOTE: processing ends here if ack is not present, which is why the
+       -- remainder of packet processing is underneath this `when`.
+       when (view tcpAck hdr) $ 
+         do -- Reset idle timeout
             io $ atomicModifyIORef' (tcbTimers tcb) resetIdleTimer
 
             -- update the send window
@@ -202,29 +200,25 @@ handleActiveSegs ns tcb now = go
                   Just False -> return ()
                   Nothing    -> do let rst = set tcpRst True emptyTcpHeader
                                    _ <- io (queueWithTcb ns tcb rst L.empty)
-                                   continue
+                                   return ()
 
               FinWait1 ->
                 case mbAck of
                   Just True ->
                     do io (setState tcb FinWait2)
                        io (processFinWait2 ns tcb)
-                       continue
 
-                  _ -> continue
+                  _ -> return ()
 
               FinWait2 ->
                 case mbAck of
-                  Just True ->
-                    do io (processFinWait2 ns tcb)
-                       continue
-
-                  _ -> continue
+                  Just True -> io (processFinWait2 ns tcb)
+                  _         -> return ()
 
               Closing ->
                 case mbAck of
                   Just True -> enterTimeWait ns tcb
-                  _         -> continue
+                  _         -> return ()
 
               LastAck ->
                 case mbAck of
@@ -233,7 +227,7 @@ handleActiveSegs ns tcb now = go
                        io (closeActive ns tcb)
                        escape
 
-                  _ -> continue
+                  _ -> return ()
 
               -- TimeWait processing is done in handleTimeWait
 
@@ -270,9 +264,7 @@ handleActiveSegs ns tcb now = go
 
                    FinWait2 -> enterTimeWait ns tcb
 
-                   _ -> continue
-
-            continue
+                   _ -> return ()
 
        go segs
 
