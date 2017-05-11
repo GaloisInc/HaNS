@@ -1,5 +1,5 @@
 name:           hans
-version:        3.0.1
+version:        3.0.2
 cabal-version:  >= 1.18
 license:        BSD3
 license-file:   LICENSE
@@ -43,7 +43,7 @@ library
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
                                 cereal     >= 0.5.0.0,
-                                heaps,
+                                heaps      <= 0.3.3,
                                 psqueues,
                                 bytestring,
                                 containers,
@@ -54,8 +54,7 @@ library
                                 BoundedChan,
                                 random,
                                 monadLib,
-                                cryptonite,
-                                memory
+                                SHA
 
         -- XXX: which of these should be exposed?
         exposed-modules:        Hans

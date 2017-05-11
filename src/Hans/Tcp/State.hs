@@ -54,18 +54,16 @@ import           Hans.Time
 import           Control.Concurrent (threadDelay,MVar,newMVar,modifyMVar)
 import qualified Control.Concurrent.BoundedChan as BC
 import           Control.Monad (guard)
-import           Crypto.Hash (hash,Digest,MD5)
-import           Data.ByteArray (withByteArray)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import           Data.Digest.Pure.SHA(sha1,integerDigest)
 import qualified Data.Foldable as F
 import           Data.Hashable (Hashable)
 import qualified Data.Heap as H
 import           Data.IORef (IORef,newIORef,atomicModifyIORef',readIORef)
-import           Data.Serialize (runPut,putByteString)
+import           Data.Serialize (runPutLazy,putByteString)
 import           Data.Time.Clock (UTCTime,getCurrentTime,addUTCTime,diffUTCTime)
 import           Data.Word (Word32)
-import           Foreign.Storable (peek)
 import           GHC.Generics (Generic)
 import           System.Random (newStdGen,random,randoms)
 
@@ -395,8 +393,7 @@ nextIss state src srcPort dst dstPort =
                                  , tcpLastUpdate = now
                                  , .. }
 
-           digest :: Digest MD5
-           digest  = hash $ runPut $
+           digest  = integerDigest $ sha1 $ runPutLazy $
              do putAddr src
                 putTcpPort srcPort
                 putAddr dst
@@ -405,8 +402,4 @@ nextIss state src srcPort dst dstPort =
 
         in (timers', (ticks, digest))
 
-     -- NOTE: MD5 digests are always 128 bytes, so peeking the first 4 bytes off
-     -- of the front should never fail.
-     withByteArray f_digest $ \ ptr ->
-       do w32 <- peek ptr
-          return (fromIntegral (m + w32))
+     return (fromIntegral (m + fromIntegral f_digest))
