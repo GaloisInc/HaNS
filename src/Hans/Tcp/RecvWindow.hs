@@ -71,11 +71,12 @@ trimSeg len seg@Segment { .. }
   len' = len - flag tcpSyn - flag tcpFin
 
 -- | Resolve overlap between two segments. It's assumed that the two segments do
--- actually overlap.
+-- actually overlap. Overlap is resolved by trimming the front of the later
+-- packet.
 resolveOverlap :: Segment -> Segment -> [Segment]
 resolveOverlap a b =
-  case trimSeg (fromTcpSeqNum (segEnd x - segStart y)) x of
-    Just x' -> [x',y]
+  case trimSeg (fromTcpSeqNum (segEnd x - segStart y)) y of
+    Just y' -> [x,y']
     Nothing -> error "resolveOverlap: invariant violated"
   where
   (x,y) | segStart a < segStart b = (a,b) -- a overlaps b

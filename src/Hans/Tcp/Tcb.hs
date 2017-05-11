@@ -46,6 +46,7 @@ module Hans.Tcp.Tcb (
     setRcvNxt,
     finalizeTcb,
     getSndUna,
+    resetIdleTimer,
 
     -- ** Active Config
     TcbConfig(..),
@@ -171,6 +172,12 @@ updateTimers tt = (tt',tt)
            , ttIdle       = ttIdle tt + 1
            }
 
+-- | Reset idle timer in the presence of packets, for use with
+-- 'atomicModifyIORef\''.
+resetIdleTimer :: TcpTimers -> (TcpTimers, ())
+resetIdleTimer t = (idleReset, ())
+  where
+   idleReset = t { ttIdle = 0 }
 
 -- | Calibrate the RTO timer, given a round-trip measurement, as specified by
 -- RFC-6298.

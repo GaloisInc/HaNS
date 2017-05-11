@@ -162,9 +162,7 @@ handleActiveSegs ns tcb now = go
   where
   go []                   = return ()
   go ((hdr,payload):segs) =
-    do let continue = go segs
-
-       -- page 70 and page 71
+    do -- page 70 and page 71
        -- check RST/check SYN
        when (view tcpRst hdr || view tcpSyn hdr) $
          do io $ do when (view tcpSyn hdr) $
@@ -185,94 +183,94 @@ handleActiveSegs ns tcb now = go
 
        -- page 72
        -- check ACK
-       unless (view tcpAck hdr) continue
+       -- NOTE: processing ends here if ack is not present, which is why the
+       -- remainder of packet processing is underneath this `when`.
+       when (view tcpAck hdr) $ 
+         do -- Reset idle timeout
+            io $ atomicModifyIORef' (tcbTimers tcb) resetIdleTimer
 
-       -- update the send window
-       mbAck <- io $
-         do mbAck <- atomicModifyIORef' (tcbSendWindow tcb)
-                         (ackSegment (view config ns) now (tcpAckNum hdr))
-            handleRTTMeasurement tcb mbAck
+            -- update the send window
+            mbAck <- io $
+              do mbAck <- atomicModifyIORef' (tcbSendWindow tcb)
+                              (ackSegment (view config ns) now (tcpAckNum hdr))
+                 handleRTTMeasurement tcb mbAck
 
-       state <- io (getState tcb)
-       case state of
+            state <- io (getState tcb)
+            case state of
 
-         SynReceived ->
-           case mbAck of
-             Just True  -> io (setState tcb Established)
-             Just False -> return ()
-             Nothing    -> do let rst = set tcpRst True emptyTcpHeader
-                              _ <- io (queueWithTcb ns tcb rst L.empty)
-                              continue
-
-         FinWait1 ->
-           case mbAck of
-             Just True ->
-               do io (setState tcb FinWait2)
-                  io (processFinWait2 ns tcb)
-                  continue
-
-             _ -> continue
-
-         FinWait2 ->
-           case mbAck of
-             Just True ->
-               do io (processFinWait2 ns tcb)
-                  continue
-
-             _ -> continue
-
-         Closing ->
-           case mbAck of
-             Just True -> enterTimeWait ns tcb
-             _         -> continue
-
-         LastAck ->
-           case mbAck of
-             Just True ->
-               do io (setState tcb Closed)
-                  io (closeActive ns tcb)
-                  escape
-
-             _ -> continue
-
-         -- TimeWait processing is done in handleTimeWait
-
-         -- CloseWait | Established
-         _ -> return ()
-
-       -- page 73
-       -- check URG
-
-       -- page 74
-       -- process the segment text
-       -- XXX: we're ignoring PSH for now, just making the data immediately
-       -- available
-       unless (S.null payload) $ io $
-         do signalDelayedAck tcb
-            queueBytes payload tcb
-
-       -- page 75
-       -- check FIN
-       when (view tcpFin hdr) $
-         do -- send an ACK to the FIN
-            _ <- io (queueAck ns tcb)
-
-            state' <- io (getState tcb)
-            case state' of
-
-              SynReceived -> io (setState tcb CloseWait)
-              Established -> io (setState tcb CloseWait)
+              SynReceived ->
+                case mbAck of
+                  Just True  -> io (setState tcb Established)
+                  Just False -> return ()
+                  Nothing    -> do let rst = set tcpRst True emptyTcpHeader
+                                   _ <- io (queueWithTcb ns tcb rst L.empty)
+                                   return ()
 
               FinWait1 ->
                 case mbAck of
+                  Just True ->
+                    do io (setState tcb FinWait2)
+                       io (processFinWait2 ns tcb)
+
+                  _ -> return ()
+
+              FinWait2 ->
+                case mbAck of
+                  Just True -> io (processFinWait2 ns tcb)
+                  _         -> return ()
+
+              Closing ->
+                case mbAck of
                   Just True -> enterTimeWait ns tcb
-                  _         -> io (setState tcb Closing)
+                  _         -> return ()
 
-              FinWait2 -> enterTimeWait ns tcb
+              LastAck ->
+                case mbAck of
+                  Just True ->
+                    do io (setState tcb Closed)
+                       io (closeActive ns tcb)
+                       escape
 
-              _ -> continue
+                  _ -> return ()
 
-       continue
+              -- TimeWait processing is done in handleTimeWait
+
+              -- CloseWait | Established
+              _ -> return ()
+
+            -- page 73
+            -- check URG
+
+            -- page 74
+            -- process the segment text
+            -- XXX: we're ignoring PSH for now, just making the data immediately
+            -- available
+            unless (S.null payload) $ io $
+              do signalDelayedAck tcb
+                 queueBytes payload tcb
+
+            -- page 75
+            -- check FIN
+            when (view tcpFin hdr) $
+              do -- send an ACK to the FIN
+                 _ <- io (queueAck ns tcb)
+
+                 state' <- io (getState tcb)
+                 case state' of
+
+                   SynReceived -> io (setState tcb CloseWait)
+                   Established -> io (setState tcb CloseWait)
+
+                   FinWait1 ->
+                     case mbAck of
+                       Just True -> enterTimeWait ns tcb
+                       _         -> io (setState tcb Closing)
+
+                   FinWait2 -> enterTimeWait ns tcb
+
+                   _ -> return ()
+
+       go segs
 
 
 -- | Processing for the FinWait2 state, when the retransmit queue is known to be
@@ -291,6 +289,7 @@ processFinWait2 _ns Tcb { .. } =
 enterTimeWait :: NetworkStack -> Tcb -> Hans ()
 enterTimeWait ns tcb =
   do tw <- io (mkTimeWaitTcb tcb)
+     io (closeActive ns tcb)
      io (registerTimeWait ns tw)
      escape
 
