@@ -81,6 +81,7 @@ library
                                 Hans.IP4.Output
                                 Hans.IP4.Packet
                                 Hans.IP4.State
+                                Hans.IP6
                                 Hans.IP6.Input
                                 Hans.IP6.Packet
                                 Hans.IP6.State
