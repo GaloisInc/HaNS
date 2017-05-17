@@ -6,3 +6,4 @@ cabal.sandbox.config
 *.o
 results.xml
 
+TAGS
