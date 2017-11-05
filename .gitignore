@@ -1,7 +1,7 @@
 dist/
 .cabal-sandbox/
 cabal.sandbox.config
-
+result
 *.o
 results.xml
 

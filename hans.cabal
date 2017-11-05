@@ -21,6 +21,10 @@ flag examples
         description:    Build example programs
         default:        False
 
+flag raw-ethernet
+        description:    Use raw ethernet packets
+        default:        False
+
 library
         if os(HALVM)
                 cpp-options:            -DHANS_TARGET_XEN
@@ -28,12 +32,19 @@ library
                                         HALVMCore >= 2.0.0 && < 3
                 other-modules:          Hans.Device.Xen
 
-        if os(darwin) || os(linux)
+        if os(darwin) || os(linux) && !flag(raw-ethernet)
                 cpp-options:            -DHANS_TARGET_UNIX
                 build-depends:          unix
                 other-modules:          Hans.Device.Tap
                 include-dirs:           cbits
                 c-sources:              cbits/tapdevice.c
+
+        if os(linux) && flag (raw-ethernet)
+                cpp-options:            -DHANS_TARGET_RAW_ETHERNET
+                build-depends:          unix
+                other-modules:          Hans.Device.RawEthernet
+                include-dirs:           cbits
+                c-sources:              cbits/ethernet.c
 
         -- XXX: Tap devices are supported on windows, someone should add support
 
@@ -43,7 +54,7 @@ library
         hs-source-dirs:         src
         build-depends:          base       >= 4.0.0.0 && < 5,
                                 cereal     >= 0.5.0.0,
-                                heaps      <= 0.3.3,
+                                heaps      == 0.3.*,
                                 psqueues,
                                 bytestring,
                                 containers,
