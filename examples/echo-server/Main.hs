@@ -27,8 +27,15 @@ main  =
                       name:_        -> return (S8.pack name,False)
                       _             -> fail "Expected a device name"
 
+     let noChecksum = ChecksumOffload { coIP4   = True
+                                      , coUdp   = True
+                                      , coTcp   = True
+                                      , coIcmp4 = True
+                                      }
      ns  <- newNetworkStack defaultConfig
-     dev <- addDevice ns name defaultDeviceConfig
+     dev <- addDevice ns name defaultDeviceConfig { dcTxOffload    = noChecksum
+                                                  , dcRxOffload    = noChecksum
+                                                  }
 
      _ <- forkIO (showExceptions "processPackets" (processPackets ns))
 
