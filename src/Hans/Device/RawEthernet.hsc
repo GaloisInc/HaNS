@@ -100,11 +100,10 @@ ethernetSendLoop stats fd queue ifIdx = forever $ do
      -- Drop both the SRC and DEST Mac address
   bs <- L.toStrict <$> readChan queue
   let destMac = S.take 6 bs
-      payload = S.drop 12 bs
+      payload = bs
   bytesWritten <- S.unsafeUseAsCStringLen payload $ \(ptr, clen) ->
      S.unsafeUseAsCStringLen destMac $ \(destMac, _) ->
-       -- We subtract 4 to remove the CRC
-       sendtosocket fd ptr (fromIntegral (clen - 4)) ifIdx destMac
+       sendtosocket fd ptr (fromIntegral clen) ifIdx destMac
   if fromIntegral bytesWritten == S.length bs
     then do
       updateBytes statTX stats (fromIntegral bytesWritten)
