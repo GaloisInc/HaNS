@@ -91,6 +91,6 @@ int send_to_socket (int sockfd, const void * buf, size_t len, int if_idx, unsign
 
   /* Send packet */
   if (sendto(sockfd, buf, len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
-    printf("Send failed\n");
+    perror("Send failed");
 
 }
