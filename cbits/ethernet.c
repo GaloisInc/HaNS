@@ -46,6 +46,11 @@ int init_ethernet_device(char *name, unsigned char *mac, int *idx) {
   if (ioctl(fd, SIOCGIFHWADDR, &if_idx) < 0) perror("SIOCGIFHWADDR");
   memcpy(mac, if_idx.ifr_hwaddr.sa_data, 6);
 
+  /* Set the device up, if it isn't already */
+  if (ioctl(fd, SIOCGIFFLAGS, &if_idx) < 0) perror("SIOCGIFFLAGS");
+  if_idx.ifr_flags |= IFF_UP;
+  if (ioctl(fd, SIOCSIFFLAGS, &if_idx) < 0) perror("SIOCSIFFLAGS");
+
   /* Allow the socket to be reused - incase connection is closed prematurely */
   if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof sockopt) == -1) {
 	perror("setsockopt");
