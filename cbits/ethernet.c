@@ -20,7 +20,7 @@ int init_ethernet_device(char *name, unsigned char *mac, int *idx) {
     return -1;
   }
 
-  fd = socket(PF_PACKET, SOCK_RAW, htons(ETHERTYPE_IP));
+  fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
   if (fd < 0) {
     perror("Couldn't open socket");
     return -1;

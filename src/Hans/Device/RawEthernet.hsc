@@ -17,7 +17,7 @@ import           Control.Concurrent
 import           Control.Concurrent.BoundedChan
                      (BoundedChan,newBoundedChan,readChan,tryWriteChan)
 import qualified Control.Exception as X
-import           Control.Monad (forever,when,foldM_)
+import           Control.Monad (forever,when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Lazy as L
@@ -25,10 +25,10 @@ import qualified Data.ByteString.Unsafe as S
 import           Data.Word (Word8)
 import           Foreign.C.String (CString)
 import           Foreign.C.Types (CSize(..),CLong(..),CInt(..),CChar(..))
-import           Foreign.Marshal.Alloc (allocaBytes, alloca)
+import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (allocaArray,peekArray)
-import           Foreign.Ptr (Ptr,plusPtr)
-import           Foreign.Storable (pokeByteOff, peek)
+import           Foreign.Ptr (Ptr)
+import           Foreign.Storable (peek)
 import           System.Posix.Types (Fd(..))
 
 listDevices :: IO [DeviceName]
@@ -102,8 +102,8 @@ ethernetSendLoop stats fd queue ifIdx = forever $ do
   let destMac = S.take 6 bs
       payload = bs
   bytesWritten <- S.unsafeUseAsCStringLen payload $ \(ptr, clen) ->
-     S.unsafeUseAsCStringLen destMac $ \(destMac, _) ->
-       sendtosocket fd ptr (fromIntegral clen) ifIdx destMac
+     S.unsafeUseAsCStringLen destMac $ \(destMac', _) ->
+       sendtosocket fd ptr (fromIntegral clen) ifIdx destMac'
   if fromIntegral bytesWritten == S.length bs
     then do
       updateBytes statTX stats (fromIntegral bytesWritten)
