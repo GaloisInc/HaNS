@@ -12,8 +12,13 @@ import Data.Word (Word8)
 
 type NetworkProtocol = Word8
 
+pattern PROT_ICMP4 :: (Num a, Eq a) => a
 pattern PROT_ICMP4 = 0x1
+
+pattern PROT_TCP :: (Num a, Eq a) => a
 pattern PROT_TCP   = 0x6
+
+pattern PROT_UDP :: (Num a, Eq a) => a
 pattern PROT_UDP   = 0x11
 
 getNetworkProtocol :: Get NetworkProtocol

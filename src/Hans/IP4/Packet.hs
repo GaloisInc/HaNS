@@ -86,10 +86,13 @@ readIP4 str =
 {-# INLINE readIP4 #-}
 
 
+pattern BroadcastIP4 :: IP4
 pattern BroadcastIP4 = IP4 0xffffffff
 
+pattern CurrentNetworkIP4 :: IP4
 pattern CurrentNetworkIP4 = IP4 0x0
 
+pattern WildcardIP4 :: IP4
 pattern WildcardIP4 = IP4 0x0
 
 
@@ -469,7 +472,9 @@ putArpPacket ArpPacket { .. } =
 
 type ArpOper = Word16
 
+pattern ArpRequest :: (Num a, Eq a) => a
 pattern ArpRequest = 0x1
+pattern ArpReply :: (Num a, Eq a) => a
 pattern ArpReply   = 0x2
 
 -- | Parse an Arp operation.

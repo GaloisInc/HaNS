@@ -83,6 +83,7 @@ readMac str =
      return (Mac a b c d e f, rest6)
 
 -- | The broadcast MAC address.
+pattern BroadcastMac :: Mac
 pattern BroadcastMac = Mac 0xff 0xff 0xff 0xff 0xff 0xff
 
 
@@ -111,7 +112,11 @@ putEthernetHeader EthernetHeader { .. } =
 
 
 -- Common Ether-Types ----------------------------------------------------------
-
+pattern ETYPE_IPV4 :: (Num a, Eq a) => a
 pattern ETYPE_IPV4 = 0x0800
-pattern ETYPE_ARP  = 0x0806
+
+pattern ETYPE_ARP :: (Num a, Eq a) => a
+pattern ETYPE_ARP = 0x0806
+
+pattern ETYPE_IPV6 :: (Num a, Eq a) => a
 pattern ETYPE_IPV6 = 0x86DD
